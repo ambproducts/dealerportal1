@@ -1889,42 +1889,7 @@ function resetFormOnly() {
     updateCustomerProgress();
 }
 
-// ============================================
-// INITIALIZATION
-// ============================================
-document.addEventListener('DOMContentLoaded', () => {
-    loadFromStorage();
-    if (dealerSettings.dealerCode && validateDealerCode(dealerSettings.dealerCode)) showMainApp();
-    else showLoginScreen();
-    initColorGrid();
-    updateColorSelection();
-    updateColorComparison();
-    updateConnectivityStatus();
-    renderSavedQuotes();
-    
-    document.getElementById('login-btn').onclick = handleLogin;
-    document.getElementById('dealer-code-input').addEventListener('keypress', e => { if (e.key === 'Enter') handleLogin(); });
-    document.getElementById('logout-btn').onclick = handleLogout;
-    document.getElementById('mode-quick').onclick = () => setQuoteMode('quick');
-    document.getElementById('mode-formal').onclick = () => setQuoteMode('formal');
-    document.getElementById('calc-btn').onclick = calculateOnly;
-    document.getElementById('add-suggestion-btn').onclick = addSuggestionToOrder;
-    document.getElementById('clear-calc-btn').onclick = () => { document.getElementById('calc-result-container').style.display = 'none'; };
-    document.getElementById('orientation').onchange = updateDiagramOrientation;
-    document.getElementById('cust-name').oninput = () => { updateCustomerProgress(); showCustomerLookup(searchCustomers(document.getElementById('cust-name').value)); };
-    document.getElementById('cust-email').oninput = updateCustomerProgress;
-    document.getElementById('cust-zip').oninput = updateCustomerProgress;
-    document.getElementById('pic-frame').onchange = e => { document.getElementById('pic-frame-note').style.display = e.target.checked ? 'block' : 'none'; };
-    document.getElementById('stairs').onchange = e => { document.getElementById('stairs-note').style.display = e.target.checked ? 'block' : 'none'; };
-    document.getElementById('add-row').onclick = () => { currentQuote.lineItems.push({ type: "system", color: selectedColor1, length: 16, customLength: null, qty: 1, customDesc: "", customUnitPrice: 0 }); render(); updateTotalAndFasteners(); };
-    document.getElementById('save-quote-btn').onclick = () => { saveCurrentQuote(); alert('Quote saved!'); };
-    document.getElementById('reset').onclick = () => { if (confirm('Reset form?')) resetFormOnly(); };
-    document.getElementById('new-quote-btn').onclick = () => { if (currentQuote.lineItems.length > 0 && !confirm('Start new quote?')) return; resetFormOnly(); };
-    document.getElementById('quote-search').oninput = renderSavedQuotes;
-    document.getElementById('submit-btn').onclick = () => { if (currentMode === 'quick') window.print(); else alert('Formal submission coming soon!'); };
-    document.getElementById('modal-close').onclick = () => { document.getElementById('colorModal').classList.remove('active'); };
-    document.getElementById('timeout-continue').onclick = continueSession;
-    document.getElementById('timeout-save-close').onclick = saveAndClose;
+
     
     
 // ============================================
