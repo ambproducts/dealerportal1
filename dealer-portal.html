@@ -1926,7 +1926,482 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('timeout-continue').onclick = continueSession;
     document.getElementById('timeout-save-close').onclick = saveAndClose;
     
+    
+// ============================================
+// VALIDATION, PRINTING & PDF FUNCTIONS
+// ============================================
+
+function validateRequired() {
+    let valid = true;
+    const name = document.getElementById('cust-name');
+    const email = document.getElementById('cust-email');
+    const zip = document.getElementById('cust-zip');
+
+    document.getElementById('err-name').textContent = '';
+    document.getElementById('err-email').textContent = '';
+    document.getElementById('err-zip').textContent = '';
+
+    if (!name.value.trim()) {
+        document.getElementById('err-name').textContent = 'Name is required';
+        valid = false;
+    }
+
+    if (!email.value.trim()) {
+        document.getElementById('err-email').textContent = 'Email is required';
+        valid = false;
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value.trim())) {
+        document.getElementById('err-email').textContent = 'Please enter a valid email';
+        valid = false;
+    }
+
+    if (!zip.value.trim()) {
+        document.getElementById('err-zip').textContent = 'Zip code is required';
+        valid = false;
+    }
+
+    if (currentQuote.lineItems.length === 0) {
+        alert('Please add at least one item to your order.');
+        valid = false;
+    }
+
+    if (!valid) {
+        document.getElementById('customer').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    return valid;
+}
+
+function generatePrintHTML(type) {
+    const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    const isCustomer = type === 'customer';
+    const title = isCustomer ? 'Customer Quote' : 'Dealer Order Form';
+
+    let html = '<div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto;">';
+    html += '<div style="border-bottom: 3px solid #2563eb; padding-bottom: 15px; margin-bottom: 20px;">';
+    html += '<h1 style="color: #2563eb; margin: 0;">AmeriDex ' + title + '</h1>';
+    html += '<p style="color: #666; margin: 5px 0 0;">Generated: ' + today + '</p>';
+    if (currentQuote.quoteId) html += '<p style="color: #1e40af; font-weight: bold; margin: 5px 0 0;">Quote #: ' + currentQuote.quoteId + '</p>';
+    if (!isCustomer && dealerSettings.dealerCode) html += '<p style="color: #666; margin: 5px 0 0;">Dealer: ' + dealerSettings.dealerCode + '</p>';
+    html += '</div>';
+
+    html += '<div style="margin-bottom: 20px;">';
+    html += '<h2 style="color: #374151; font-size: 1.1rem; border-bottom: 1px solid #ddd; padding-bottom: 5px;">Customer Information</h2>';
+    html += '<table style="width: 100%;"><tr><td style="padding: 3px 10px 3px 0; color: #666; width: 120px;"><strong>Name:</strong></td><td>' + (document.getElementById('cust-name').value || 'N/A') + '</td></tr>';
+    html += '<tr><td style="padding: 3px 10px 3px 0; color: #666;"><strong>Email:</strong></td><td>' + (document.getElementById('cust-email').value || 'N/A') + '</td></tr>';
+    html += '<tr><td style="padding: 3px 10px 3px 0; color: #666;"><strong>Zip Code:</strong></td><td>' + (document.getElementById('cust-zip').value || 'N/A') + '</td></tr>';
+    const company = document.getElementById('cust-company').value;
+    if (company) html += '<tr><td style="padding: 3px 10px 3px 0; color: #666;"><strong>Company:</strong></td><td>' + company + '</td></tr>';
+    const phone = document.getElementById('cust-phone').value;
+    if (phone) html += '<tr><td style="padding: 3px 10px 3px 0; color: #666;"><strong>Phone:</strong></td><td>' + phone + '</td></tr>';
+    html += '</table></div>';
+
+    const hasPicFrame = document.getElementById('pic-frame').checked;
+    const hasStairs = document.getElementById('stairs').checked;
+    if (hasPicFrame || hasStairs) {
+        html += '<div style="margin-bottom: 20px;"><h2 style="color: #374151; font-size: 1.1rem; border-bottom: 1px solid #ddd; padding-bottom: 5px;">Options</h2>';
+        if (hasPicFrame) html += '<p style="margin: 5px 0;">✓ Picture Framing</p>';
+        if (hasStairs) html += '<p style="margin: 5px 0;">✓ Stairs</p>';
+        html += '</div>';
+    }
+
+    html += '<div style="margin-bottom: 20px;"><h2 style="color: #374151; font-size: 1.1rem; border-bottom: 1px solid #ddd; padding-bottom: 5px;">Order Items</h2>';
+    html += '<table style="width: 100%; border-collapse: collapse; margin-top: 10px;"><thead><tr style="background: #f3f4f6;">';
+    html += '<th style="border: 1px solid #ddd; padding: 10px; text-align: left;">Product</th>';
+    html += '<th style="border: 1px solid #ddd; padding: 10px; text-align: left;">Color</th>';
+    html += '<th style="border: 1px solid #ddd; padding: 10px; text-align: left;">Length</th>';
+    html += '<th style="border: 1px solid #ddd; padding: 10px; text-align: center;">Qty</th>';
+    html += '<th style="border: 1px solid #ddd; padding: 10px; text-align: right;">Subtotal</th></tr></thead><tbody>';
+
+    let grandTotal = 0;
+    currentQuote.lineItems.forEach(item => {
+        const prod = PRODUCTS[item.type] || PRODUCTS.custom;
+        const sub = getItemSubtotal(item);
+        grandTotal += sub;
+        let lengthDisplay = '';
+        if (item.type === 'dexerdry') lengthDisplay = item.length + ' ft box';
+        else if (prod.isFt) {
+            const len = item.length === 'custom' ? (item.customLength || 0) : (item.length || 0);
+            lengthDisplay = len + ' ft';
+        }
+        const productName = item.type === 'custom' && item.customDesc ? item.customDesc : prod.name;
+        html += '<tr><td style="border: 1px solid #ddd; padding: 10px;">' + productName + '</td>';
+        html += '<td style="border: 1px solid #ddd; padding: 10px;">' + (prod.hasColor ? (item.color || '') : '') + '</td>';
+        html += '<td style="border: 1px solid #ddd; padding: 10px;">' + lengthDisplay + '</td>';
+        html += '<td style="border: 1px solid #ddd; padding: 10px; text-align: center;">' + item.qty + '</td>';
+        html += '<td style="border: 1px solid #ddd; padding: 10px; text-align: right;">' + formatCurrency(sub) + '</td></tr>';
+    });
+
+    html += '<tr style="background: #f3f4f6; font-weight: bold;"><td colspan="4" style="border: 1px solid #ddd; padding: 12px; text-align: right;">ESTIMATED TOTAL:</td>';
+    html += '<td style="border: 1px solid #ddd; padding: 12px; text-align: right; color: #1e40af; font-size: 1.1rem;">' + formatCurrency(grandTotal) + '</td></tr></tbody></table></div>';
+
+    const special = document.getElementById('special-instr').value;
+    if (special) {
+        html += '<div style="margin-bottom: 20px;"><h2 style="color: #374151; font-size: 1.1rem; border-bottom: 1px solid #ddd; padding-bottom: 5px;">Special Instructions</h2>';
+        html += '<p style="white-space: pre-wrap; background: #f9fafb; padding: 10px; border-radius: 5px;">' + special + '</p></div>';
+    }
+
+    const shipAddr = document.getElementById('ship-addr').value;
+    const delDate = document.getElementById('del-date').value;
+    if (shipAddr || delDate) {
+        html += '<div style="margin-bottom: 20px;"><h2 style="color: #374151; font-size: 1.1rem; border-bottom: 1px solid #ddd; padding-bottom: 5px;">Shipping & Delivery</h2>';
+        if (shipAddr) html += '<p><strong>Address:</strong><br>' + shipAddr.replace(/\n/g, '<br>') + '</p>';
+        if (delDate) html += '<p><strong>Preferred Date:</strong> ' + delDate + '</p>';
+        html += '</div>';
+    }
+
+    if (isCustomer) {
+        html += '<div style="margin-top: 30px; padding-top: 15px; border-top: 1px solid #ddd; font-size: 0.85rem; color: #666;">';
+        html += '<p><strong>Disclaimer:</strong> This is an estimate only. Final pricing subject to confirmation by A&M Building Products / AmeriDex. Prices do not include shipping, taxes, or installation unless otherwise noted.</p></div>';
+    }
+
+    html += '</div>';
+    return html;
+}
+
+function showPrintPreview(type) {
+    document.getElementById('print-preview-title').textContent = type === 'customer' ? 'Customer Quote Preview' : 'Order Form Preview';
+    document.getElementById('print-preview-content').innerHTML = generatePrintHTML(type);
+    document.getElementById('printPreviewModal').classList.add('active');
+}
+
+function printFromPreview() {
+    const content = document.getElementById('print-preview-content').innerHTML;
+    const printWindow = window.open('', '_blank', 'width=800,height=600');
+    printWindow.document.write('<!DOCTYPE html><html><head><title>AmeriDex Quote</title>');
+    printWindow.document.write('<style>body { font-family: Arial, sans-serif; padding: 20px; margin: 0; } @media print { body { padding: 0; } }</style>');
+    printWindow.document.write('</head><body>' + content + '</body></html>');
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => { printWindow.print(); printWindow.close(); }, 250);
+}
+
+function generatePDF() {
+    if (typeof window.jspdf === 'undefined') { alert('PDF library not loaded. Please use Print instead.'); return; }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    let y = 20;
+    const leftMargin = 20;
+    const pageWidth = doc.internal.pageSize.getWidth();
+
+    doc.setFontSize(20);
+    doc.setTextColor(37, 99, 235);
+    doc.text('AmeriDex Customer Quote', leftMargin, y);
+    y += 10;
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.text('Generated: ' + today, leftMargin, y);
+    if (currentQuote.quoteId) doc.text('Quote #: ' + currentQuote.quoteId, pageWidth - 60, y);
+    y += 15;
+
+    doc.setFontSize(12);
+    doc.setTextColor(55, 65, 81);
+    doc.text('Customer Information', leftMargin, y);
+    y += 7;
+    doc.setFontSize(10);
+    doc.setTextColor(0);
+    doc.text('Name: ' + (document.getElementById('cust-name').value || 'N/A'), leftMargin, y); y += 5;
+    doc.text('Email: ' + (document.getElementById('cust-email').value || 'N/A'), leftMargin, y); y += 5;
+    doc.text('Zip: ' + (document.getElementById('cust-zip').value || 'N/A'), leftMargin, y); y += 10;
+
+    doc.setFontSize(12);
+    doc.setTextColor(55, 65, 81);
+    doc.text('Order Items', leftMargin, y);
+    y += 7;
+    doc.setFontSize(9);
+    doc.setTextColor(0);
+
+    let grandTotal = 0;
+    currentQuote.lineItems.forEach((item, idx) => {
+        const prod = PRODUCTS[item.type] || PRODUCTS.custom;
+        const sub = getItemSubtotal(item);
+        grandTotal += sub;
+        const productName = item.type === 'custom' && item.customDesc ? item.customDesc : prod.name;
+        let desc = productName;
+        if (prod.hasColor && item.color) desc += ' (' + item.color + ')';
+        if (prod.isFt) {
+            const len = item.length === 'custom' ? (item.customLength || 0) : (item.length || 0);
+            desc += ' - ' + len + 'ft x ' + item.qty;
+        } else if (item.type === 'dexerdry') {
+            desc += ' - ' + item.length + 'ft box x ' + item.qty;
+        } else {
+            desc += ' - Qty: ' + item.qty;
+        }
+        doc.text((idx + 1) + '. ' + desc, leftMargin, y);
+        doc.text(formatCurrency(sub), pageWidth - 40, y);
+        y += 5;
+        if (y > 270) { doc.addPage(); y = 20; }
+    });
+
+    y += 5;
+    doc.setFontSize(11);
+    doc.setTextColor(30, 64, 175);
+    doc.text('TOTAL: ' + formatCurrency(grandTotal), pageWidth - 50, y);
+    doc.save('AmeriDex-Quote-' + (currentQuote.quoteId || 'draft') + '.pdf');
+}
+
+// ============================================
+// FORMSPREE INTEGRATION
+// ============================================
+
+// IMPORTANT: Replace with your actual Formspree endpoint
+const FORMSPREE_URL = 'https://formspree.io/f/xreljrrd'; // <-- CHANGE THIS TO YOUR FORMSPREE URL
+
+function generateOrderTextForEmail() {
+    const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    let txt = '===============================================\n';
+    txt += '     AMERIDEX DEALER FORMAL QUOTE REQUEST\n';
+    txt += '===============================================\n\n';
+    txt += 'Date: ' + today + '\n';
+    txt += 'Dealer Code: ' + (dealerSettings.dealerCode || 'N/A') + '\n';
+    if (currentQuote.quoteId) txt += 'Quote ID: ' + currentQuote.quoteId + '\n';
+    txt += '\n--- CUSTOMER INFORMATION ---\n';
+    txt += 'Name: ' + (document.getElementById('cust-name').value || '') + '\n';
+    txt += 'Email: ' + (document.getElementById('cust-email').value || '') + '\n';
+    txt += 'Zip Code: ' + (document.getElementById('cust-zip').value || '') + '\n';
+    const company = document.getElementById('cust-company').value;
+    if (company) txt += 'Company: ' + company + '\n';
+    const phone = document.getElementById('cust-phone').value;
+    if (phone) txt += 'Phone: ' + phone + '\n';
+    txt += '\n--- LINE ITEMS ---\n\n';
+    let grandTotal = 0;
+    currentQuote.lineItems.forEach((item, i) => {
+        const prod = PRODUCTS[item.type] || PRODUCTS.custom;
+        const price = getItemPrice(item);
+        const sub = getItemSubtotal(item);
+        grandTotal += sub;
+        const productName = item.type === 'custom' && item.customDesc ? item.customDesc : prod.name;
+        txt += 'Item ' + (i + 1) + ': ' + productName + '\n';
+        if (prod.hasColor && item.color) txt += '   Color: ' + item.color + '\n';
+        if (item.type === 'dexerdry') {
+            txt += '   Size: ' + item.length + ' ft box, Qty: ' + item.qty + ' (' + (item.length * item.qty) + ' ft total)\n';
+        } else if (prod.isFt) {
+            const len = item.length === 'custom' ? (item.customLength || 0) : (item.length || 0);
+            txt += '   Length: ' + len + ' ft, Qty: ' + item.qty + '\n';
+        } else {
+            txt += '   Qty: ' + item.qty + '\n';
+        }
+        txt += '   Subtotal: ' + formatCurrency(sub) + '\n\n';
+    });
+    txt += '--- ESTIMATED TOTAL: ' + formatCurrency(grandTotal) + ' ---\n\n';
+    const special = document.getElementById('special-instr').value;
+    if (special) txt += 'SPECIAL INSTRUCTIONS:\n' + special + '\n\n';
+    const internal = document.getElementById('internal-notes').value;
+    if (internal) txt += 'INTERNAL DEALER NOTES:\n' + internal + '\n\n';
+    const shipAddr = document.getElementById('ship-addr').value;
+    if (shipAddr) txt += 'SHIPPING ADDRESS:\n' + shipAddr + '\n\n';
+    const delDate = document.getElementById('del-date').value;
+    if (delDate) txt += 'PREFERRED DELIVERY DATE: ' + delDate + '\n\n';
+    txt += '===============================================\n';
+    txt += 'Please reply with a formal quote.\n';
+    txt += 'Contact: sales@ameridex.com\n';
+    return txt;
+}
+
+function buildFormspreePayload() {
+    let grandTotal = 0;
+    currentQuote.lineItems.forEach(item => { grandTotal += getItemSubtotal(item); });
+    return {
+        _subject: 'AmeriDex Dealer Quote Request - ' + (currentQuote.quoteId || 'New'),
+        dealerCode: dealerSettings.dealerCode || '',
+        quoteId: currentQuote.quoteId || '',
+        customerName: document.getElementById('cust-name').value.trim(),
+        customerEmail: document.getElementById('cust-email').value.trim(),
+        customerZip: document.getElementById('cust-zip').value.trim(),
+        estimatedTotal: formatCurrency(grandTotal),
+        itemCount: currentQuote.lineItems.length,
+        orderDetails: generateOrderTextForEmail()
+    };
+}
+
+function showReviewModal() {
+    document.getElementById('review-name').textContent = document.getElementById('cust-name').value || 'N/A';
+    document.getElementById('review-email').textContent = document.getElementById('cust-email').value || 'N/A';
+    document.getElementById('review-zip').textContent = document.getElementById('cust-zip').value || 'N/A';
+    const itemsContainer = document.getElementById('review-items');
+    itemsContainer.innerHTML = '';
+    let grandTotal = 0;
+    currentQuote.lineItems.forEach(item => {
+        const prod = PRODUCTS[item.type] || PRODUCTS.custom;
+        const sub = getItemSubtotal(item);
+        grandTotal += sub;
+        const productName = item.type === 'custom' && item.customDesc ? item.customDesc : prod.name;
+        const div = document.createElement('div');
+        div.className = 'review-item';
+        div.innerHTML = '<span>' + productName + (prod.hasColor && item.color ? ' (' + item.color + ')' : '') + ' x ' + item.qty + '</span><span>' + formatCurrency(sub) + '</span>';
+        itemsContainer.appendChild(div);
+    });
+    document.getElementById('review-total').textContent = formatCurrency(grandTotal);
+    document.getElementById('email-fallback').style.display = 'none';
+    document.getElementById('reviewModal').classList.add('active');
+}
+
+function sendFormalRequest() {
+    const quoteId = saveCurrentQuote();
+    const payload = buildFormspreePayload();
+
+    if (!FORMSPREE_URL || FORMSPREE_URL.includes('YOUR_FORM_ID')) {
+        const orderText = generateOrderTextForEmail();
+        navigator.clipboard.writeText(orderText).then(() => {
+            document.getElementById('email-fallback').style.display = 'block';
+            alert('Formspree not configured. Order copied to clipboard!\n\nPlease email it to: sales@ameridex.com');
+        }).catch(() => {
+            window.location.href = 'mailto:sales@ameridex.com?subject=' + encodeURIComponent('AmeriDex Quote Request - ' + quoteId) + '&body=' + encodeURIComponent(orderText);
+        });
+        return;
+    }
+
+    const submitBtn = document.getElementById('review-submit');
+    submitBtn.textContent = 'Sending...';
+    submitBtn.disabled = true;
+
+    fetch(FORMSPREE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(response => { if (!response.ok) throw new Error('Network error'); return response.json(); })
+    .then(() => {
+        document.getElementById('reviewModal').classList.remove('active');
+        document.getElementById('success-order-number').textContent = quoteId;
+        document.getElementById('success-confirmation').classList.add('visible');
+        currentQuote.status = 'submitted';
+        saveCurrentQuote();
+    })
+    .catch(() => {
+        const orderText = generateOrderTextForEmail();
+        navigator.clipboard.writeText(orderText).then(() => {
+            document.getElementById('email-fallback').style.display = 'block';
+        }).catch(() => {
+            window.location.href = 'mailto:sales@ameridex.com?subject=' + encodeURIComponent('AmeriDex Quote Request - ' + quoteId) + '&body=' + encodeURIComponent(orderText);
+        });
+    })
+    .finally(() => { submitBtn.textContent = 'Send to AmeriDex'; submitBtn.disabled = false; });
+}
+
+// ============================================
+// INITIALIZATION - ALL EVENT HANDLERS
+// ============================================
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadFromStorage();
+    if (dealerSettings.dealerCode && validateDealerCode(dealerSettings.dealerCode)) showMainApp();
+    else showLoginScreen();
+    initColorGrid();
+    updateColorSelection();
+    updateColorComparison();
+    updateConnectivityStatus();
+    renderSavedQuotes();
     setQuoteMode('quick');
+
+    // Login
+    document.getElementById('login-btn').onclick = handleLogin;
+    document.getElementById('dealer-code-input').addEventListener('keypress', e => { if (e.key === 'Enter') handleLogin(); });
+    document.getElementById('logout-btn').onclick = handleLogout;
+
+    // Quote mode
+    document.getElementById('mode-quick').onclick = () => setQuoteMode('quick');
+    document.getElementById('mode-formal').onclick = () => setQuoteMode('formal');
+
+    // New Quote
+    document.getElementById('new-quote-btn').onclick = () => {
+        if (currentQuote.lineItems.length > 0 || document.getElementById('cust-name').value.trim() || document.getElementById('cust-email').value.trim()) {
+            if (!confirm('Start a new quote? This will clear the current form.')) return;
+        }
+        resetFormOnly();
+        document.getElementById('customer').scrollIntoView({ behavior: 'smooth' });
+    };
+
+    // Search
+    document.getElementById('quote-search').oninput = renderSavedQuotes;
+
+    // Calculator
+    document.getElementById('calc-btn').onclick = calculateOnly;
+    document.getElementById('add-suggestion-btn').onclick = addSuggestionToOrder;
+    document.getElementById('clear-calc-btn').onclick = () => { document.getElementById('calc-result-container').style.display = 'none'; lastCalculation = null; };
+    document.getElementById('orientation').onchange = updateDiagramOrientation;
+
+    // Customer
+    document.getElementById('cust-name').oninput = () => { updateCustomerProgress(); showCustomerLookup(searchCustomers(document.getElementById('cust-name').value)); };
+    document.getElementById('cust-email').oninput = updateCustomerProgress;
+    document.getElementById('cust-zip').oninput = updateCustomerProgress;
+    document.addEventListener('click', e => { if (!e.target.closest('.field-with-lookup')) document.getElementById('customer-lookup-results').classList.remove('visible'); });
+
+    // Options
+    document.getElementById('pic-frame').onchange = e => { document.getElementById('pic-frame-note').style.display = e.target.checked ? 'block' : 'none'; };
+    document.getElementById('stairs').onchange = e => { document.getElementById('stairs-note').style.display = e.target.checked ? 'block' : 'none'; };
+
+    // Add item
+    document.getElementById('add-row').onclick = () => { currentQuote.lineItems.push({ type: 'system', color: selectedColor1, length: 16, customLength: null, qty: 1, customDesc: '', customUnitPrice: 0 }); deletedItems = []; render(); updateTotalAndFasteners(); };
+
+    // Save/Reset
+    document.getElementById('save-quote-btn').onclick = () => { const id = saveCurrentQuote(); alert('Quote saved!\nQuote ID: ' + id); };
+    document.getElementById('reset').onclick = () => { if (currentQuote.lineItems.length > 0 && !confirm('Reset form?')) return; resetFormOnly(); };
+
+    // Print dropdown
+    document.getElementById('print-btn').onclick = e => { e.stopPropagation(); document.getElementById('print-dropdown').classList.toggle('active'); };
+    document.addEventListener('click', e => { if (!e.target.closest('#print-dropdown')) document.getElementById('print-dropdown').classList.remove('active'); });
+    document.getElementById('print-customer').onclick = () => { document.getElementById('print-dropdown').classList.remove('active'); if (!validateRequired()) return; showPrintPreview('customer'); };
+    document.getElementById('export-pdf').onclick = () => { document.getElementById('print-dropdown').classList.remove('active'); if (!validateRequired()) return; generatePDF(); };
+
+    // Print preview modal
+    document.getElementById('print-preview-print').onclick = printFromPreview;
+    document.getElementById('print-preview-cancel').onclick = () => { document.getElementById('printPreviewModal').classList.remove('active'); };
+    document.getElementById('print-preview-close').onclick = () => { document.getElementById('printPreviewModal').classList.remove('active'); };
+
+    // Main submit
+    document.getElementById('submit-btn').onclick = () => { if (!validateRequired()) return; if (currentMode === 'quick') showPrintPreview('customer'); else showReviewModal(); };
+
+    // Review modal
+    document.getElementById('review-close').onclick = () => { document.getElementById('reviewModal').classList.remove('active'); };
+    document.getElementById('review-back').onclick = () => { document.getElementById('reviewModal').classList.remove('active'); };
+    document.getElementById('review-submit').onclick = sendFormalRequest;
+
+    // Success modal
+    document.getElementById('success-close-btn').onclick = () => { document.getElementById('success-confirmation').classList.remove('visible'); resetFormOnly(); };
+    document.getElementById('success-continue-btn').onclick = () => { document.getElementById('success-confirmation').classList.remove('visible'); };
+
+    // Color modal
+    document.getElementById('modal-close').onclick = () => { document.getElementById('colorModal').classList.remove('active'); };
+
+    // Settings modal
+    document.getElementById('settings-btn').onclick = () => {
+        document.getElementById('settings-dealer-code').textContent = dealerSettings.dealerCode || 'N/A';
+        document.getElementById('settings-dealer-name').value = dealerSettings.dealerName || '';
+        document.getElementById('settings-dealer-contact').value = dealerSettings.dealerContact || '';
+        document.getElementById('settings-dealer-phone').value = dealerSettings.dealerPhone || '';
+        document.getElementById('settingsModal').classList.add('active');
+    };
+    document.getElementById('settings-close').onclick = () => { document.getElementById('settingsModal').classList.remove('active'); };
+    document.getElementById('settings-cancel').onclick = () => { document.getElementById('settingsModal').classList.remove('active'); };
+    document.getElementById('settings-save').onclick = () => {
+        dealerSettings.dealerName = document.getElementById('settings-dealer-name').value.trim();
+        dealerSettings.dealerContact = document.getElementById('settings-dealer-contact').value.trim();
+        dealerSettings.dealerPhone = document.getElementById('settings-dealer-phone').value.trim();
+        saveDealerSettings();
+        document.getElementById('settingsModal').classList.remove('active');
+        alert('Settings saved!');
+    };
+
+    // Timeout
+    document.getElementById('timeout-continue').onclick = continueSession;
+    document.getElementById('timeout-save-close').onclick = saveAndClose;
+
+    // Escape key closes modals
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') {
+            document.getElementById('colorModal').classList.remove('active');
+            document.getElementById('reviewModal').classList.remove('active');
+            document.getElementById('printPreviewModal').classList.remove('active');
+            document.getElementById('settingsModal').classList.remove('active');
+            document.getElementById('print-dropdown').classList.remove('active');
+        }
+    });
+
+    // Backdrop click closes modals
+    ['colorModal', 'reviewModal', 'printPreviewModal', 'settingsModal'].forEach(id => {
+        document.getElementById(id).addEventListener('click', e => { if (e.target.classList.contains('modal')) document.getElementById(id).classList.remove('active'); });
+    });
 });
 </script>
 </body>
