@@ -1201,16 +1201,52 @@ function handleLogin() {
 }
 
 function handleLogout() {
-    if (confirm('Are you sure you want to log out? Unsaved changes will be lost.')) {
-        clearTimeout(idleTimer);
-        clearTimeout(warningTimer);
-        clearInterval(countdownInterval);
-        dealerSettings.dealerCode = '';
-        saveDealerSettings();
-        resetFormOnly();
-        showLoginScreen();
+    if (currentQuote.lineItems.length > 0 || document.getElementById('cust-name').value.trim()) {
+        if (!confirm('Are you sure you want to log out? Any unsaved changes will be lost.')) {
+            return;
+        }
     }
+
+    // Clear all timers
+    clearTimeout(idleTimer);
+    clearTimeout(warningTimer);
+    clearInterval(countdownInterval);
+
+    // Clear dealer code from settings (but keep other settings)
+    dealerSettings.dealerCode = '';
+    saveDealerSettings();
+
+    // Reset the form
+    resetFormOnly();
+
+    // Clear the dealer code input field
+    document.getElementById('dealer-code-input').value = '';
+
+    // Hide the main app
+    document.getElementById('main-app').classList.add('app-hidden');
+
+    // Show the login screen
+    document.getElementById('login-screen').style.display = 'flex';
+
+    // Focus the dealer code input
+    document.getElementById('dealer-code-input').focus();
 }
+
+// Also update the success modal button handlers in DOMContentLoaded:
+// Find these lines and replace them:
+
+document.getElementById('success-close-btn').onclick = () => {
+    document.getElementById('success-confirmation').classList.remove('visible');
+    resetFormOnly();
+    setTimeout(() => {
+        document.getElementById('customer').scrollIntoView({ behavior: 'smooth' });
+    }, 100);
+};
+
+document.getElementById('success-continue-btn').onclick = () => {
+    document.getElementById('success-confirmation').classList.remove('visible');
+    // Don't reset, just close the modal
+};
 
 // ============================================
 // QUOTE MODE
@@ -1882,12 +1918,62 @@ function updateCustomerHistory() {
 }
 
 function resetFormOnly() {
-    currentQuote = { quoteId: null, status: 'draft', customer: { name: '', email: '', zipCode: '', company: '', phone: '' }, lineItems: [], options: { pictureFrame: false, stairs: false }, specialInstructions: '', internalNotes: '', shippingAddress: '', deliveryDate: '' };
-    document.getElementById('order-form').reset();
+    // Reset the quote state
+    currentQuote = {
+        quoteId: null,
+        status: 'draft',
+        customer: { name: '', email: '', zipCode: '', company: '', phone: '' },
+        lineItems: [],
+        options: { pictureFrame: false, stairs: false },
+        specialInstructions: '',
+        internalNotes: '',
+        shippingAddress: '',
+        deliveryDate: ''
+    };
+
+    // Clear all form fields manually (don't rely on form.reset() alone)
+    document.getElementById('cust-name').value = '';
+    document.getElementById('cust-email').value = '';
+    document.getElementById('cust-zip').value = '';
+    document.getElementById('cust-company').value = '';
+    document.getElementById('cust-phone').value = '';
+    document.getElementById('pic-frame').checked = false;
+    document.getElementById('stairs').checked = false;
+    document.getElementById('special-instr').value = '';
+    document.getElementById('internal-notes').value = '';
+    document.getElementById('ship-addr').value = '';
+    document.getElementById('del-date').value = '';
+
+    // Hide the option notes
+    document.getElementById('pic-frame-note').style.display = 'none';
+    document.getElementById('stairs-note').style.display = 'none';
+
+    // Clear calculator results
+    document.getElementById('calc-result-container').style.display = 'none';
+    document.getElementById('deck-len').value = '';
+    document.getElementById('deck-wid').value = '';
+    document.getElementById('waste-pct').value = '';
+    lastCalculation = null;
+    deckLengthFt = 0;
+    deckWidthFt = 0;
+
+    // Clear deleted items stack
+    deletedItems = [];
+
+    // Re-render the empty line items
     render();
     updateTotalAndFasteners();
     updateCustomerProgress();
+    updateUndoButton();
+
+    // Reset quote mode to quick
+    setQuoteMode('quick');
+
+    // Scroll to top
+    window.scrollTo({ top: 0, behavior: 'smooth' });
 }
+
+// Find and REPLACE your existing handleLogout function with this improved version:
 
 
     
