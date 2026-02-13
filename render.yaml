@@ -1,0 +1,16 @@
+# render.yaml
+# Place this file in the ROOT of your GitHub repository
+# Render will auto-detect it when you create a Blueprint
+
+services:
+  - type: web
+    name: ameridex-dealer-portal
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
