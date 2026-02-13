@@ -650,6 +650,7 @@ app.get('*', (req, res) => {
 // START SERVER
 // ===========================================================
 ensureDataFiles();
+require('./admin-routes')(app, requireAuth);
 app.listen(PORT, () => {
     console.log('');
     console.log('==============================================');
