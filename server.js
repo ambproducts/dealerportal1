@@ -21,7 +21,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ---- Data File Paths ----
-const DATA_DIR = path.join(__dirname, 'data');
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const DEALERS_FILE = path.join(DATA_DIR, 'dealers.json');
 const QUOTES_FILE = path.join(DATA_DIR, 'quotes.json');
 const TIERS_FILE = path.join(DATA_DIR, 'pricing-tiers.json');
