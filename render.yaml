@@ -1,0 +1,25 @@
+# render.yaml
+# AmeriDex Dealer Portal - Render Blueprint Config
+# Updated: 2026-02-13
+# Plan: Starter ($7/mo) + 1GB Persistent Disk (~$0.40/mo)
+
+services:
+  - type: web
+    name: ameridex-dealer-portal
+    runtime: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: node server.js
+    disk:
+      name: ameridex-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: MASTER_KEY
+        generateValue: true
+      - key: DATA_DIR
+        value: /opt/render/project/src/data
