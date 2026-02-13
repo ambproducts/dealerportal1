@@ -651,6 +651,7 @@ app.get('*', (req, res) => {
 // ===========================================================
 ensureDataFiles();
 require('./admin-routes')(app, requireAuth);
+require('./keep-warm')(app);
 app.listen(PORT, () => {
     console.log('');
     console.log('==============================================');
