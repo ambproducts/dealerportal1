@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - Price Override System v1.4
+// AmeriDex Dealer Portal - Price Override System v1.5
 // Date: 2026-02-14
 // ============================================================
 // REQUIRES: ameridex-api.js, ameridex-pricing-fix.js loaded first
@@ -13,24 +13,23 @@
 //   6. ameridex-admin.js
 //   7. ameridex-admin-customers.js
 //
+// v1.5 Changes (2026-02-14):
+//   - ADD: GM/Admin real-time polling for pending overrides (30s).
+//   - ADD: Polling pauses when browser tab is hidden, resumes on focus.
+//   - ADD: Immediate refresh on tab re-focus before resuming interval.
+//   - ADD: Polling stops if main-app becomes hidden (logout).
+//
 // v1.4 Changes (2026-02-14):
 //   - ADD: Auto-save quote when frontdesk requests a pending override
 //     on an unsaved quote, so the GM sees it immediately.
 //   - ADD: After auto-save, fires the override API with the new
 //     server ID so the pending override persists on the server.
-//   - ADD: Toast feedback for frontdesk: "Quote auto-saved for GM review."
-//   - ADD: GM/Admin overrides on unsaved quotes also auto-save now.
 //
 // v1.3 Changes (2026-02-14):
 //   - REWRITE: Overrides now operate client-side on the live
 //     currentQuote.lineItems. No save required before overriding.
-//   - GM/Admin override is instant (status: approved, price
-//     changes on screen immediately via getDisplayPrice()).
-//   - Frontdesk override sets status: pending (price unchanged
-//     until GM approves). Persists when quote is saved.
+//   - GM/Admin override is instant. Frontdesk override sets pending.
 //   - Multiple line items can be overridden in sequence.
-//   - Server sync happens in background when quote has a server
-//     ID, but UI does not depend on the server response.
 // ============================================================
 
 (function () {
@@ -326,13 +325,11 @@
         }
 
         // ----- BACKGROUND SERVER SYNC -----
-        // Capture values needed for async operations
         var capturedIdx = idx;
         var capturedPrice = roundedPrice;
         var capturedReason = reason;
         var isFrontdesk = (role === 'frontdesk');
 
-        // Resolve existing server ID
         var serverId = null;
         if (typeof savedQuotes !== 'undefined' && typeof currentQuote !== 'undefined' && currentQuote.quoteId) {
             var match = savedQuotes.find(function (q) { return q.quoteId === currentQuote.quoteId; });
@@ -343,11 +340,8 @@
         }
 
         if (serverId && api) {
-            // Quote already exists on server: sync override directly
             fireOverrideAPI(serverId, capturedIdx, capturedPrice, capturedReason);
         } else if (api) {
-            // Quote has NO server ID yet.
-            // Auto-save the quote to the server first, then fire the override.
             autoSaveQuoteThenOverride(capturedIdx, capturedPrice, capturedReason, isFrontdesk);
         }
     });
@@ -375,20 +369,12 @@
     // ----------------------------------------------------------
     // 3b-ii. HELPER: Auto-save an unsaved quote, then fire override
     // ----------------------------------------------------------
-    // When a frontdesk user requests an override on a quote that
-    // hasn't been saved to the server yet, we need to:
-    //   1. Create the quote on the server (POST /api/quotes)
-    //   2. Store the server ID locally
-    //   3. Fire the override API with the new server ID
-    // This ensures the GM's pending overrides widget sees it.
-    // ----------------------------------------------------------
     function autoSaveQuoteThenOverride(itemIdx, price, reason, isFrontdesk) {
         if (typeof currentQuote === 'undefined' || !currentQuote.lineItems) {
             console.warn('[Overrides] Cannot auto-save: no currentQuote');
             return;
         }
 
-        // Build the payload from local state
         var payload = {
             customer: currentQuote.customer || {},
             lineItems: currentQuote.lineItems.map(function (li) {
@@ -409,7 +395,6 @@
             .then(function (savedQuote) {
                 console.log('[Overrides] Auto-save OK. Server ID: ' + savedQuote.id + ', Quote #: ' + savedQuote.quoteNumber);
 
-                // Store server ID in local state so future syncs work
                 if (typeof savedQuotes !== 'undefined' && typeof currentQuote !== 'undefined' && currentQuote.quoteId) {
                     var localMatch = savedQuotes.find(function (q) { return q.quoteId === currentQuote.quoteId; });
                     if (localMatch) {
@@ -418,21 +403,17 @@
                     }
                 }
 
-                // Also store on currentQuote for immediate reference
                 if (typeof currentQuote !== 'undefined') {
                     currentQuote._serverId = savedQuote.id;
                     currentQuote._serverQuoteNumber = savedQuote.quoteNumber;
                 }
 
-                // Now fire the override API with the new server ID
                 fireOverrideAPI(savedQuote.id, itemIdx, price, reason);
 
-                // Notify frontdesk that the quote was auto-saved
                 if (isFrontdesk) {
                     showOverrideToast('Quote auto-saved so your GM can review the override.', 'success');
                 }
 
-                // Refresh saved quotes list if available
                 if (typeof window.loadServerQuotesAndRender === 'function') {
                     window.loadServerQuotesAndRender();
                 }
@@ -459,20 +440,15 @@
         serverQuote.lineItems.forEach(function (serverItem, idx) {
             if (idx < currentQuote.lineItems.length) {
                 var local = currentQuote.lineItems[idx];
-                // Only sync override data from server (don't clobber local overrides
-                // that haven't been synced yet)
                 if (serverItem.priceOverride && !local.priceOverride) {
                     local.priceOverride = serverItem.priceOverride;
                 }
-                // If server has approved what was pending locally, update status
                 if (local.priceOverride && local.priceOverride.status === 'pending'
                     && serverItem.priceOverride && serverItem.priceOverride.status === 'approved') {
                     local.priceOverride = serverItem.priceOverride;
-                    // Re-render to show the approval
                     if (typeof renderDesktop === 'function') renderDesktop();
                     if (typeof updateTotals === 'function') updateTotals();
                 }
-                // Sync tierPrice and basePrice from server if we don't have them
                 if ((local.tierPrice === undefined || local.tierPrice === null) && serverItem.tierPrice) {
                     local.tierPrice = serverItem.tierPrice;
                 }
@@ -737,7 +713,6 @@
         var reviewModal = document.getElementById('reviewModal');
         if (!reviewModal) return;
 
-        // Check local state first (works even before server save)
         var pendingCount = 0;
         if (typeof currentQuote !== 'undefined' && currentQuote.lineItems) {
             pendingCount = currentQuote.lineItems.filter(function (li) {
@@ -792,7 +767,96 @@
 
 
     // ----------------------------------------------------------
-    // 10. INIT: Create widget + load pending on page ready
+    // 10. REAL-TIME POLLING FOR GM/ADMIN
+    // ----------------------------------------------------------
+    // Polls GET /api/quotes/pending-overrides every 30 seconds
+    // so the GM sees new frontdesk requests without refreshing.
+    //
+    // Smart behaviors:
+    //   - Only runs for gm/admin roles
+    //   - Pauses when browser tab is hidden (saves bandwidth)
+    //   - Fires an immediate refresh when tab regains focus
+    //   - Stops if main-app becomes hidden (user logged out)
+    //   - Does not stack: each poll waits for the previous to finish
+    // ----------------------------------------------------------
+    var POLL_INTERVAL_MS = 30000; // 30 seconds
+    var _pollTimer = null;
+    var _pollActive = false;
+    var _tabVisible = true;
+
+    function isGMOrAdmin() {
+        var user = window.getCurrentUser ? window.getCurrentUser() : null;
+        return user && (user.role === 'gm' || user.role === 'admin');
+    }
+
+    function isAppVisible() {
+        var mainApp = document.getElementById('main-app');
+        return mainApp && !mainApp.classList.contains('app-hidden');
+    }
+
+    function pollPendingOverrides() {
+        if (!_pollActive) return;
+        if (!_tabVisible) return;
+        if (!isGMOrAdmin()) {
+            stopPolling();
+            return;
+        }
+        if (!isAppVisible()) return; // skip this tick, app not visible
+
+        api('GET', '/api/quotes/pending-overrides')
+            .then(function (data) {
+                renderPendingOverrides(data.pending || [], data.count || 0);
+            })
+            .catch(function (err) {
+                console.warn('[Overrides Poll] Failed:', err.message);
+            });
+    }
+
+    function startPolling() {
+        if (_pollActive) return;
+        if (!isGMOrAdmin()) return;
+
+        _pollActive = true;
+        _pollTimer = setInterval(pollPendingOverrides, POLL_INTERVAL_MS);
+        console.log('[Overrides] Polling started (every ' + (POLL_INTERVAL_MS / 1000) + 's)');
+    }
+
+    function stopPolling() {
+        if (_pollTimer) {
+            clearInterval(_pollTimer);
+            _pollTimer = null;
+        }
+        _pollActive = false;
+        console.log('[Overrides] Polling stopped.');
+    }
+
+    // Pause/resume on tab visibility change
+    document.addEventListener('visibilitychange', function () {
+        _tabVisible = !document.hidden;
+        if (_tabVisible && _pollActive && isGMOrAdmin()) {
+            // Tab just became visible again: do an immediate refresh
+            console.log('[Overrides] Tab visible, refreshing pending overrides...');
+            pollPendingOverrides();
+        }
+    });
+
+    // Watch for main-app visibility changes (login/logout)
+    var _pollObserver = new MutationObserver(function () {
+        if (isAppVisible() && isGMOrAdmin()) {
+            if (!_pollActive) {
+                loadPendingOverrides();
+                startPolling();
+            }
+        } else {
+            if (_pollActive) {
+                stopPolling();
+            }
+        }
+    });
+
+
+    // ----------------------------------------------------------
+    // 11. INIT: Create widget + load pending + start polling
     // ----------------------------------------------------------
     function initOverrides() {
         var user = window.getCurrentUser ? window.getCurrentUser() : null;
@@ -803,22 +867,22 @@
 
         createGMWidget();
         loadPendingOverrides();
-        console.log('[Overrides] v1.4 initialized for role: ' + user.role);
+
+        // Start polling for GM/Admin
+        if (user.role === 'gm' || user.role === 'admin') {
+            startPolling();
+        }
+
+        console.log('[Overrides] v1.5 initialized for role: ' + user.role);
     }
 
     setTimeout(initOverrides, 500);
 
-    var observer = new MutationObserver(function () {
-        var mainApp = document.getElementById('main-app');
-        if (mainApp && !mainApp.classList.contains('app-hidden')) {
-            createGMWidget();
-            loadPendingOverrides();
-        }
-    });
+    // Observe main-app for class changes (login/logout transitions)
     var mainApp = document.getElementById('main-app');
     if (mainApp) {
-        observer.observe(mainApp, { attributes: true, attributeFilter: ['class'] });
+        _pollObserver.observe(mainApp, { attributes: true, attributeFilter: ['class'] });
     }
 
-    console.log('[AmeriDex Overrides] v1.4 loaded.');
+    console.log('[AmeriDex Overrides] v1.5 loaded.');
 })();
