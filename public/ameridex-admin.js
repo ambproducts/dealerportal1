@@ -1,6 +1,6 @@
 // ============================================================
-// AmeriDex Dealer Portal - Admin Panel v1.0
-// Date: 2026-02-13
+// AmeriDex Dealer Portal - Admin Panel v1.1
+// Date: 2026-02-14
 // ============================================================
 // REQUIRES: ameridex-api.js (v2.1) loaded first
 //
@@ -14,9 +14,16 @@
 //   2. Wires the Admin header button to open it
 //   3. Full CRUD for dealers (create, edit, reset password, toggle active)
 //   4. View/manage all quotes across all dealers with status transitions
-//   5. Edit pricing tiers and multipliers
+//   5. Edit pricing tiers and multipliers with product price preview
 //   6. Export quotes to CSV
 //   7. Only accessible to role=admin users
+//
+// v1.1 Changes (2026-02-14):
+//   - FIX: Pricing tier GET/PUT uses /api/admin/pricing-tiers
+//   - FIX: Save pricing iterates per-tier PUT instead of bulk
+//   - ADD: Pricing tab loads product catalog for computed price preview
+//   - ADD: Username field in Add Dealer form
+//   - ADD: Username column in dealers table
 // ============================================================
 
 (function () {
@@ -61,6 +68,8 @@
         '.badge-admin { background:#fef3c7; color:#92400e; }' +
         '.badge-dealer { background:#dbeafe; color:#1d4ed8; }' +
         '.badge-rep { background:#f3e8ff; color:#7c3aed; }' +
+        '.badge-gm { background:#dbeafe; color:#1d4ed8; }' +
+        '.badge-frontdesk { background:#f3f4f6; color:#374151; }' +
         '.badge-draft { background:#f3f4f6; color:#374151; }' +
         '.badge-submitted { background:#dbeafe; color:#1d4ed8; }' +
         '.badge-reviewed { background:#fef3c7; color:#92400e; }' +
@@ -116,6 +125,7 @@
         '.admin-tier-product { display:flex; justify-content:space-between; padding:0.35rem 0; border-bottom:1px solid #f9fafb; }' +
         '.admin-tier-product-name { color:#6b7280; }' +
         '.admin-tier-product-price { font-weight:600; color:#111827; }' +
+        '.admin-tier-product-base { font-size:0.78rem; color:#9ca3af; text-decoration:line-through; margin-right:0.5rem; }' +
         '.admin-loading { text-align:center; padding:2rem; color:#6b7280; }' +
         '.admin-error { background:#fee2e2; color:#dc2626; padding:0.75rem 1rem; border-radius:8px; font-size:0.88rem; margin-bottom:1rem; }' +
         '.admin-success { background:#dcfce7; color:#16a34a; padding:0.75rem 1rem; border-radius:8px; font-size:0.88rem; margin-bottom:1rem; }' +
@@ -155,7 +165,7 @@
                     '<div id="admin-dealers-stats" class="admin-stat-row"></div>' +
                     '<div id="admin-dealer-alert"></div>' +
 
-                    // Add Dealer Form
+                    // Add Dealer Form (with Username field)
                     '<details id="admin-add-dealer-details">' +
                         '<summary style="cursor:pointer;font-weight:600;color:#2563eb;margin-bottom:1rem;font-size:0.95rem;">+ Add New Dealer</summary>' +
                         '<div class="admin-form" id="admin-add-dealer-form">' +
@@ -165,39 +175,46 @@
                                     '<input type="text" id="admin-new-code" maxlength="6" placeholder="ABC123" style="text-transform:uppercase;">' +
                                 '</div>' +
                                 '<div class="admin-form-field">' +
-                                    '<label>Password</label>' +
-                                    '<input type="text" id="admin-new-pw" placeholder="Min 8 characters">' +
+                                    '<label>GM Username</label>' +
+                                    '<input type="text" id="admin-new-username" placeholder="e.g. john.smith" style="text-transform:lowercase;">' +
+                                    '<div style="font-size:0.75rem;color:#6b7280;margin-top:0.2rem;">Login username for General Manager. Leave blank to auto-generate from dealer code.</div>' +
                                 '</div>' +
                             '</div>' +
                             '<div class="admin-form-row">' +
+                                '<div class="admin-form-field">' +
+                                    '<label>Password</label>' +
+                                    '<input type="text" id="admin-new-pw" placeholder="Min 8 characters">' +
+                                '</div>' +
                                 '<div class="admin-form-field">' +
                                     '<label>Dealer Name</label>' +
                                     '<input type="text" id="admin-new-name" placeholder="Business name">' +
                                 '</div>' +
+                            '</div>' +
+                            '<div class="admin-form-row">' +
                                 '<div class="admin-form-field">' +
                                     '<label>Contact Person</label>' +
                                     '<input type="text" id="admin-new-contact" placeholder="Full name">' +
                                 '</div>' +
-                            '</div>' +
-                            '<div class="admin-form-row">' +
                                 '<div class="admin-form-field">' +
                                     '<label>Email</label>' +
                                     '<input type="email" id="admin-new-email" placeholder="dealer@example.com">' +
                                 '</div>' +
+                            '</div>' +
+                            '<div class="admin-form-row">' +
                                 '<div class="admin-form-field">' +
                                     '<label>Phone</label>' +
                                     '<input type="tel" id="admin-new-phone" placeholder="555-123-4567">' +
                                 '</div>' +
-                            '</div>' +
-                            '<div class="admin-form-row">' +
                                 '<div class="admin-form-field">' +
-                                    '<label>Role</label>' +
+                                    '<label>User Role</label>' +
                                     '<select id="admin-new-role">' +
                                         '<option value="dealer">Dealer</option>' +
                                         '<option value="rep">Internal Rep</option>' +
                                         '<option value="admin">Admin</option>' +
                                     '</select>' +
                                 '</div>' +
+                            '</div>' +
+                            '<div class="admin-form-row">' +
                                 '<div class="admin-form-field">' +
                                     '<label>Pricing Tier</label>' +
                                     '<select id="admin-new-tier">' +
@@ -206,6 +223,7 @@
                                         '<option value="vip">VIP (0.90x)</option>' +
                                     '</select>' +
                                 '</div>' +
+                                '<div class="admin-form-field"></div>' +
                             '</div>' +
                             '<div class="admin-form-actions">' +
                                 '<button type="button" class="admin-btn admin-btn-primary" id="admin-create-dealer-btn">Create Dealer</button>' +
@@ -257,6 +275,7 @@
                         '<h3>Pricing Tiers</h3>' +
                         '<button type="button" class="admin-btn admin-btn-primary" id="admin-save-pricing-btn">Save All Changes</button>' +
                     '</div>' +
+                    '<p style="font-size:0.85rem;color:#6b7280;margin-top:-0.5rem;margin-bottom:1rem;">Edit the multiplier for each tier. Product prices shown are base price &times; multiplier (preview only, computed automatically).</p>' +
                     '<div id="admin-pricing-list"><div class="admin-loading">Loading pricing...</div></div>' +
                 '</div>' +
 
@@ -276,7 +295,6 @@
             modal.querySelectorAll('.admin-tab-content').forEach(function (c) { c.classList.remove('active'); });
             document.getElementById('admin-tab-' + tab.getAttribute('data-tab')).classList.add('active');
 
-            // Load data for the active tab
             var tabName = tab.getAttribute('data-tab');
             if (tabName === 'dealers') loadDealers();
             if (tabName === 'quotes') loadAllQuotes();
@@ -322,6 +340,7 @@
     var _allDealers = [];
     var _allQuotes = [];
     var _pricingTiers = [];
+    var _baseProducts = [];
 
     function showAlert(containerId, msg, type) {
         var el = document.getElementById(containerId);
@@ -408,7 +427,6 @@
         html += '</tbody></table>';
         container.innerHTML = html;
 
-        // Bind action buttons
         container.querySelectorAll('[data-action]').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 var action = btn.getAttribute('data-action');
@@ -420,14 +438,14 @@
         });
     }
 
-    // Search handler
     document.getElementById('admin-dealer-search').addEventListener('input', function () {
         renderDealersTable();
     });
 
-    // Create Dealer
+    // Create Dealer (with username field)
     document.getElementById('admin-create-dealer-btn').addEventListener('click', function () {
         var code = document.getElementById('admin-new-code').value.trim().toUpperCase();
+        var username = document.getElementById('admin-new-username').value.trim().toLowerCase();
         var pw = document.getElementById('admin-new-pw').value;
         var name = document.getElementById('admin-new-name').value.trim();
         var contact = document.getElementById('admin-new-contact').value.trim();
@@ -445,7 +463,7 @@
             return;
         }
 
-        _api('POST', '/api/admin/dealers', {
+        var payload = {
             dealerCode: code,
             password: pw,
             dealerName: name,
@@ -454,22 +472,38 @@
             phone: phone,
             role: role,
             pricingTier: tier
-        }).then(function (newDealer) {
-            showAlert('admin-dealer-alert', 'Dealer ' + code + ' created successfully!', 'success');
-            // Clear form
-            document.getElementById('admin-new-code').value = '';
-            document.getElementById('admin-new-pw').value = '';
-            document.getElementById('admin-new-name').value = '';
-            document.getElementById('admin-new-contact').value = '';
-            document.getElementById('admin-new-email').value = '';
-            document.getElementById('admin-new-phone').value = '';
-            document.getElementById('admin-new-role').value = 'dealer';
-            document.getElementById('admin-new-tier').value = 'standard';
-            document.getElementById('admin-add-dealer-details').removeAttribute('open');
-            loadDealers();
-        }).catch(function (err) {
-            showAlert('admin-dealer-alert', 'Failed: ' + esc(err.message), 'error');
-        });
+        };
+
+        // Include username if provided (backend will use it for GM user)
+        if (username) {
+            payload.username = username;
+        }
+
+        _api('POST', '/api/admin/dealers', payload)
+            .then(function (result) {
+                // Response may include { dealer, gmUser } or just the dealer
+                var gmInfo = '';
+                if (result.gmUser) {
+                    gmInfo = '<br>GM Login: <strong>' + esc(result.gmUser.username) + '</strong> (role: ' + esc(result.gmUser.role) + ')';
+                }
+                showAlert('admin-dealer-alert', 'Dealer ' + code + ' created!' + gmInfo, 'success');
+
+                // Clear form
+                document.getElementById('admin-new-code').value = '';
+                document.getElementById('admin-new-username').value = '';
+                document.getElementById('admin-new-pw').value = '';
+                document.getElementById('admin-new-name').value = '';
+                document.getElementById('admin-new-contact').value = '';
+                document.getElementById('admin-new-email').value = '';
+                document.getElementById('admin-new-phone').value = '';
+                document.getElementById('admin-new-role').value = 'dealer';
+                document.getElementById('admin-new-tier').value = 'standard';
+                document.getElementById('admin-add-dealer-details').removeAttribute('open');
+                loadDealers();
+            })
+            .catch(function (err) {
+                showAlert('admin-dealer-alert', 'Failed: ' + esc(err.message), 'error');
+            });
     });
 
     function editDealer(id) {
@@ -572,7 +606,6 @@
                 dealerCodes.push(q.dealerCode);
             }
         });
-        // Keep "All Dealers" option, remove old
         select.innerHTML = '<option value="">All Dealers</option>';
         dealerCodes.sort().forEach(function (code) {
             select.innerHTML += '<option value="' + code + '">' + code + '</option>';
@@ -642,7 +675,6 @@
         html += '</tbody></table>';
         container.innerHTML = html;
 
-        // Bind status change
         container.querySelectorAll('.admin-status-select').forEach(function (sel) {
             sel.addEventListener('change', function () {
                 var qId = sel.getAttribute('data-quote-id');
@@ -650,7 +682,6 @@
             });
         });
 
-        // Bind action buttons
         container.querySelectorAll('[data-action]').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 var action = btn.getAttribute('data-action');
@@ -661,7 +692,6 @@
         });
     }
 
-    // Filter handlers
     document.getElementById('admin-quote-status-filter').addEventListener('change', renderQuotesTable);
     document.getElementById('admin-quote-dealer-filter').addEventListener('change', renderQuotesTable);
     document.getElementById('admin-quote-search').addEventListener('input', renderQuotesTable);
@@ -676,7 +706,7 @@
             })
             .catch(function (err) {
                 showAlert('admin-quote-alert', 'Update failed: ' + esc(err.message), 'error');
-                loadAllQuotes(); // reload to reset select
+                loadAllQuotes();
             });
     }
 
@@ -792,13 +822,36 @@
 
 
     // ----------------------------------------------------------
-    // PRICING TAB
+    // PRICING TAB (Fixed: correct endpoint + per-tier save)
     // ----------------------------------------------------------
+
+    // Base product catalog (hardcoded to match backend products.js)
+    var BASE_PRODUCTS = [
+        { id: 'idx-standard', name: 'Standard Index Tab Set', basePrice: 24.99 },
+        { id: 'idx-legal', name: 'Legal Size Index Tabs', basePrice: 29.99 },
+        { id: 'idx-custom', name: 'Custom Printed Tabs', basePrice: 49.99 },
+        { id: 'idx-exhibit', name: 'Exhibit Index Set (A-Z)', basePrice: 34.99 },
+        { id: 'idx-num25', name: 'Numbered Tabs 1-25', basePrice: 19.99 },
+        { id: 'idx-num50', name: 'Numbered Tabs 1-50', basePrice: 34.99 },
+        { id: 'idx-num100', name: 'Numbered Tabs 1-100', basePrice: 54.99 },
+        { id: 'idx-blank', name: 'Blank Tab Set', basePrice: 14.99 },
+        { id: 'idx-month', name: 'Monthly Index Tabs (Jan-Dec)', basePrice: 22.99 },
+        { id: 'bnd-half', name: 'Half-Inch Binder', basePrice: 8.99 },
+        { id: 'bnd-one', name: '1-Inch Binder', basePrice: 12.99 },
+        { id: 'bnd-onehalf', name: '1.5-Inch Binder', basePrice: 16.99 },
+        { id: 'bnd-two', name: '2-Inch Binder', basePrice: 19.99 },
+        { id: 'bnd-three', name: '3-Inch Binder', basePrice: 24.99 },
+        { id: 'acc-sheet', name: 'Sheet Protectors (100pk)', basePrice: 18.99 },
+        { id: 'acc-pocket', name: 'Expanding Pockets (25pk)', basePrice: 22.99 },
+        { id: 'acc-spine', name: 'Spine Labels (50pk)', basePrice: 9.99 },
+        { id: 'acc-divider', name: 'Divider Sheets (50pk)', basePrice: 15.99 }
+    ];
+
     function loadPricingTiers() {
         var container = document.getElementById('admin-pricing-list');
-        container.innerHTML = '<div class="admin-loading">Loading pricing...</div>';
+        container.innerHTML = '<div class="admin-loading">Loading pricing tiers...</div>';
 
-        _api('GET', '/api/admin/pricing')
+        _api('GET', '/api/admin/pricing-tiers')
             .then(function (tiers) {
                 _pricingTiers = tiers;
                 renderPricingTiers();
@@ -818,69 +871,124 @@
 
         var html = '';
         _pricingTiers.forEach(function (tier, tIdx) {
-            html += '<div class="admin-tier-card" data-tier-idx="' + tIdx + '">' +
+            var slug = tier.slug || tier.id || 'tier-' + tIdx;
+            var mult = tier.multiplier || 1;
+
+            html += '<div class="admin-tier-card" data-tier-idx="' + tIdx + '" data-tier-slug="' + esc(slug) + '">' +
                 '<div class="admin-tier-header">' +
                     '<div>' +
-                        '<span class="admin-tier-name">' + esc(tier.label || tier.id) + '</span>' +
-                        ' <span class="admin-badge badge-' + (tier.id || 'standard') + '">' + (tier.id || 'standard') + '</span>' +
+                        '<span class="admin-tier-name">' + esc(tier.label || slug) + '</span>' +
+                        ' <span class="admin-badge badge-' + slug + '">' + slug + '</span>' +
                     '</div>' +
-                    '<div class="admin-form-inline" style="gap:0.5rem;">' +
+                    '<div class="admin-form-inline" style="gap:0.5rem;align-items:center;">' +
                         '<label style="font-size:0.82rem;font-weight:600;color:#6b7280;">Multiplier:</label>' +
-                        '<input type="number" step="0.01" min="0.01" max="2" value="' + (tier.multiplier || 1) + '" ' +
-                            'class="tier-multiplier-input" data-tier="' + tIdx + '" ' +
+                        '<input type="number" step="0.01" min="0.01" max="2" value="' + mult + '" ' +
+                            'class="tier-multiplier-input" data-tier="' + tIdx + '" data-slug="' + esc(slug) + '" ' +
                             'style="width:80px;padding:0.4rem;border:1px solid #e5e7eb;border-radius:6px;font-size:0.9rem;font-weight:600;text-align:center;">' +
+                        '<span class="tier-mult-preview" data-tier="' + tIdx + '" style="font-size:0.82rem;color:#6b7280;">(' + (mult * 100).toFixed(0) + '% of base)</span>' +
                     '</div>' +
-                '</div>' +
-                '<div class="admin-tier-products">';
+                '</div>';
 
-            if (tier.products) {
-                Object.keys(tier.products).forEach(function (prodKey) {
-                    var prod = tier.products[prodKey];
-                    html += '<div class="admin-tier-product">' +
-                        '<span class="admin-tier-product-name">' + esc(prod.name || prodKey) + '</span>' +
-                        '<span class="admin-tier-product-price">' +
-                            '<input type="number" step="0.01" min="0" value="' + (prod.price || 0) + '" ' +
-                                'class="tier-price-input" data-tier="' + tIdx + '" data-product="' + prodKey + '" ' +
-                                'style="width:80px;padding:0.3rem;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem;text-align:right;">' +
-                        '</span>' +
-                    '</div>';
-                });
-            }
+            // Product price preview grid
+            html += '<div style="margin-top:0.5rem;margin-bottom:0.25rem;font-size:0.8rem;font-weight:600;color:#6b7280;">Product Price Preview (base &times; ' + mult + ')</div>';
+            html += '<div class="admin-tier-products">';
+
+            BASE_PRODUCTS.forEach(function (prod) {
+                var computedPrice = Math.round(prod.basePrice * mult * 100) / 100;
+                var showStrike = mult !== 1;
+                html += '<div class="admin-tier-product">' +
+                    '<span class="admin-tier-product-name">' + esc(prod.name) + '</span>' +
+                    '<span>' +
+                        (showStrike ? '<span class="admin-tier-product-base">$' + prod.basePrice.toFixed(2) + '</span>' : '') +
+                        '<span class="admin-tier-product-price tier-computed-price" data-tier="' + tIdx + '" data-base="' + prod.basePrice + '">$' + computedPrice.toFixed(2) + '</span>' +
+                    '</span>' +
+                '</div>';
+            });
 
             html += '</div></div>';
         });
 
         container.innerHTML = html;
+
+        // Live preview: update computed prices when multiplier changes
+        container.querySelectorAll('.tier-multiplier-input').forEach(function (input) {
+            input.addEventListener('input', function () {
+                var tIdx = input.getAttribute('data-tier');
+                var newMult = parseFloat(input.value) || 1;
+
+                // Update percentage label
+                var preview = container.querySelector('.tier-mult-preview[data-tier="' + tIdx + '"]');
+                if (preview) preview.textContent = '(' + (newMult * 100).toFixed(0) + '% of base)';
+
+                // Update all computed prices for this tier
+                container.querySelectorAll('.tier-computed-price[data-tier="' + tIdx + '"]').forEach(function (el) {
+                    var base = parseFloat(el.getAttribute('data-base')) || 0;
+                    var computed = Math.round(base * newMult * 100) / 100;
+                    el.textContent = '$' + computed.toFixed(2);
+                });
+            });
+        });
     }
 
-    // Save pricing
+    // Save pricing: iterate per-tier PUT
     document.getElementById('admin-save-pricing-btn').addEventListener('click', function () {
-        // Collect updated values
-        var updatedTiers = JSON.parse(JSON.stringify(_pricingTiers));
+        var inputs = document.querySelectorAll('.tier-multiplier-input');
+        if (inputs.length === 0) {
+            showAlert('admin-pricing-alert', 'No tiers to save', 'error');
+            return;
+        }
 
-        document.querySelectorAll('.tier-multiplier-input').forEach(function (input) {
-            var idx = parseInt(input.getAttribute('data-tier'), 10);
-            updatedTiers[idx].multiplier = parseFloat(input.value) || 1;
-        });
+        var saveBtn = document.getElementById('admin-save-pricing-btn');
+        saveBtn.textContent = 'Saving...';
+        saveBtn.disabled = true;
 
-        document.querySelectorAll('.tier-price-input').forEach(function (input) {
-            var idx = parseInt(input.getAttribute('data-tier'), 10);
-            var prodKey = input.getAttribute('data-product');
-            if (updatedTiers[idx].products && updatedTiers[idx].products[prodKey]) {
-                updatedTiers[idx].products[prodKey].price = parseFloat(input.value) || 0;
+        var promises = [];
+        inputs.forEach(function (input) {
+            var slug = input.getAttribute('data-slug');
+            var tIdx = parseInt(input.getAttribute('data-tier'), 10);
+            var newMult = parseFloat(input.value);
+
+            if (isNaN(newMult) || newMult <= 0 || newMult > 2) {
+                return; // skip invalid
+            }
+
+            var tier = _pricingTiers[tIdx];
+            if (!tier) return;
+
+            // Only save if changed
+            if (tier.multiplier !== newMult) {
+                promises.push(
+                    _api('PUT', '/api/admin/pricing-tiers/' + encodeURIComponent(slug), {
+                        multiplier: newMult
+                    }).then(function (updated) {
+                        // Update local cache
+                        _pricingTiers[tIdx].multiplier = updated.multiplier || newMult;
+                        return slug;
+                    })
+                );
             }
         });
 
-        _api('PUT', '/api/admin/pricing', updatedTiers)
-            .then(function () {
-                _pricingTiers = updatedTiers;
-                showAlert('admin-pricing-alert', 'Pricing tiers saved!', 'success');
+        if (promises.length === 0) {
+            saveBtn.textContent = 'Save All Changes';
+            saveBtn.disabled = false;
+            showAlert('admin-pricing-alert', 'No changes to save', 'success');
+            return;
+        }
+
+        Promise.all(promises)
+            .then(function (savedSlugs) {
+                saveBtn.textContent = 'Save All Changes';
+                saveBtn.disabled = false;
+                showAlert('admin-pricing-alert', 'Saved ' + savedSlugs.length + ' tier(s): ' + savedSlugs.join(', '), 'success');
             })
             .catch(function (err) {
+                saveBtn.textContent = 'Save All Changes';
+                saveBtn.disabled = false;
                 showAlert('admin-pricing-alert', 'Save failed: ' + esc(err.message), 'error');
             });
     });
 
 
-    console.log('[AmeriDex Admin] v1.0 loaded.');
+    console.log('[AmeriDex Admin] v1.1 loaded.');
 })();
