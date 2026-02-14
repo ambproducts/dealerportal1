@@ -140,7 +140,9 @@ router.post('/:id/reject', requireRole('admin'), (req, res) => {
 });
 
 // POST /api/users/:id/disable
-router.post('/:id/disable', requireRole('admin'), (req, res) => {
+// Admin: can disable any user (except self)
+// GM: can disable frontdesk users at their own dealerCode (not self, not other GMs/admins)
+router.post('/:id/disable', requireRole('admin', 'gm'), (req, res) => {
     const users = readJSON(USERS_FILE);
     const idx = users.findIndex(u => u.id === req.params.id);
     if (idx === -1) return res.status(404).json({ error: 'User not found' });
@@ -149,33 +151,69 @@ router.post('/:id/disable', requireRole('admin'), (req, res) => {
         return res.status(400).json({ error: 'Cannot disable your own account' });
     }
 
+    // GM scope checks
+    if (req.user.role === 'gm') {
+        if (users[idx].dealerCode !== req.user.dealerCode) {
+            return res.status(403).json({ error: 'Cannot modify users from another dealer' });
+        }
+        if (users[idx].role !== 'frontdesk') {
+            return res.status(403).json({ error: 'GM can only disable frontdesk accounts' });
+        }
+    }
+
     users[idx].status = 'disabled';
     users[idx].updatedAt = new Date().toISOString();
     writeJSON(USERS_FILE, users);
 
     const { passwordHash, ...safe } = users[idx];
+    console.log('[Users] Disabled: ' + users[idx].username + ' by ' + req.user.username);
     res.json(safe);
 });
 
 // POST /api/users/:id/enable
-router.post('/:id/enable', requireRole('admin'), (req, res) => {
+// Admin: can enable any user
+// GM: can enable frontdesk users at their own dealerCode
+router.post('/:id/enable', requireRole('admin', 'gm'), (req, res) => {
     const users = readJSON(USERS_FILE);
     const idx = users.findIndex(u => u.id === req.params.id);
     if (idx === -1) return res.status(404).json({ error: 'User not found' });
+
+    // GM scope checks
+    if (req.user.role === 'gm') {
+        if (users[idx].dealerCode !== req.user.dealerCode) {
+            return res.status(403).json({ error: 'Cannot modify users from another dealer' });
+        }
+        if (users[idx].role !== 'frontdesk') {
+            return res.status(403).json({ error: 'GM can only enable frontdesk accounts' });
+        }
+    }
 
     users[idx].status = 'active';
     users[idx].updatedAt = new Date().toISOString();
     writeJSON(USERS_FILE, users);
 
     const { passwordHash, ...safe } = users[idx];
+    console.log('[Users] Enabled: ' + users[idx].username + ' by ' + req.user.username);
     res.json(safe);
 });
 
 // POST /api/users/:id/reset-password
-router.post('/:id/reset-password', requireRole('admin'), (req, res) => {
+// Admin: can reset any user's password
+// GM: can reset frontdesk users' passwords at their own dealerCode
+router.post('/:id/reset-password', requireRole('admin', 'gm'), (req, res) => {
     const users = readJSON(USERS_FILE);
     const idx = users.findIndex(u => u.id === req.params.id);
     if (idx === -1) return res.status(404).json({ error: 'User not found' });
+
+    // GM scope checks
+    if (req.user.role === 'gm') {
+        if (users[idx].dealerCode !== req.user.dealerCode) {
+            return res.status(403).json({ error: 'Cannot modify users from another dealer' });
+        }
+        if (users[idx].role !== 'frontdesk') {
+            return res.status(403).json({ error: 'GM can only reset passwords for frontdesk accounts' });
+        }
+    }
 
     const { newPassword } = req.body;
     if (!newPassword || newPassword.length < 8) {
@@ -188,6 +226,7 @@ router.post('/:id/reset-password', requireRole('admin'), (req, res) => {
     users[idx].lockedUntil = null;
     writeJSON(USERS_FILE, users);
 
+    console.log('[Users] Password reset for: ' + users[idx].username + ' by ' + req.user.username);
     res.json({ message: 'Password reset for ' + users[idx].username });
 });
 
