@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - API Integration Patch v2.2
+// AmeriDex Dealer Portal - API Integration Patch v2.3
 // Date: 2026-02-14
 // ============================================================
 // REQUIRES: ameridex-patches.js (v1.0+) loaded first
@@ -8,19 +8,25 @@
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
 //
+// v2.3 Changes (2026-02-14):
+//   - FIX: api() helper no longer treats 401 from /api/auth/login
+//     as "session expired". Login failures now show the server's
+//     error message (e.g. "Invalid credentials") instead of
+//     clearing the session and redirecting to login screen.
+//   - FIX: applyTierPricing() guards every price assignment
+//     against undefined/null/NaN to prevent $undefined display.
+//   - FIX: tryResumeSession() silently falls back to login on
+//     failure without flashing "Session expired" error text.
+//
 // v2.2 Changes (2026-02-14):
 //   - FIX: Section 14 loadQuote() now resolves real savedQuotes
 //     index via indexOf() instead of using filtered array index.
-//     Matches the pattern already used by the delete handler.
 //
 // v2.1 Changes (2026-02-14):
-//   - FIX: Login now sends { dealerCode, username, password } to
-//     match backend auth.js contract (username field added to UI)
+//   - FIX: Login now sends { dealerCode, username, password }
 //   - FIX: Login/resume response unwraps { user, dealer } shape
-//     and merges role from user object onto _currentDealer
 //   - FIX: Session resume (GET /api/auth/me) unwraps nested response
 //   - FIX: Self password change uses POST /api/auth/change-password
-//     instead of admin-only route, with currentPassword field
 //   - ADD: Expose _authToken getter for admin-customers.js
 // ============================================================
 
@@ -46,7 +52,12 @@
     // ----------------------------------------------------------
     // API HELPER
     // ----------------------------------------------------------
-    function api(method, path, body) {
+    // options.skipAuthRedirect: when true, a 401 response will NOT
+    //   trigger the automatic session-clear + login redirect.
+    //   Used by handleServerLogin() so that bad-credentials 401s
+    //   are returned to the caller as a normal rejected promise.
+    // ----------------------------------------------------------
+    function api(method, path, body, options) {
         var opts = {
             method: method,
             headers: { 'Content-Type': 'application/json' }
@@ -57,20 +68,39 @@
         if (body && method !== 'GET') {
             opts.body = JSON.stringify(body);
         }
+
+        var skipAuthRedirect = (options && options.skipAuthRedirect) || false;
+
         return fetch(API_BASE + path, opts)
             .then(function (res) {
                 _serverOnline = true;
+
                 if (res.status === 401) {
-                    sessionStorage.removeItem('ameridex-token');
-                    _authToken = null;
-                    _currentUser = null;
-                    _currentDealer = null;
-                    showLoginScreen();
-                    showLoginError('Session expired. Please log in again.');
-                    return Promise.reject(new Error('Unauthorized'));
+                    if (!skipAuthRedirect) {
+                        // Genuine session expiry on an authenticated request
+                        sessionStorage.removeItem('ameridex-token');
+                        _authToken = null;
+                        _currentUser = null;
+                        _currentDealer = null;
+                        showLoginScreen();
+                        showLoginError('Session expired. Please log in again.');
+                    }
+                    // Always reject so the caller's .catch() fires
+                    return res.json().catch(function () { return {}; }).then(function (errBody) {
+                        return Promise.reject(new Error(
+                            errBody.error || (skipAuthRedirect ? 'Invalid credentials' : 'Unauthorized')
+                        ));
+                    });
                 }
+
+                if (res.status === 403) {
+                    return res.json().catch(function () { return {}; }).then(function (errBody) {
+                        return Promise.reject(new Error(errBody.error || 'Access denied'));
+                    });
+                }
+
                 if (!res.ok) {
-                    return res.json().then(function (err) {
+                    return res.json().catch(function () { return {}; }).then(function (err) {
                         return Promise.reject(new Error(err.error || 'Request failed'));
                     });
                 }
@@ -79,7 +109,7 @@
                 return res.json();
             })
             .catch(function (err) {
-                if (err.message === 'Unauthorized') throw err;
+                if (err.message === 'Unauthorized' || err.message === 'Invalid credentials' || err.message === 'Access denied') throw err;
                 if (err.message === 'Failed to fetch' || err.name === 'TypeError') {
                     _serverOnline = false;
                     console.warn('[API] Server unreachable, falling back to localStorage');
@@ -277,11 +307,13 @@
         loginBtn.textContent = 'Signing in...';
         loginBtn.disabled = true;
 
+        // v2.3: Pass skipAuthRedirect so 401 from login endpoint
+        // does NOT trigger "Session expired" + screen redirect.
         api('POST', '/api/auth/login', {
             dealerCode: code,
             username: username,
             password: password
-        })
+        }, { skipAuthRedirect: true })
             .then(function (data) {
                 _authToken = data.token;
                 sessionStorage.setItem('ameridex-token', data.token);
@@ -315,7 +347,10 @@
             .catch(function (err) {
                 loginBtn.textContent = 'Enter Portal';
                 loginBtn.disabled = false;
-                if (err.message === 'Unauthorized') return;
+
+                // v2.3: Since we used skipAuthRedirect, we get here for
+                // bad credentials (401) with err.message from the server.
+                // No "Session expired" flash, no screen redirect.
                 if (!_serverOnline) {
                     if (validateDealerCode(code)) {
                         showLoginError('Server unavailable. Logging in offline mode (limited features).');
@@ -368,21 +403,35 @@
     // ----------------------------------------------------------
     // 5. TIER PRICING: Fetch and apply
     // ----------------------------------------------------------
+    // v2.3: Guard every price assignment against undefined/null/NaN.
+    //       Only overwrite PRODUCTS[key].price if the server value
+    //       is a valid finite number. This prevents the $undefined
+    //       display bug caused by missing price fields in the
+    //       server response.
+    // ----------------------------------------------------------
+    function isValidPrice(val) {
+        if (val === undefined || val === null) return false;
+        var n = Number(val);
+        return !isNaN(n) && isFinite(n);
+    }
+
     function applyTierPricing() {
         return api('GET', '/api/products')
             .then(function (data) {
                 if (!data || !data.products) return;
 
                 Object.keys(data.products).forEach(function (key) {
-                    if (PRODUCTS[key]) {
-                        PRODUCTS[key].price = data.products[key].price;
+                    if (PRODUCTS[key] && isValidPrice(data.products[key].price)) {
+                        PRODUCTS[key].price = parseFloat(data.products[key].price);
+                    } else if (PRODUCTS[key] && !isValidPrice(data.products[key].price)) {
+                        console.warn('[Pricing] Server returned invalid price for "' + key + '": ' + data.products[key].price + '. Keeping default: $' + PRODUCTS[key].price);
                     }
                 });
 
                 Object.values(PRODUCT_CONFIG.categories).forEach(function (cat) {
                     Object.keys(cat.products).forEach(function (prodKey) {
-                        if (data.products[prodKey]) {
-                            cat.products[prodKey].price = data.products[prodKey].price;
+                        if (data.products[prodKey] && isValidPrice(data.products[prodKey].price)) {
+                            cat.products[prodKey].price = parseFloat(data.products[prodKey].price);
                         }
                     });
                 });
@@ -561,7 +610,7 @@
         }
 
         if (_authToken) {
-            api('POST', '/api/auth/logout').catch(function () {});
+            api('POST', '/api/auth/logout', null, { skipAuthRedirect: true }).catch(function () {});
         }
 
         _authToken = null;
@@ -751,9 +800,6 @@
     // ----------------------------------------------------------
     // 14. OVERRIDE: renderSavedQuotes (status badges + duplicate)
     // ----------------------------------------------------------
-    // v2.2 FIX: loadQuote() now receives the real savedQuotes index
-    //           via indexOf(), not the filtered array index.
-    // ----------------------------------------------------------
     window.renderSavedQuotes = function () {
         var list = document.getElementById('saved-quotes-list');
         var searchQuery = (document.getElementById('quote-search').value || '').toLowerCase();
@@ -832,7 +878,6 @@
             list.appendChild(item);
         });
 
-        // v2.2: Load/View resolves the real savedQuotes index via indexOf()
         list.querySelectorAll('.btn-load').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 var i = parseInt(btn.getAttribute('data-idx'), 10);
@@ -923,10 +968,15 @@
     // ----------------------------------------------------------
     // 16. AUTO-RESUME SESSION ON PAGE LOAD
     // ----------------------------------------------------------
+    // v2.3: tryResumeSession now uses skipAuthRedirect so that a
+    //       stale token does NOT flash "Session expired" before
+    //       the login screen appears. It just silently clears
+    //       the token and shows the login form.
+    // ----------------------------------------------------------
     function tryResumeSession() {
         if (!_authToken) return;
 
-        api('GET', '/api/auth/me')
+        api('GET', '/api/auth/me', null, { skipAuthRedirect: true })
             .then(function (data) {
                 // Backend returns { user: {...}, dealer: {...} }
                 _currentUser = data.user;
@@ -950,6 +1000,7 @@
                 console.log('[Session] Resumed as ' + _currentUser.username + ' (' + _currentUser.role + ')');
             })
             .catch(function () {
+                // v2.3: Silently clear stale session, no error flash
                 sessionStorage.removeItem('ameridex-token');
                 _authToken = null;
                 _currentUser = null;
@@ -984,5 +1035,5 @@
         tryResumeSession();
     }
 
-    console.log('[AmeriDex API] v2.2 loaded: Auth + API integration active.');
+    console.log('[AmeriDex API] v2.3 loaded: Auth + API integration active.');
 })();

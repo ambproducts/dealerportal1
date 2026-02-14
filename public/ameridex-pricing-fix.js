@@ -1,11 +1,14 @@
 // ============================================================
-// AmeriDex Dealer Portal - Pricing Fix v1.0
+// AmeriDex Dealer Portal - Pricing Fix v1.1
 // Date: 2026-02-14
 // ============================================================
 // FIXES:
-//   - "Price: undefined/ft" display bug in line items
+//   - "Price: $undefined/ft" display bug in line items
 //   - applyTierPricing() overwriting PRODUCTS with undefined
 //   - Subtotal calculations using unresolved prices
+//   - Double-dollar-sign bug in post-render DOM scan (v1.1)
+//   - Broadened pattern matching for $undefined, $NaN, $null
+//   - MutationObserver safety net for late async renders
 //
 // REQUIRES: ameridex-patches.js, ameridex-api.js loaded first
 //
@@ -24,36 +27,32 @@
     // ----------------------------------------------------------
     // 1. getDisplayPrice() - Single source of truth for price
     // ----------------------------------------------------------
-    // Resolves the correct per-unit price for display:
-    //   1. Approved override price (highest priority)
-    //   2. Item-level tierPrice (set by server sync)
-    //   3. PRODUCTS[type].price (set by applyTierPricing)
-    //   4. PRODUCT_CONFIG fallback
-    //   5. 0 (absolute fallback)
-    // ----------------------------------------------------------
     window.getDisplayPrice = function (item) {
         if (!item) return 0;
 
         // Custom items use their own unitPrice field
         if (item.type === 'custom') {
-            return parseFloat(item.unitPrice) || 0;
+            return parseFloat(item.unitPrice) || parseFloat(item.customUnitPrice) || 0;
         }
 
         // Check for approved override
         if (item.priceOverride && item.priceOverride.status === 'approved') {
-            return parseFloat(item.priceOverride.requestedPrice) || 0;
+            var ovr = parseFloat(item.priceOverride.requestedPrice);
+            if (!isNaN(ovr) && isFinite(ovr)) return ovr;
         }
 
         // Try item-level tierPrice (from server sync)
-        if (item.tierPrice !== undefined && item.tierPrice !== null && !isNaN(item.tierPrice)) {
-            return parseFloat(item.tierPrice);
+        if (item.tierPrice !== undefined && item.tierPrice !== null) {
+            var tp = parseFloat(item.tierPrice);
+            if (!isNaN(tp) && isFinite(tp)) return tp;
         }
 
         // Try PRODUCTS global (updated by applyTierPricing)
         if (typeof PRODUCTS !== 'undefined' && PRODUCTS[item.type]) {
             var prodPrice = PRODUCTS[item.type].price;
-            if (prodPrice !== undefined && prodPrice !== null && !isNaN(prodPrice)) {
-                return parseFloat(prodPrice);
+            if (prodPrice !== undefined && prodPrice !== null) {
+                var pp = parseFloat(prodPrice);
+                if (!isNaN(pp) && isFinite(pp)) return pp;
             }
         }
 
@@ -63,8 +62,9 @@
             for (var c = 0; c < cats.length; c++) {
                 if (cats[c].products && cats[c].products[item.type]) {
                     var cfgPrice = cats[c].products[item.type].price;
-                    if (cfgPrice !== undefined && cfgPrice !== null && !isNaN(cfgPrice)) {
-                        return parseFloat(cfgPrice);
+                    if (cfgPrice !== undefined && cfgPrice !== null) {
+                        var cp = parseFloat(cfgPrice);
+                        if (!isNaN(cp) && isFinite(cp)) return cp;
                     }
                 }
             }
@@ -77,20 +77,14 @@
     // ----------------------------------------------------------
     // 2. Guard applyTierPricing() against undefined overwrites
     // ----------------------------------------------------------
-    // The original applyTierPricing in ameridex-api.js does:
-    //   PRODUCTS[key].price = data.products[key].price;
-    // If the server response is missing a price field, this
-    // overwrites the hardcoded default with undefined.
-    //
-    // We store a backup of original prices and restore on bad data.
-    // ----------------------------------------------------------
     var _originalPrices = {};
 
     function backupPrices() {
         if (typeof PRODUCTS === 'undefined') return;
         Object.keys(PRODUCTS).forEach(function (key) {
-            if (PRODUCTS[key].price !== undefined && PRODUCTS[key].price !== null) {
-                _originalPrices[key] = PRODUCTS[key].price;
+            var p = PRODUCTS[key].price;
+            if (p !== undefined && p !== null && !isNaN(Number(p))) {
+                _originalPrices[key] = parseFloat(p);
             }
         });
     }
@@ -98,84 +92,133 @@
     // Take backup immediately
     backupPrices();
 
-    // Patch: After any render cycle, check for undefined prices and restore
     function healUndefinedPrices() {
         if (typeof PRODUCTS === 'undefined') return;
+        var healed = false;
         Object.keys(PRODUCTS).forEach(function (key) {
-            if (PRODUCTS[key].price === undefined || PRODUCTS[key].price === null || isNaN(PRODUCTS[key].price)) {
+            var p = PRODUCTS[key].price;
+            if (p === undefined || p === null || isNaN(Number(p))) {
                 if (_originalPrices[key] !== undefined) {
                     PRODUCTS[key].price = _originalPrices[key];
+                    healed = true;
                     console.warn('[PricingFix] Healed undefined price for "' + key + '" back to $' + _originalPrices[key]);
                 }
             }
         });
+        return healed;
     }
 
 
     // ----------------------------------------------------------
-    // 3. Patch renderDesktop() to use getDisplayPrice()
+    // 3. DOM scanner: fix broken price/subtotal text in-place
+    // ----------------------------------------------------------
+    // Matches: "$undefined", "$NaN", "$null", "Price: $undefined",
+    //          "Price: undefined", etc.
+    // ----------------------------------------------------------
+    var BAD_PRICE_REGEX = /\$(undefined|NaN|null)|Price:\s*\$?(undefined|NaN|null)/i;
+
+    function fixPriceTextInRow(row, item, rowIndex) {
+        if (!row || !item) return;
+
+        var prod = (typeof PRODUCTS !== 'undefined' && PRODUCTS[item.type]) ? PRODUCTS[item.type] : null;
+        var price = window.getDisplayPrice(item);
+        var unit = '';
+        if (prod) {
+            unit = prod.isFt ? '/ft' : ' each';
+        } else {
+            unit = '/ft';
+        }
+
+        // Format the price without double dollar sign
+        var priceNum = parseFloat(price) || 0;
+        var priceText = '$' + priceNum.toFixed(2) + unit;
+
+        // Scan first cell for price display text
+        var firstCell = row.cells ? row.cells[0] : null;
+        if (firstCell) {
+            var allEls = firstCell.querySelectorAll('div, small, span, p');
+            allEls.forEach(function (el) {
+                var text = el.textContent || '';
+                if (BAD_PRICE_REGEX.test(text)) {
+                    el.textContent = 'Price: ' + priceText;
+                    el.style.color = '#2563eb';
+                }
+            });
+        }
+
+        // Fix subtotal cell
+        var subCell = document.getElementById('sub-' + rowIndex);
+        if (subCell) {
+            var subText = subCell.textContent || '';
+            if (BAD_PRICE_REGEX.test(subText) || subText === '$' || subText.trim() === '') {
+                var sub = (typeof getItemSubtotal === 'function') ? getItemSubtotal(item) : 0;
+                var subNum = parseFloat(sub) || 0;
+                subCell.textContent = '$' + subNum.toFixed(2);
+            }
+        }
+    }
+
+    function scanAndFixAllPrices() {
+        if (typeof currentQuote === 'undefined' || !currentQuote.lineItems) return;
+
+        // Desktop table
+        var tbody = document.querySelector('#line-items tbody');
+        if (tbody) {
+            var rows = tbody.querySelectorAll('tr');
+            currentQuote.lineItems.forEach(function (item, i) {
+                if (rows[i]) fixPriceTextInRow(rows[i], item, i);
+            });
+        }
+
+        // Mobile cards
+        var mobileContainer = document.getElementById('mobile-items-container');
+        if (mobileContainer) {
+            var allEls = mobileContainer.querySelectorAll('div, span, small, p');
+            allEls.forEach(function (el) {
+                var text = el.textContent || '';
+                if (BAD_PRICE_REGEX.test(text)) {
+                    // Try to figure out which item this belongs to by context
+                    // For mobile, just scan all items and fix any matching text
+                    el.style.color = '#2563eb';
+                    // Replace the bad text generically
+                    el.textContent = text.replace(/\$undefined|\.?undefined/gi, '$0.00').replace(/\$NaN|\.?NaN/gi, '$0.00').replace(/\$null|\.?null/gi, '$0.00');
+                }
+            });
+        }
+
+        // Grand total
+        var grandEl = document.getElementById('grand-total');
+        if (grandEl) {
+            var gt = grandEl.textContent || '';
+            if (BAD_PRICE_REGEX.test(gt) || gt === '$' || gt.trim() === '') {
+                var total = 0;
+                currentQuote.lineItems.forEach(function (li) {
+                    total += (typeof getItemSubtotal === 'function') ? getItemSubtotal(li) : 0;
+                });
+                grandEl.textContent = '$' + (parseFloat(total) || 0).toFixed(2);
+            }
+        }
+    }
+
+
+    // ----------------------------------------------------------
+    // 4. Patch renderDesktop() to heal + scan
     // ----------------------------------------------------------
     var _prevRenderDesktop = window.renderDesktop;
     window.renderDesktop = function () {
-        // Heal any undefined prices before rendering
         healUndefinedPrices();
 
-        // Call the existing renderDesktop (which may be the
-        // patches.js version that handles empty state)
         if (typeof _prevRenderDesktop === 'function') {
             _prevRenderDesktop();
         }
 
-        // Post-render: fix any "Price: undefined" or "Price: NaN" text
-        if (typeof currentQuote === 'undefined' || !currentQuote.lineItems) return;
-
-        currentQuote.lineItems.forEach(function (item, i) {
-            // Find the price display element for this row
-            // The main file creates elements like: priceDiv with text "Price: X.XX/ft"
-            var tbody = document.querySelector('#line-items tbody');
-            if (!tbody) return;
-            var rows = tbody.querySelectorAll('tr');
-            if (!rows[i]) return;
-
-            var row = rows[i];
-            var priceDivs = row.querySelectorAll('.product-description, div[style*="color"], small');
-            var prod = (typeof PRODUCTS !== 'undefined' && PRODUCTS[item.type]) ? PRODUCTS[item.type] : null;
-
-            // Scan all child elements in the first cell for price text
-            var firstCell = row.cells ? row.cells[0] : null;
-            if (firstCell) {
-                var allDivs = firstCell.querySelectorAll('div, small, span');
-                allDivs.forEach(function (el) {
-                    var text = el.textContent || '';
-                    if (text.indexOf('Price:') !== -1 && (text.indexOf('undefined') !== -1 || text.indexOf('NaN') !== -1)) {
-                        var price = window.getDisplayPrice(item);
-                        var unit = '';
-                        if (prod) {
-                            unit = prod.isFt ? '/ft' : ' each';
-                        } else {
-                            unit = '/ft';
-                        }
-                        el.textContent = 'Price: $' + (typeof formatCurrency === 'function' ? formatCurrency(price) : price.toFixed(2)) + unit;
-                        el.style.color = '#2563eb';
-                    }
-                });
-            }
-
-            // Also fix subtotal cell if it shows NaN or undefined
-            var subCell = document.getElementById('sub-' + i);
-            if (subCell) {
-                var subText = subCell.textContent || '';
-                if (subText.indexOf('NaN') !== -1 || subText.indexOf('undefined') !== -1 || subText === '$') {
-                    var sub = (typeof getItemSubtotal === 'function') ? getItemSubtotal(item) : 0;
-                    subCell.textContent = '$' + (typeof formatCurrency === 'function' ? formatCurrency(sub) : sub.toFixed(2));
-                }
-            }
-        });
+        // Post-render scan
+        scanAndFixAllPrices();
     };
 
 
     // ----------------------------------------------------------
-    // 4. Patch renderMobile() similarly
+    // 5. Patch renderMobile() similarly
     // ----------------------------------------------------------
     var _prevRenderMobile = window.renderMobile;
     window.renderMobile = function () {
@@ -185,50 +228,25 @@
             _prevRenderMobile();
         }
 
-        // Post-render: fix mobile price displays
-        var container = document.getElementById('mobile-items-container');
-        if (!container) return;
-        if (typeof currentQuote === 'undefined' || !currentQuote.lineItems) return;
-
-        var cards = container.querySelectorAll('.mobile-item-card, div[class*="mobile"]');
-        currentQuote.lineItems.forEach(function (item, i) {
-            if (!cards[i]) return;
-            var allEls = cards[i].querySelectorAll('div, span, small');
-            allEls.forEach(function (el) {
-                var text = el.textContent || '';
-                if (text.indexOf('Price:') !== -1 && (text.indexOf('undefined') !== -1 || text.indexOf('NaN') !== -1)) {
-                    var price = window.getDisplayPrice(item);
-                    var prod = (typeof PRODUCTS !== 'undefined' && PRODUCTS[item.type]) ? PRODUCTS[item.type] : null;
-                    var unit = (prod && prod.isFt) ? '/ft' : ' each';
-                    el.textContent = 'Price: $' + (typeof formatCurrency === 'function' ? formatCurrency(price) : price.toFixed(2)) + unit;
-                    el.style.color = '#2563eb';
-                }
-            });
-        });
+        scanAndFixAllPrices();
     };
 
 
     // ----------------------------------------------------------
-    // 5. Patch getItemPrice() to use fallback chain
+    // 6. Patch getItemPrice() to use fallback chain
     // ----------------------------------------------------------
-    var _origGetItemPrice = window.getItemPrice;
     window.getItemPrice = function (item) {
         if (!item) return 0;
-
-        // Custom items
         if (item.type === 'custom') {
-            return parseFloat(item.unitPrice) || 0;
+            return parseFloat(item.unitPrice) || parseFloat(item.customUnitPrice) || 0;
         }
-
-        // Use getDisplayPrice for the full fallback chain
         return window.getDisplayPrice(item);
     };
 
 
     // ----------------------------------------------------------
-    // 6. Patch getItemSubtotal() to use fixed getItemPrice()
+    // 7. Patch getItemSubtotal() to use fixed getItemPrice()
     // ----------------------------------------------------------
-    var _origGetItemSubtotal = window.getItemSubtotal;
     window.getItemSubtotal = function (item) {
         if (!item) return 0;
 
@@ -254,24 +272,18 @@
         return price * qty;
     };
 
-    // Keep getItemSubtotalFromData in sync
     window.getItemSubtotalFromData = function (li) {
         return window.getItemSubtotal(li);
     };
 
 
     // ----------------------------------------------------------
-    // 7. Force re-render after tier pricing loads
-    // ----------------------------------------------------------
-    // Listen for the tier pricing to finish loading, then backup
-    // the new prices and force a re-render.
+    // 8. Force re-render after tier pricing loads
     // ----------------------------------------------------------
     var _checkInterval = setInterval(function () {
         if (typeof window._currentTier !== 'undefined' && window._currentTier) {
             clearInterval(_checkInterval);
-            // Re-backup with server-loaded prices
             backupPrices();
-            // Force re-render if items exist
             if (typeof currentQuote !== 'undefined' && currentQuote.lineItems && currentQuote.lineItems.length > 0) {
                 if (typeof render === 'function') {
                     render();
@@ -284,9 +296,45 @@
         }
     }, 500);
 
-    // Stop checking after 30 seconds (server might be offline)
     setTimeout(function () { clearInterval(_checkInterval); }, 30000);
 
 
-    console.log('[AmeriDex PricingFix] v1.0 loaded: undefined price protection active.');
+    // ----------------------------------------------------------
+    // 9. MutationObserver safety net
+    // ----------------------------------------------------------
+    // Watches the line-items table body for changes and runs
+    // the price scanner after any DOM mutation. This catches
+    // cases where renderDesktop is called from code paths that
+    // bypass our patched version (e.g. inline event handlers).
+    // ----------------------------------------------------------
+    var _scanDebounce = null;
+    function debouncedScan() {
+        if (_scanDebounce) clearTimeout(_scanDebounce);
+        _scanDebounce = setTimeout(function () {
+            scanAndFixAllPrices();
+        }, 100);
+    }
+
+    // Start observing once the table body exists
+    function startObserver() {
+        var tbody = document.querySelector('#line-items tbody');
+        if (!tbody) {
+            // Retry after DOM is ready
+            setTimeout(startObserver, 500);
+            return;
+        }
+        var observer = new MutationObserver(debouncedScan);
+        observer.observe(tbody, { childList: true, subtree: true, characterData: true });
+
+        // Also observe mobile container
+        var mobile = document.getElementById('mobile-items-container');
+        if (mobile) {
+            observer.observe(mobile, { childList: true, subtree: true, characterData: true });
+        }
+    }
+
+    startObserver();
+
+
+    console.log('[AmeriDex PricingFix] v1.1 loaded: undefined price protection active.');
 })();
