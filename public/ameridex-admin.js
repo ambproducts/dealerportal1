@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - Admin Panel v1.2
+// AmeriDex Dealer Portal - Admin Panel v1.3
 // Date: 2026-02-14
 // ============================================================
 // REQUIRES: ameridex-api.js (v2.1+) loaded first
@@ -8,6 +8,12 @@
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
 //   <script src="ameridex-admin.js"></script>
+//
+// v1.3 Changes (2026-02-14):
+//   - FIX: Replace 18 placeholder products (index tabs, binders)
+//     with real AmeriDex decking product catalog (7 products)
+//   - FIX: Pricing tier preview now shows correct product names/prices
+//   - Custom/Manual Item excluded from pricing preview (always $0)
 //
 // v1.2 Changes (2026-02-14):
 //   - FIX: Add Dealer password field changed from type='text'
@@ -121,6 +127,7 @@
         '.admin-tier-product-name { color:#6b7280; }' +
         '.admin-tier-product-price { font-weight:600; color:#111827; }' +
         '.admin-tier-product-base { font-size:0.78rem; color:#9ca3af; text-decoration:line-through; margin-right:0.5rem; }' +
+        '.admin-tier-product-unit { font-size:0.75rem; color:#9ca3af; margin-left:0.25rem; }' +
         '.admin-loading { text-align:center; padding:2rem; color:#6b7280; }' +
         '.admin-error { background:#fee2e2; color:#dc2626; padding:0.75rem 1rem; border-radius:8px; font-size:0.88rem; margin-bottom:1rem; }' +
         '.admin-success { background:#dcfce7; color:#16a34a; padding:0.75rem 1rem; border-radius:8px; font-size:0.88rem; margin-bottom:1rem; }' +
@@ -817,29 +824,20 @@
 
 
     // ----------------------------------------------------------
-    // PRICING TAB (Fixed: correct endpoint + per-tier save)
+    // PRICING TAB (v1.3: Real AmeriDex products)
     // ----------------------------------------------------------
 
-    // Base product catalog (hardcoded to match backend products.js)
+    // Real AmeriDex product catalog for pricing preview
+    // Matches PRODUCT_CONFIG in dealer-portal.html and routes/products.js
+    // Custom/Manual Item excluded (always $0.00, dealer-set pricing)
     var BASE_PRODUCTS = [
-        { id: 'idx-standard', name: 'Standard Index Tab Set', basePrice: 24.99 },
-        { id: 'idx-legal', name: 'Legal Size Index Tabs', basePrice: 29.99 },
-        { id: 'idx-custom', name: 'Custom Printed Tabs', basePrice: 49.99 },
-        { id: 'idx-exhibit', name: 'Exhibit Index Set (A-Z)', basePrice: 34.99 },
-        { id: 'idx-num25', name: 'Numbered Tabs 1-25', basePrice: 19.99 },
-        { id: 'idx-num50', name: 'Numbered Tabs 1-50', basePrice: 34.99 },
-        { id: 'idx-num100', name: 'Numbered Tabs 1-100', basePrice: 54.99 },
-        { id: 'idx-blank', name: 'Blank Tab Set', basePrice: 14.99 },
-        { id: 'idx-month', name: 'Monthly Index Tabs (Jan-Dec)', basePrice: 22.99 },
-        { id: 'bnd-half', name: 'Half-Inch Binder', basePrice: 8.99 },
-        { id: 'bnd-one', name: '1-Inch Binder', basePrice: 12.99 },
-        { id: 'bnd-onehalf', name: '1.5-Inch Binder', basePrice: 16.99 },
-        { id: 'bnd-two', name: '2-Inch Binder', basePrice: 19.99 },
-        { id: 'bnd-three', name: '3-Inch Binder', basePrice: 24.99 },
-        { id: 'acc-sheet', name: 'Sheet Protectors (100pk)', basePrice: 18.99 },
-        { id: 'acc-pocket', name: 'Expanding Pockets (25pk)', basePrice: 22.99 },
-        { id: 'acc-spine', name: 'Spine Labels (50pk)', basePrice: 9.99 },
-        { id: 'acc-divider', name: 'Divider Sheets (50pk)', basePrice: 15.99 }
+        { id: 'system',   name: 'AmeriDex System Boards (Grooved + Dexerdry)', basePrice: 8.00,   unit: '/ft'   },
+        { id: 'grooved',  name: 'Grooved Deck Boards (no Dexerdry)',           basePrice: 6.00,   unit: '/ft'   },
+        { id: 'solid',    name: 'Solid Edge Deck Boards',                      basePrice: 6.00,   unit: '/ft'   },
+        { id: 'dexerdry', name: 'Dexerdry Seals (standalone)',                  basePrice: 2.00,   unit: '/ft'   },
+        { id: 'screws',   name: 'Epoxy-Coated Screws',                         basePrice: 37.00,  unit: '/box'  },
+        { id: 'plugs',    name: 'Color-Matching Plugs',                        basePrice: 33.79,  unit: '/box'  },
+        { id: 'blueclaw', name: 'Dexerdry BlueClaw',                           basePrice: 150.00, unit: '/each' }
     ];
 
     function loadPricingTiers() {
@@ -892,7 +890,7 @@
                 var computedPrice = Math.round(prod.basePrice * mult * 100) / 100;
                 var showStrike = mult !== 1;
                 html += '<div class="admin-tier-product">' +
-                    '<span class="admin-tier-product-name">' + esc(prod.name) + '</span>' +
+                    '<span class="admin-tier-product-name">' + esc(prod.name) + '<span class="admin-tier-product-unit">' + esc(prod.unit) + '</span></span>' +
                     '<span>' +
                         (showStrike ? '<span class="admin-tier-product-base">$' + prod.basePrice.toFixed(2) + '</span>' : '') +
                         '<span class="admin-tier-product-price tier-computed-price" data-tier="' + tIdx + '" data-base="' + prod.basePrice + '">$' + computedPrice.toFixed(2) + '</span>' +
@@ -985,5 +983,5 @@
     });
 
 
-    console.log('[AmeriDex Admin] v1.2 loaded.');
+    console.log('[AmeriDex Admin] v1.3 loaded.');
 })();
