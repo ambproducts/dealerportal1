@@ -19,7 +19,7 @@ router.get('/', (req, res) => {
 
 // POST /api/admin/dealers
 router.post('/', (req, res) => {
-    const { dealerCode, password, dealerName, contactPerson, email, phone, pricingTier, role } = req.body;
+    const { dealerCode, password, dealerName, contactPerson, email, phone, pricingTier, role, username } = req.body;
     if (!dealerCode || !password) {
         return res.status(400).json({ error: 'Dealer code and password required' });
     }
@@ -33,6 +33,17 @@ router.post('/', (req, res) => {
     const dealers = readJSON(DEALERS_FILE);
     if (dealers.find(d => d.dealerCode.toUpperCase() === dealerCode.toUpperCase())) {
         return res.status(409).json({ error: 'Dealer code already exists' });
+    }
+
+    // Determine GM username: use provided username or fall back to dealer code
+    const gmUsername = (username && username.trim().length > 0)
+        ? username.trim().toLowerCase()
+        : dealerCode.toLowerCase();
+
+    // Check for duplicate username
+    const users = readJSON(USERS_FILE);
+    if (users.find(u => u.username.toLowerCase() === gmUsername)) {
+        return res.status(409).json({ error: 'Username "' + gmUsername + '" already exists. Choose a different username.' });
     }
 
     const newDealer = {
@@ -52,10 +63,9 @@ router.post('/', (req, res) => {
     dealers.push(newDealer);
     writeJSON(DEALERS_FILE, dealers);
 
-    const users = readJSON(USERS_FILE);
     const gmUser = {
         id: generateId(),
-        username: dealerCode.toLowerCase(),
+        username: gmUsername,
         passwordHash: hashPassword(password),
         dealerCode: dealerCode.toUpperCase(),
         role: 'gm',
