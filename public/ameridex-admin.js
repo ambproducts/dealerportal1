@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - Admin Panel v1.3
+// AmeriDex Dealer Portal - Admin Panel v1.4
 // Date: 2026-02-14
 // ============================================================
 // REQUIRES: ameridex-api.js (v2.1+) loaded first
@@ -9,22 +9,24 @@
 //   <script src="ameridex-api.js"></script>
 //   <script src="ameridex-admin.js"></script>
 //
+// v1.4 Changes (2026-02-14):
+//   - ADD: Products tab in admin panel (full CRUD)
+//   - ADD: Per-product tier override support (e.g. BlueClaw stays flat)
+//   - ADD: Admin can add, edit base price, rename, change unit/category,
+//     toggle active/inactive, and delete products
+//   - FIX: Pricing tier preview now reads live product catalog from API
+//   - FIX: Custom/Manual Item excluded from pricing preview
+//
 // v1.3 Changes (2026-02-14):
-//   - FIX: Replace 18 placeholder products (index tabs, binders)
-//     with real AmeriDex decking product catalog (7 products)
-//   - FIX: Pricing tier preview now shows correct product names/prices
-//   - Custom/Manual Item excluded from pricing preview (always $0)
+//   - FIX: Replace placeholder products with real AmeriDex catalog
 //
 // v1.2 Changes (2026-02-14):
-//   - FIX: Add Dealer password field changed from type='text'
-//     to type='password' so credentials are masked on screen.
+//   - FIX: Add Dealer password field type='password'
 //
 // v1.1 Changes (2026-02-14):
 //   - FIX: Pricing tier GET/PUT uses /api/admin/pricing-tiers
-//   - FIX: Save pricing iterates per-tier PUT instead of bulk
 //   - ADD: Pricing tab loads product catalog for computed price preview
 //   - ADD: Username field in Add Dealer form
-//   - ADD: Username column in dealers table
 // ============================================================
 
 (function () {
@@ -80,6 +82,12 @@
         '.badge-standard { background:#f3f4f6; color:#374151; }' +
         '.badge-preferred { background:#dcfce7; color:#16a34a; }' +
         '.badge-vip { background:#fef3c7; color:#92400e; }' +
+        '.badge-decking { background:#dbeafe; color:#1d4ed8; }' +
+        '.badge-sealing { background:#e0e7ff; color:#4338ca; }' +
+        '.badge-fasteners { background:#fef3c7; color:#92400e; }' +
+        '.badge-hardware { background:#f3f4f6; color:#374151; }' +
+        '.badge-custom { background:#f5f3ff; color:#7c3aed; }' +
+        '.badge-other { background:#f3f4f6; color:#6b7280; }' +
         '.admin-btn { padding:0.4rem 0.85rem; border-radius:6px; border:none; font-size:0.8rem; ' +
             'font-weight:600; cursor:pointer; transition:all 0.15s; }' +
         '.admin-btn-primary { background:#2563eb; color:#fff; }' +
@@ -128,6 +136,7 @@
         '.admin-tier-product-price { font-weight:600; color:#111827; }' +
         '.admin-tier-product-base { font-size:0.78rem; color:#9ca3af; text-decoration:line-through; margin-right:0.5rem; }' +
         '.admin-tier-product-unit { font-size:0.75rem; color:#9ca3af; margin-left:0.25rem; }' +
+        '.admin-tier-product-locked { font-size:0.7rem; color:#dc2626; margin-left:0.35rem; font-weight:600; }' +
         '.admin-loading { text-align:center; padding:2rem; color:#6b7280; }' +
         '.admin-error { background:#fee2e2; color:#dc2626; padding:0.75rem 1rem; border-radius:8px; font-size:0.88rem; margin-bottom:1rem; }' +
         '.admin-success { background:#dcfce7; color:#16a34a; padding:0.75rem 1rem; border-radius:8px; font-size:0.88rem; margin-bottom:1rem; }' +
@@ -156,8 +165,9 @@
                 '<button class="admin-close" id="admin-close-btn" aria-label="Close">&times;</button>' +
             '</div>' +
             '<div class="admin-tabs">' +
-                '<button class="admin-tab active" data-tab="dealers">Manage Dealers</button>' +
-                '<button class="admin-tab" data-tab="quotes">All Quotes</button>' +
+                '<button class="admin-tab active" data-tab="dealers">Dealers</button>' +
+                '<button class="admin-tab" data-tab="quotes">Quotes</button>' +
+                '<button class="admin-tab" data-tab="products">Products</button>' +
                 '<button class="admin-tab" data-tab="pricing">Pricing Tiers</button>' +
             '</div>' +
             '<div class="admin-body">' +
@@ -166,8 +176,6 @@
                 '<div class="admin-tab-content active" id="admin-tab-dealers">' +
                     '<div id="admin-dealers-stats" class="admin-stat-row"></div>' +
                     '<div id="admin-dealer-alert"></div>' +
-
-                    // Add Dealer Form (with Username field)
                     '<details id="admin-add-dealer-details">' +
                         '<summary style="cursor:pointer;font-weight:600;color:#2563eb;margin-bottom:1rem;font-size:0.95rem;">+ Add New Dealer</summary>' +
                         '<div class="admin-form" id="admin-add-dealer-form">' +
@@ -179,7 +187,7 @@
                                 '<div class="admin-form-field">' +
                                     '<label>GM Username</label>' +
                                     '<input type="text" id="admin-new-username" placeholder="e.g. john.smith" style="text-transform:lowercase;">' +
-                                    '<div style="font-size:0.75rem;color:#6b7280;margin-top:0.2rem;">Login username for General Manager. Leave blank to auto-generate from dealer code.</div>' +
+                                    '<div style="font-size:0.75rem;color:#6b7280;margin-top:0.2rem;">Login username for General Manager. Leave blank to auto-generate.</div>' +
                                 '</div>' +
                             '</div>' +
                             '<div class="admin-form-row">' +
@@ -232,10 +240,7 @@
                             '</div>' +
                         '</div>' +
                     '</details>' +
-
                     '<hr class="admin-divider">' +
-
-                    // Dealers Table
                     '<div class="admin-toolbar">' +
                         '<h3>Active Dealers</h3>' +
                         '<input type="text" class="admin-search" id="admin-dealer-search" placeholder="Search dealers...">' +
@@ -270,6 +275,71 @@
                     '<div id="admin-quote-detail-panel" style="display:none;"></div>' +
                 '</div>' +
 
+                // ---- PRODUCTS TAB ----
+                '<div class="admin-tab-content" id="admin-tab-products">' +
+                    '<div id="admin-products-stats" class="admin-stat-row"></div>' +
+                    '<div id="admin-product-alert"></div>' +
+                    '<details id="admin-add-product-details">' +
+                        '<summary style="cursor:pointer;font-weight:600;color:#2563eb;margin-bottom:1rem;font-size:0.95rem;">+ Add New Product</summary>' +
+                        '<div class="admin-form" id="admin-add-product-form">' +
+                            '<div class="admin-form-row">' +
+                                '<div class="admin-form-field">' +
+                                    '<label>Product Name</label>' +
+                                    '<input type="text" id="admin-new-prod-name" placeholder="e.g. Fascia Board">' +
+                                '</div>' +
+                                '<div class="admin-form-field">' +
+                                    '<label>Product ID (optional, auto-generated)</label>' +
+                                    '<input type="text" id="admin-new-prod-id" placeholder="e.g. fascia" style="text-transform:lowercase;">' +
+                                '</div>' +
+                            '</div>' +
+                            '<div class="admin-form-row">' +
+                                '<div class="admin-form-field">' +
+                                    '<label>Base Price ($)</label>' +
+                                    '<input type="number" step="0.01" min="0" id="admin-new-prod-price" placeholder="0.00">' +
+                                '</div>' +
+                                '<div class="admin-form-field">' +
+                                    '<label>Unit</label>' +
+                                    '<select id="admin-new-prod-unit">' +
+                                        '<option value="ft">per foot (ft)</option>' +
+                                        '<option value="box">per box</option>' +
+                                        '<option value="each">each</option>' +
+                                        '<option value="pack">per pack</option>' +
+                                        '<option value="sqft">per sq ft</option>' +
+                                    '</select>' +
+                                '</div>' +
+                            '</div>' +
+                            '<div class="admin-form-row">' +
+                                '<div class="admin-form-field">' +
+                                    '<label>Category</label>' +
+                                    '<select id="admin-new-prod-cat">' +
+                                        '<option value="decking">Decking</option>' +
+                                        '<option value="sealing">Sealing & Protection</option>' +
+                                        '<option value="fasteners">Fasteners & Hardware</option>' +
+                                        '<option value="hardware">Hardware</option>' +
+                                        '<option value="other">Other</option>' +
+                                    '</select>' +
+                                '</div>' +
+                                '<div class="admin-form-field">' +
+                                    '<label>Exempt from Tier Discounts?</label>' +
+                                    '<select id="admin-new-prod-flat">' +
+                                        '<option value="no">No (apply tier multiplier normally)</option>' +
+                                        '<option value="yes">Yes (same price for all tiers)</option>' +
+                                    '</select>' +
+                                '</div>' +
+                            '</div>' +
+                            '<div class="admin-form-actions">' +
+                                '<button type="button" class="admin-btn admin-btn-primary" id="admin-create-product-btn">Add Product</button>' +
+                            '</div>' +
+                        '</div>' +
+                    '</details>' +
+                    '<hr class="admin-divider">' +
+                    '<div class="admin-toolbar">' +
+                        '<h3>Product Catalog</h3>' +
+                        '<input type="text" class="admin-search" id="admin-product-search" placeholder="Search products...">' +
+                    '</div>' +
+                    '<div id="admin-products-list"><div class="admin-loading">Loading products...</div></div>' +
+                '</div>' +
+
                 // ---- PRICING TAB ----
                 '<div class="admin-tab-content" id="admin-tab-pricing">' +
                     '<div id="admin-pricing-alert"></div>' +
@@ -277,7 +347,7 @@
                         '<h3>Pricing Tiers</h3>' +
                         '<button type="button" class="admin-btn admin-btn-primary" id="admin-save-pricing-btn">Save All Changes</button>' +
                     '</div>' +
-                    '<p style="font-size:0.85rem;color:#6b7280;margin-top:-0.5rem;margin-bottom:1rem;">Edit the multiplier for each tier. Product prices shown are base price &times; multiplier (preview only, computed automatically).</p>' +
+                    '<p style="font-size:0.85rem;color:#6b7280;margin-top:-0.5rem;margin-bottom:1rem;">Edit the multiplier for each tier. Product prices are base &times; multiplier. Products marked as tier-exempt stay at base price. Custom/Manual Items are excluded (always $0.00).</p>' +
                     '<div id="admin-pricing-list"><div class="admin-loading">Loading pricing...</div></div>' +
                 '</div>' +
 
@@ -300,6 +370,7 @@
             var tabName = tab.getAttribute('data-tab');
             if (tabName === 'dealers') loadDealers();
             if (tabName === 'quotes') loadAllQuotes();
+            if (tabName === 'products') loadProducts();
             if (tabName === 'pricing') loadPricingTiers();
         });
     });
@@ -341,8 +412,8 @@
     var _api = window.ameridexAPI;
     var _allDealers = [];
     var _allQuotes = [];
+    var _allProducts = [];
     var _pricingTiers = [];
-    var _baseProducts = [];
 
     function showAlert(containerId, msg, type) {
         var el = document.getElementById(containerId);
@@ -444,7 +515,6 @@
         renderDealersTable();
     });
 
-    // Create Dealer (with username field)
     document.getElementById('admin-create-dealer-btn').addEventListener('click', function () {
         var code = document.getElementById('admin-new-code').value.trim().toUpperCase();
         var username = document.getElementById('admin-new-username').value.trim().toLowerCase();
@@ -456,41 +526,17 @@
         var role = document.getElementById('admin-new-role').value;
         var tier = document.getElementById('admin-new-tier').value;
 
-        if (!code || code.length !== 6) {
-            showAlert('admin-dealer-alert', 'Dealer code must be exactly 6 characters', 'error');
-            return;
-        }
-        if (!pw || pw.length < 8) {
-            showAlert('admin-dealer-alert', 'Password must be at least 8 characters', 'error');
-            return;
-        }
+        if (!code || code.length !== 6) { showAlert('admin-dealer-alert', 'Dealer code must be exactly 6 characters', 'error'); return; }
+        if (!pw || pw.length < 8) { showAlert('admin-dealer-alert', 'Password must be at least 8 characters', 'error'); return; }
 
-        var payload = {
-            dealerCode: code,
-            password: pw,
-            dealerName: name,
-            contactPerson: contact,
-            email: email,
-            phone: phone,
-            role: role,
-            pricingTier: tier
-        };
-
-        // Include username if provided (backend will use it for GM user)
-        if (username) {
-            payload.username = username;
-        }
+        var payload = { dealerCode: code, password: pw, dealerName: name, contactPerson: contact, email: email, phone: phone, role: role, pricingTier: tier };
+        if (username) payload.username = username;
 
         _api('POST', '/api/admin/dealers', payload)
             .then(function (result) {
-                // Response may include { dealer, gmUser } or just the dealer
                 var gmInfo = '';
-                if (result.gmUser) {
-                    gmInfo = '<br>GM Login: <strong>' + esc(result.gmUser.username) + '</strong> (role: ' + esc(result.gmUser.role) + ')';
-                }
+                if (result.gmUser) gmInfo = '<br>GM Login: <strong>' + esc(result.gmUser.username) + '</strong>';
                 showAlert('admin-dealer-alert', 'Dealer ' + code + ' created!' + gmInfo, 'success');
-
-                // Clear form
                 document.getElementById('admin-new-code').value = '';
                 document.getElementById('admin-new-username').value = '';
                 document.getElementById('admin-new-pw').value = '';
@@ -503,15 +549,12 @@
                 document.getElementById('admin-add-dealer-details').removeAttribute('open');
                 loadDealers();
             })
-            .catch(function (err) {
-                showAlert('admin-dealer-alert', 'Failed: ' + esc(err.message), 'error');
-            });
+            .catch(function (err) { showAlert('admin-dealer-alert', 'Failed: ' + esc(err.message), 'error'); });
     });
 
     function editDealer(id) {
         var dealer = _allDealers.find(function (d) { return d.id === id; });
         if (!dealer) return;
-
         var newName = prompt('Dealer Name:', dealer.dealerName || '');
         if (newName === null) return;
         var newTier = prompt('Pricing Tier (standard, preferred, vip):', dealer.pricingTier || 'standard');
@@ -519,53 +562,32 @@
         var newRole = prompt('Role (dealer, rep, admin):', dealer.role || 'dealer');
         if (newRole === null) return;
 
-        _api('PUT', '/api/admin/dealers/' + id, {
-            dealerName: newName,
-            pricingTier: newTier,
-            role: newRole
-        }).then(function () {
-            showAlert('admin-dealer-alert', 'Dealer updated!', 'success');
-            loadDealers();
-        }).catch(function (err) {
-            showAlert('admin-dealer-alert', 'Update failed: ' + esc(err.message), 'error');
-        });
+        _api('PUT', '/api/admin/dealers/' + id, { dealerName: newName, pricingTier: newTier, role: newRole })
+            .then(function () { showAlert('admin-dealer-alert', 'Dealer updated!', 'success'); loadDealers(); })
+            .catch(function (err) { showAlert('admin-dealer-alert', 'Update failed: ' + esc(err.message), 'error'); });
     }
 
     function resetDealerPassword(id) {
         var dealer = _allDealers.find(function (d) { return d.id === id; });
         if (!dealer) return;
-
         var newPw = prompt('New password for ' + dealer.dealerCode + ' (min 8 chars):');
         if (!newPw) return;
-        if (newPw.length < 8) {
-            showAlert('admin-dealer-alert', 'Password must be at least 8 characters', 'error');
-            return;
-        }
+        if (newPw.length < 8) { showAlert('admin-dealer-alert', 'Password must be at least 8 characters', 'error'); return; }
 
-        _api('POST', '/api/admin/dealers/' + id + '/change-password', {
-            newPassword: newPw
-        }).then(function () {
-            showAlert('admin-dealer-alert', 'Password reset for ' + dealer.dealerCode + '!', 'success');
-        }).catch(function (err) {
-            showAlert('admin-dealer-alert', 'Reset failed: ' + esc(err.message), 'error');
-        });
+        _api('POST', '/api/admin/dealers/' + id + '/change-password', { newPassword: newPw })
+            .then(function () { showAlert('admin-dealer-alert', 'Password reset for ' + dealer.dealerCode + '!', 'success'); })
+            .catch(function (err) { showAlert('admin-dealer-alert', 'Reset failed: ' + esc(err.message), 'error'); });
     }
 
     function toggleDealerActive(id) {
         var dealer = _allDealers.find(function (d) { return d.id === id; });
         if (!dealer) return;
-
         var action = dealer.isActive ? 'disable' : 'enable';
         if (!confirm('Are you sure you want to ' + action + ' dealer ' + dealer.dealerCode + '?')) return;
 
-        _api('PUT', '/api/admin/dealers/' + id, {
-            isActive: !dealer.isActive
-        }).then(function () {
-            showAlert('admin-dealer-alert', 'Dealer ' + dealer.dealerCode + ' ' + action + 'd!', 'success');
-            loadDealers();
-        }).catch(function (err) {
-            showAlert('admin-dealer-alert', 'Failed: ' + esc(err.message), 'error');
-        });
+        _api('PUT', '/api/admin/dealers/' + id, { isActive: !dealer.isActive })
+            .then(function () { showAlert('admin-dealer-alert', 'Dealer ' + dealer.dealerCode + ' ' + action + 'd!', 'success'); loadDealers(); })
+            .catch(function (err) { showAlert('admin-dealer-alert', 'Failed: ' + esc(err.message), 'error'); });
     }
 
 
@@ -575,24 +597,15 @@
     function loadAllQuotes() {
         var container = document.getElementById('admin-quotes-list');
         container.innerHTML = '<div class="admin-loading">Loading quotes...</div>';
-
         _api('GET', '/api/admin/quotes')
-            .then(function (quotes) {
-                _allQuotes = quotes;
-                renderQuoteStats();
-                populateDealerFilter();
-                renderQuotesTable();
-            })
-            .catch(function (err) {
-                container.innerHTML = '<div class="admin-error">Failed to load quotes: ' + esc(err.message) + '</div>';
-            });
+            .then(function (quotes) { _allQuotes = quotes; renderQuoteStats(); populateDealerFilter(); renderQuotesTable(); })
+            .catch(function (err) { container.innerHTML = '<div class="admin-error">Failed to load quotes: ' + esc(err.message) + '</div>'; });
     }
 
     function renderQuoteStats() {
         var submitted = _allQuotes.filter(function (q) { return q.status === 'submitted'; }).length;
         var approved = _allQuotes.filter(function (q) { return q.status === 'approved'; }).length;
         var totalValue = _allQuotes.reduce(function (sum, q) { return sum + (q.totalAmount || 0); }, 0);
-
         document.getElementById('admin-quotes-stats').innerHTML = '' +
             '<div class="admin-stat"><div class="admin-stat-value">' + _allQuotes.length + '</div><div class="admin-stat-label">Total Quotes</div></div>' +
             '<div class="admin-stat"><div class="admin-stat-value">' + submitted + '</div><div class="admin-stat-label">Pending Review</div></div>' +
@@ -602,16 +615,10 @@
 
     function populateDealerFilter() {
         var select = document.getElementById('admin-quote-dealer-filter');
-        var dealerCodes = [];
-        _allQuotes.forEach(function (q) {
-            if (q.dealerCode && dealerCodes.indexOf(q.dealerCode) === -1) {
-                dealerCodes.push(q.dealerCode);
-            }
-        });
+        var codes = [];
+        _allQuotes.forEach(function (q) { if (q.dealerCode && codes.indexOf(q.dealerCode) === -1) codes.push(q.dealerCode); });
         select.innerHTML = '<option value="">All Dealers</option>';
-        dealerCodes.sort().forEach(function (code) {
-            select.innerHTML += '<option value="' + code + '">' + code + '</option>';
-        });
+        codes.sort().forEach(function (c) { select.innerHTML += '<option value="' + c + '">' + c + '</option>'; });
     }
 
     function renderQuotesTable() {
@@ -624,70 +631,48 @@
             if (statusFilter && q.status !== statusFilter) return false;
             if (dealerFilter && q.dealerCode !== dealerFilter) return false;
             if (search) {
-                var haystack = ((q.quoteNumber || '') + (q.customer && q.customer.name || '') +
-                    (q.customer && q.customer.company || '') + (q.dealerCode || '')).toLowerCase();
-                if (!haystack.includes(search)) return false;
+                var hay = ((q.quoteNumber || '') + (q.customer && q.customer.name || '') + (q.customer && q.customer.company || '') + (q.dealerCode || '')).toLowerCase();
+                if (!hay.includes(search)) return false;
             }
             return true;
         });
+        filtered.sort(function (a, b) { return new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0); });
 
-        filtered.sort(function (a, b) {
-            return new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0);
-        });
+        if (filtered.length === 0) { container.innerHTML = '<div class="admin-empty">No quotes match your filters</div>'; return; }
 
-        if (filtered.length === 0) {
-            container.innerHTML = '<div class="admin-empty">No quotes match your filters</div>';
-            return;
-        }
-
-        var html = '<table class="admin-table"><thead><tr>' +
-            '<th>Quote #</th><th>Dealer</th><th>Customer</th><th>Items</th><th>Total</th><th>Status</th><th>Date</th><th>Actions</th>' +
-            '</tr></thead><tbody>';
-
+        var html = '<table class="admin-table"><thead><tr><th>Quote #</th><th>Dealer</th><th>Customer</th><th>Items</th><th>Total</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead><tbody>';
         filtered.forEach(function (q) {
-            var dateStr = '';
-            try { dateStr = new Date(q.updatedAt || q.createdAt).toLocaleDateString(); } catch(e) {}
+            var dateStr = ''; try { dateStr = new Date(q.updatedAt || q.createdAt).toLocaleDateString(); } catch(e) {}
             var custName = (q.customer && q.customer.name) || 'N/A';
             var custCompany = (q.customer && q.customer.company) || '';
-            var itemCount = (q.lineItems || []).length;
-
-            html += '<tr>' +
-                '<td><strong>' + esc(q.quoteNumber || q.id) + '</strong></td>' +
+            html += '<tr><td><strong>' + esc(q.quoteNumber || q.id) + '</strong></td>' +
                 '<td>' + esc(q.dealerCode || 'N/A') + '</td>' +
                 '<td>' + esc(custName) + (custCompany ? '<br><span style="font-size:0.78rem;color:#6b7280;">' + esc(custCompany) + '</span>' : '') + '</td>' +
-                '<td style="text-align:center;">' + itemCount + '</td>' +
+                '<td style="text-align:center;">' + (q.lineItems || []).length + '</td>' +
                 '<td style="text-align:right;font-weight:600;">$' + (q.totalAmount || 0).toFixed(2) + '</td>' +
-                '<td>' +
-                    '<select class="admin-status-select" data-quote-id="' + q.id + '">' +
-                        '<option value="draft"' + (q.status === 'draft' ? ' selected' : '') + '>Draft</option>' +
-                        '<option value="submitted"' + (q.status === 'submitted' ? ' selected' : '') + '>Submitted</option>' +
-                        '<option value="reviewed"' + (q.status === 'reviewed' ? ' selected' : '') + '>Reviewed</option>' +
-                        '<option value="approved"' + (q.status === 'approved' ? ' selected' : '') + '>Approved</option>' +
-                        '<option value="rejected"' + (q.status === 'rejected' ? ' selected' : '') + '>Rejected</option>' +
-                        '<option value="revision"' + (q.status === 'revision' ? ' selected' : '') + '>Revision</option>' +
-                    '</select>' +
-                '</td>' +
+                '<td><select class="admin-status-select" data-quote-id="' + q.id + '">' +
+                    '<option value="draft"' + (q.status==='draft'?' selected':'') + '>Draft</option>' +
+                    '<option value="submitted"' + (q.status==='submitted'?' selected':'') + '>Submitted</option>' +
+                    '<option value="reviewed"' + (q.status==='reviewed'?' selected':'') + '>Reviewed</option>' +
+                    '<option value="approved"' + (q.status==='approved'?' selected':'') + '>Approved</option>' +
+                    '<option value="rejected"' + (q.status==='rejected'?' selected':'') + '>Rejected</option>' +
+                    '<option value="revision"' + (q.status==='revision'?' selected':'') + '>Revision</option>' +
+                '</select></td>' +
                 '<td>' + dateStr + '</td>' +
                 '<td class="admin-actions">' +
                     '<button class="admin-btn admin-btn-ghost admin-btn-sm" data-action="view-quote" data-id="' + q.id + '">View</button>' +
                     '<button class="admin-btn admin-btn-danger admin-btn-sm" data-action="delete-quote" data-id="' + q.id + '">Del</button>' +
                 '</td></tr>';
         });
-
         html += '</tbody></table>';
         container.innerHTML = html;
 
         container.querySelectorAll('.admin-status-select').forEach(function (sel) {
-            sel.addEventListener('change', function () {
-                var qId = sel.getAttribute('data-quote-id');
-                updateQuoteStatus(qId, sel.value);
-            });
+            sel.addEventListener('change', function () { updateQuoteStatus(sel.getAttribute('data-quote-id'), sel.value); });
         });
-
         container.querySelectorAll('[data-action]').forEach(function (btn) {
             btn.addEventListener('click', function () {
-                var action = btn.getAttribute('data-action');
-                var id = btn.getAttribute('data-id');
+                var action = btn.getAttribute('data-action'), id = btn.getAttribute('data-id');
                 if (action === 'view-quote') viewQuoteDetail(id);
                 if (action === 'delete-quote') deleteAdminQuote(id);
             });
@@ -706,16 +691,12 @@
                 renderQuoteStats();
                 showAlert('admin-quote-alert', 'Status updated to ' + newStatus, 'success');
             })
-            .catch(function (err) {
-                showAlert('admin-quote-alert', 'Update failed: ' + esc(err.message), 'error');
-                loadAllQuotes();
-            });
+            .catch(function (err) { showAlert('admin-quote-alert', 'Update failed: ' + esc(err.message), 'error'); loadAllQuotes(); });
     }
 
     function viewQuoteDetail(quoteId) {
         var q = _allQuotes.find(function (q) { return q.id === quoteId; });
         if (!q) return;
-
         var panel = document.getElementById('admin-quote-detail-panel');
         var custName = (q.customer && q.customer.name) || 'N/A';
         var custEmail = (q.customer && q.customer.email) || 'N/A';
@@ -725,128 +706,230 @@
 
         var lineItemsHTML = '';
         if (q.lineItems && q.lineItems.length > 0) {
-            lineItemsHTML = '<table class="admin-line-items-table"><thead><tr>' +
-                '<th>Product</th><th>Color</th><th>Length</th><th>Qty</th><th>Subtotal</th></tr></thead><tbody>';
+            lineItemsHTML = '<table class="admin-line-items-table"><thead><tr><th>Product</th><th>Color</th><th>Length</th><th>Qty</th><th>Subtotal</th></tr></thead><tbody>';
             q.lineItems.forEach(function (li) {
-                lineItemsHTML += '<tr>' +
-                    '<td>' + esc(li.type || '') + '</td>' +
-                    '<td>' + esc(li.color || '-') + '</td>' +
-                    '<td>' + (li.length || '-') + '</td>' +
-                    '<td>' + (li.qty || 0) + '</td>' +
-                    '<td>$' + (typeof getItemSubtotal === 'function' ? getItemSubtotal(li).toFixed(2) : '0.00') + '</td>' +
-                    '</tr>';
+                lineItemsHTML += '<tr><td>' + esc(li.type || '') + '</td><td>' + esc(li.color || '-') + '</td><td>' + (li.length || '-') + '</td><td>' + (li.qty || 0) + '</td><td>$' + (typeof getItemSubtotal === 'function' ? getItemSubtotal(li).toFixed(2) : '0.00') + '</td></tr>';
             });
             lineItemsHTML += '</tbody></table>';
-        } else {
-            lineItemsHTML = '<div style="color:#6b7280;font-size:0.88rem;">No line items</div>';
-        }
+        } else { lineItemsHTML = '<div style="color:#6b7280;font-size:0.88rem;">No line items</div>'; }
 
-        panel.innerHTML = '' +
-            '<div class="admin-quote-detail">' +
-                '<div style="display:flex;justify-content:space-between;align-items:center;">' +
-                    '<h4>Quote: ' + esc(q.quoteNumber || q.id) + '</h4>' +
-                    '<button class="admin-btn admin-btn-ghost admin-btn-sm" id="admin-close-detail">Close</button>' +
-                '</div>' +
-                '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem 2rem;">' +
-                    '<div class="admin-detail-row"><span class="admin-detail-label">Customer</span><span class="admin-detail-value">' + esc(custName) + '</span></div>' +
-                    '<div class="admin-detail-row"><span class="admin-detail-label">Email</span><span class="admin-detail-value">' + esc(custEmail) + '</span></div>' +
-                    '<div class="admin-detail-row"><span class="admin-detail-label">Company</span><span class="admin-detail-value">' + esc(custCompany || '-') + '</span></div>' +
-                    '<div class="admin-detail-row"><span class="admin-detail-label">Phone</span><span class="admin-detail-value">' + esc(custPhone || '-') + '</span></div>' +
-                    '<div class="admin-detail-row"><span class="admin-detail-label">Zip</span><span class="admin-detail-value">' + esc(custZip) + '</span></div>' +
-                    '<div class="admin-detail-row"><span class="admin-detail-label">Dealer</span><span class="admin-detail-value">' + esc(q.dealerCode || 'N/A') + '</span></div>' +
-                    '<div class="admin-detail-row"><span class="admin-detail-label">Status</span><span class="admin-detail-value"><span class="admin-badge badge-' + (q.status || 'draft') + '">' + (q.status || 'draft') + '</span></span></div>' +
-                    '<div class="admin-detail-row"><span class="admin-detail-label">Total</span><span class="admin-detail-value" style="font-weight:700;color:#1e40af;">$' + (q.totalAmount || 0).toFixed(2) + '</span></div>' +
-                '</div>' +
-                (q.specialInstructions ? '<div style="margin-top:0.75rem;"><strong style="font-size:0.85rem;">Special Instructions:</strong><div style="font-size:0.88rem;color:#374151;margin-top:0.25rem;">' + esc(q.specialInstructions) + '</div></div>' : '') +
-                (q.internalNotes ? '<div style="margin-top:0.5rem;"><strong style="font-size:0.85rem;">Internal Notes:</strong><div style="font-size:0.88rem;color:#374151;margin-top:0.25rem;">' + esc(q.internalNotes) + '</div></div>' : '') +
-                (q.shippingAddress ? '<div style="margin-top:0.5rem;"><strong style="font-size:0.85rem;">Shipping:</strong><div style="font-size:0.88rem;color:#374151;margin-top:0.25rem;">' + esc(q.shippingAddress) + '</div></div>' : '') +
-                '<div style="margin-top:1rem;"><strong style="font-size:0.85rem;">Line Items</strong></div>' +
-                lineItemsHTML +
+        panel.innerHTML = '<div class="admin-quote-detail">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;"><h4>Quote: ' + esc(q.quoteNumber || q.id) + '</h4><button class="admin-btn admin-btn-ghost admin-btn-sm" id="admin-close-detail">Close</button></div>' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem 2rem;">' +
+                '<div class="admin-detail-row"><span class="admin-detail-label">Customer</span><span class="admin-detail-value">' + esc(custName) + '</span></div>' +
+                '<div class="admin-detail-row"><span class="admin-detail-label">Email</span><span class="admin-detail-value">' + esc(custEmail) + '</span></div>' +
+                '<div class="admin-detail-row"><span class="admin-detail-label">Company</span><span class="admin-detail-value">' + esc(custCompany || '-') + '</span></div>' +
+                '<div class="admin-detail-row"><span class="admin-detail-label">Phone</span><span class="admin-detail-value">' + esc(custPhone || '-') + '</span></div>' +
+                '<div class="admin-detail-row"><span class="admin-detail-label">Zip</span><span class="admin-detail-value">' + esc(custZip) + '</span></div>' +
+                '<div class="admin-detail-row"><span class="admin-detail-label">Dealer</span><span class="admin-detail-value">' + esc(q.dealerCode || 'N/A') + '</span></div>' +
+                '<div class="admin-detail-row"><span class="admin-detail-label">Status</span><span class="admin-detail-value"><span class="admin-badge badge-' + (q.status || 'draft') + '">' + (q.status || 'draft') + '</span></span></div>' +
+                '<div class="admin-detail-row"><span class="admin-detail-label">Total</span><span class="admin-detail-value" style="font-weight:700;color:#1e40af;">$' + (q.totalAmount || 0).toFixed(2) + '</span></div>' +
+            '</div>' +
+            (q.specialInstructions ? '<div style="margin-top:0.75rem;"><strong style="font-size:0.85rem;">Special Instructions:</strong><div style="font-size:0.88rem;color:#374151;margin-top:0.25rem;">' + esc(q.specialInstructions) + '</div></div>' : '') +
+            (q.internalNotes ? '<div style="margin-top:0.5rem;"><strong style="font-size:0.85rem;">Internal Notes:</strong><div style="font-size:0.88rem;color:#374151;margin-top:0.25rem;">' + esc(q.internalNotes) + '</div></div>' : '') +
+            '<div style="margin-top:1rem;"><strong style="font-size:0.85rem;">Line Items</strong></div>' + lineItemsHTML +
             '</div>';
-
         panel.style.display = 'block';
         panel.scrollIntoView({ behavior: 'smooth' });
-
-        document.getElementById('admin-close-detail').addEventListener('click', function () {
-            panel.style.display = 'none';
-        });
+        document.getElementById('admin-close-detail').addEventListener('click', function () { panel.style.display = 'none'; });
     }
 
     function deleteAdminQuote(quoteId) {
         var q = _allQuotes.find(function (q) { return q.id === quoteId; });
         if (!q) return;
-        if (!confirm('Permanently delete quote ' + (q.quoteNumber || q.id) + '? This cannot be undone.')) return;
-
+        if (!confirm('Permanently delete quote ' + (q.quoteNumber || q.id) + '?')) return;
         _api('DELETE', '/api/admin/quotes/' + quoteId)
-            .then(function () {
-                showAlert('admin-quote-alert', 'Quote deleted.', 'success');
-                loadAllQuotes();
-            })
-            .catch(function (err) {
-                showAlert('admin-quote-alert', 'Delete failed: ' + esc(err.message), 'error');
-            });
+            .then(function () { showAlert('admin-quote-alert', 'Quote deleted.', 'success'); loadAllQuotes(); })
+            .catch(function (err) { showAlert('admin-quote-alert', 'Delete failed: ' + esc(err.message), 'error'); });
     }
 
-    // CSV Export
     document.getElementById('admin-export-csv-btn').addEventListener('click', function () {
-        if (_allQuotes.length === 0) {
-            showAlert('admin-quote-alert', 'No quotes to export', 'error');
-            return;
-        }
-
+        if (_allQuotes.length === 0) { showAlert('admin-quote-alert', 'No quotes to export', 'error'); return; }
         var csv = 'Quote Number,Dealer,Customer,Company,Email,Phone,Zip,Status,Items,Total,Special Instructions,Date\n';
         _allQuotes.forEach(function (q) {
-            var custName = (q.customer && q.customer.name) || '';
-            var custCompany = (q.customer && q.customer.company) || '';
-            var custEmail = (q.customer && q.customer.email) || '';
-            var custPhone = (q.customer && q.customer.phone) || '';
-            var custZip = (q.customer && q.customer.zipCode) || '';
-            var dateStr = '';
-            try { dateStr = new Date(q.updatedAt || q.createdAt).toISOString().split('T')[0]; } catch(e) {}
-
-            csv += '"' + (q.quoteNumber || q.id) + '","' + (q.dealerCode || '') + '","' +
-                custName.replace(/"/g, '""') + '","' + custCompany.replace(/"/g, '""') + '","' +
-                custEmail + '","' + custPhone + '","' + custZip + '","' +
-                (q.status || 'draft') + '",' + (q.lineItems || []).length + ',' +
-                (q.totalAmount || 0).toFixed(2) + ',"' +
-                (q.specialInstructions || '').replace(/"/g, '""').replace(/\n/g, ' ') + '","' + dateStr + '"\n';
+            var cn = (q.customer && q.customer.name) || '', cc = (q.customer && q.customer.company) || '';
+            var ce = (q.customer && q.customer.email) || '', cp = (q.customer && q.customer.phone) || '', cz = (q.customer && q.customer.zipCode) || '';
+            var ds = ''; try { ds = new Date(q.updatedAt || q.createdAt).toISOString().split('T')[0]; } catch(e) {}
+            csv += '"' + (q.quoteNumber||q.id) + '","' + (q.dealerCode||'') + '","' + cn.replace(/"/g,'""') + '","' + cc.replace(/"/g,'""') + '","' + ce + '","' + cp + '","' + cz + '","' + (q.status||'draft') + '",' + (q.lineItems||[]).length + ',' + (q.totalAmount||0).toFixed(2) + ',"' + (q.specialInstructions||'').replace(/"/g,'""').replace(/\n/g,' ') + '","' + ds + '"\n';
         });
-
-        var blob = new Blob([csv], { type: 'text/csv' });
-        var url = URL.createObjectURL(blob);
-        var a = document.createElement('a');
-        a.href = url;
-        a.download = 'ameridex-quotes-' + new Date().toISOString().split('T')[0] + '.csv';
-        a.click();
-        URL.revokeObjectURL(url);
+        var blob = new Blob([csv], { type: 'text/csv' }); var url = URL.createObjectURL(blob);
+        var a = document.createElement('a'); a.href = url; a.download = 'ameridex-quotes-' + new Date().toISOString().split('T')[0] + '.csv'; a.click(); URL.revokeObjectURL(url);
         showAlert('admin-quote-alert', 'CSV exported!', 'success');
     });
 
 
     // ----------------------------------------------------------
-    // PRICING TAB (v1.3: Real AmeriDex products)
+    // PRODUCTS TAB (NEW in v1.4)
     // ----------------------------------------------------------
+    function loadProducts() {
+        var container = document.getElementById('admin-products-list');
+        container.innerHTML = '<div class="admin-loading">Loading products...</div>';
+        _api('GET', '/api/admin/products')
+            .then(function (products) { _allProducts = products; renderProductStats(); renderProductsTable(); })
+            .catch(function (err) { container.innerHTML = '<div class="admin-error">Failed to load products: ' + esc(err.message) + '</div>'; });
+    }
 
-    // Real AmeriDex product catalog for pricing preview
-    // Matches PRODUCT_CONFIG in dealer-portal.html and routes/products.js
-    // Custom/Manual Item excluded (always $0.00, dealer-set pricing)
-    var BASE_PRODUCTS = [
-        { id: 'system',   name: 'AmeriDex System Boards (Grooved + Dexerdry)', basePrice: 8.00,   unit: '/ft'   },
-        { id: 'grooved',  name: 'Grooved Deck Boards (no Dexerdry)',           basePrice: 6.00,   unit: '/ft'   },
-        { id: 'solid',    name: 'Solid Edge Deck Boards',                      basePrice: 6.00,   unit: '/ft'   },
-        { id: 'dexerdry', name: 'Dexerdry Seals (standalone)',                  basePrice: 2.00,   unit: '/ft'   },
-        { id: 'screws',   name: 'Epoxy-Coated Screws',                         basePrice: 37.00,  unit: '/box'  },
-        { id: 'plugs',    name: 'Color-Matching Plugs',                        basePrice: 33.79,  unit: '/box'  },
-        { id: 'blueclaw', name: 'Dexerdry BlueClaw',                           basePrice: 150.00, unit: '/each' }
-    ];
+    function renderProductStats() {
+        var active = _allProducts.filter(function (p) { return p.isActive !== false; }).length;
+        var inactive = _allProducts.length - active;
+        var exemptCount = _allProducts.filter(function (p) { return p.tierOverrides && Object.keys(p.tierOverrides).length > 0; }).length;
+        document.getElementById('admin-products-stats').innerHTML = '' +
+            '<div class="admin-stat"><div class="admin-stat-value">' + _allProducts.length + '</div><div class="admin-stat-label">Total Products</div></div>' +
+            '<div class="admin-stat"><div class="admin-stat-value">' + active + '</div><div class="admin-stat-label">Active</div></div>' +
+            '<div class="admin-stat"><div class="admin-stat-value">' + inactive + '</div><div class="admin-stat-label">Inactive</div></div>' +
+            '<div class="admin-stat"><div class="admin-stat-value">' + exemptCount + '</div><div class="admin-stat-label">Tier Exempt</div></div>';
+    }
 
+    function renderProductsTable() {
+        var container = document.getElementById('admin-products-list');
+        var search = (document.getElementById('admin-product-search').value || '').toLowerCase();
+
+        var filtered = _allProducts.filter(function (p) {
+            if (!search) return true;
+            return (p.name || '').toLowerCase().includes(search) || (p.id || '').toLowerCase().includes(search) || (p.category || '').toLowerCase().includes(search);
+        });
+
+        if (filtered.length === 0) { container.innerHTML = '<div class="admin-empty">No products found</div>'; return; }
+
+        var html = '<table class="admin-table"><thead><tr>' +
+            '<th>Product</th><th>ID</th><th>Category</th><th>Base Price</th><th>Unit</th><th>Tier Exempt</th><th>Status</th><th>Actions</th>' +
+            '</tr></thead><tbody>';
+
+        filtered.forEach(function (p) {
+            var isExempt = p.tierOverrides && Object.keys(p.tierOverrides).length > 0;
+            var isCustom = p.id === 'custom';
+            html += '<tr>' +
+                '<td><strong>' + esc(p.name) + '</strong></td>' +
+                '<td><code style="font-size:0.78rem;background:#f3f4f6;padding:0.15rem 0.4rem;border-radius:4px;">' + esc(p.id) + '</code></td>' +
+                '<td><span class="admin-badge badge-' + (p.category || 'other') + '">' + esc(p.category || 'other') + '</span></td>' +
+                '<td style="text-align:right;font-weight:600;">$' + (p.basePrice || 0).toFixed(2) + '</td>' +
+                '<td>/' + esc(p.unit || 'each') + '</td>' +
+                '<td style="text-align:center;">' + (isExempt ? '<span style="color:#dc2626;font-weight:600;">Yes</span>' : '<span style="color:#6b7280;">No</span>') + '</td>' +
+                '<td><span class="admin-badge ' + (p.isActive !== false ? 'badge-active' : 'badge-inactive') + '">' + (p.isActive !== false ? 'Active' : 'Inactive') + '</span></td>' +
+                '<td class="admin-actions">' +
+                    '<button class="admin-btn admin-btn-ghost admin-btn-sm" data-action="edit-product" data-id="' + esc(p.id) + '">Edit</button>' +
+                    '<button class="admin-btn ' + (p.isActive !== false ? 'admin-btn-danger' : 'admin-btn-success') + ' admin-btn-sm" data-action="toggle-product" data-id="' + esc(p.id) + '">' + (p.isActive !== false ? 'Disable' : 'Enable') + '</button>' +
+                    (isCustom ? '' : '<button class="admin-btn admin-btn-danger admin-btn-sm" data-action="delete-product" data-id="' + esc(p.id) + '">Del</button>') +
+                '</td></tr>';
+        });
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
+
+        container.querySelectorAll('[data-action]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var action = btn.getAttribute('data-action'), id = btn.getAttribute('data-id');
+                if (action === 'edit-product') editProduct(id);
+                if (action === 'toggle-product') toggleProduct(id);
+                if (action === 'delete-product') deleteProduct(id);
+            });
+        });
+    }
+
+    document.getElementById('admin-product-search').addEventListener('input', renderProductsTable);
+
+    // Create Product
+    document.getElementById('admin-create-product-btn').addEventListener('click', function () {
+        var name = document.getElementById('admin-new-prod-name').value.trim();
+        var id = document.getElementById('admin-new-prod-id').value.trim().toLowerCase();
+        var price = document.getElementById('admin-new-prod-price').value;
+        var unit = document.getElementById('admin-new-prod-unit').value;
+        var cat = document.getElementById('admin-new-prod-cat').value;
+        var flat = document.getElementById('admin-new-prod-flat').value;
+
+        if (!name) { showAlert('admin-product-alert', 'Product name is required', 'error'); return; }
+        if (!price || isNaN(Number(price))) { showAlert('admin-product-alert', 'Valid base price is required', 'error'); return; }
+
+        var tierOverrides = {};
+        if (flat === 'yes') {
+            tierOverrides = { preferred: { multiplier: 1.0 }, vip: { multiplier: 1.0 } };
+        }
+
+        var payload = { name: name, basePrice: Number(price), unit: unit, category: cat, tierOverrides: tierOverrides };
+        if (id) payload.id = id;
+
+        _api('POST', '/api/admin/products', payload)
+            .then(function (prod) {
+                showAlert('admin-product-alert', 'Product "' + esc(prod.name) + '" added (ID: ' + esc(prod.id) + ')', 'success');
+                document.getElementById('admin-new-prod-name').value = '';
+                document.getElementById('admin-new-prod-id').value = '';
+                document.getElementById('admin-new-prod-price').value = '';
+                document.getElementById('admin-new-prod-unit').value = 'ft';
+                document.getElementById('admin-new-prod-cat').value = 'decking';
+                document.getElementById('admin-new-prod-flat').value = 'no';
+                document.getElementById('admin-add-product-details').removeAttribute('open');
+                loadProducts();
+            })
+            .catch(function (err) { showAlert('admin-product-alert', 'Failed: ' + esc(err.message), 'error'); });
+    });
+
+    function editProduct(id) {
+        var prod = _allProducts.find(function (p) { return p.id === id; });
+        if (!prod) return;
+
+        var newName = prompt('Product Name:', prod.name || '');
+        if (newName === null) return;
+        var newPrice = prompt('Base Price ($):', (prod.basePrice || 0).toFixed(2));
+        if (newPrice === null) return;
+        if (isNaN(Number(newPrice))) { showAlert('admin-product-alert', 'Invalid price', 'error'); return; }
+        var newUnit = prompt('Unit (ft, box, each, pack, sqft):', prod.unit || 'each');
+        if (newUnit === null) return;
+        var newCat = prompt('Category (decking, sealing, fasteners, hardware, other):', prod.category || 'other');
+        if (newCat === null) return;
+
+        var isExempt = prod.tierOverrides && Object.keys(prod.tierOverrides).length > 0;
+        var exemptAnswer = prompt('Exempt from tier discounts? (yes/no):', isExempt ? 'yes' : 'no');
+        if (exemptAnswer === null) return;
+
+        var tierOverrides = {};
+        if (exemptAnswer.toLowerCase() === 'yes') {
+            tierOverrides = { preferred: { multiplier: 1.0 }, vip: { multiplier: 1.0 } };
+        }
+
+        _api('PUT', '/api/admin/products/' + encodeURIComponent(id), {
+            name: newName, basePrice: Number(newPrice), unit: newUnit, category: newCat, tierOverrides: tierOverrides
+        })
+            .then(function () { showAlert('admin-product-alert', 'Product updated!', 'success'); loadProducts(); })
+            .catch(function (err) { showAlert('admin-product-alert', 'Update failed: ' + esc(err.message), 'error'); });
+    }
+
+    function toggleProduct(id) {
+        var prod = _allProducts.find(function (p) { return p.id === id; });
+        if (!prod) return;
+        var action = prod.isActive !== false ? 'disable' : 'enable';
+        if (!confirm('Are you sure you want to ' + action + ' "' + prod.name + '"?')) return;
+
+        _api('PUT', '/api/admin/products/' + encodeURIComponent(id), { isActive: prod.isActive === false })
+            .then(function () { showAlert('admin-product-alert', 'Product ' + action + 'd!', 'success'); loadProducts(); })
+            .catch(function (err) { showAlert('admin-product-alert', 'Failed: ' + esc(err.message), 'error'); });
+    }
+
+    function deleteProduct(id) {
+        var prod = _allProducts.find(function (p) { return p.id === id; });
+        if (!prod) return;
+        if (!confirm('Permanently delete "' + prod.name + '"? This cannot be undone.')) return;
+
+        _api('DELETE', '/api/admin/products/' + encodeURIComponent(id))
+            .then(function () { showAlert('admin-product-alert', 'Product deleted.', 'success'); loadProducts(); })
+            .catch(function (err) { showAlert('admin-product-alert', 'Delete failed: ' + esc(err.message), 'error'); });
+    }
+
+
+    // ----------------------------------------------------------
+    // PRICING TAB (v1.4: reads live product catalog from API)
+    // ----------------------------------------------------------
     function loadPricingTiers() {
         var container = document.getElementById('admin-pricing-list');
         container.innerHTML = '<div class="admin-loading">Loading pricing tiers...</div>';
 
-        _api('GET', '/api/admin/pricing-tiers')
-            .then(function (tiers) {
-                _pricingTiers = tiers;
+        // Load both tiers and products in parallel
+        Promise.all([
+            _api('GET', '/api/admin/pricing-tiers'),
+            _api('GET', '/api/admin/products')
+        ])
+            .then(function (results) {
+                _pricingTiers = results[0];
+                _allProducts = results[1];
                 renderPricingTiers();
             })
             .catch(function (err) {
@@ -856,11 +939,12 @@
 
     function renderPricingTiers() {
         var container = document.getElementById('admin-pricing-list');
+        if (!_pricingTiers || _pricingTiers.length === 0) { container.innerHTML = '<div class="admin-empty">No pricing tiers configured</div>'; return; }
 
-        if (!_pricingTiers || _pricingTiers.length === 0) {
-            container.innerHTML = '<div class="admin-empty">No pricing tiers configured</div>';
-            return;
-        }
+        // Filter to only active, non-custom products for the preview
+        var previewProducts = _allProducts.filter(function (p) {
+            return p.isActive !== false && p.id !== 'custom';
+        });
 
         var html = '';
         _pricingTiers.forEach(function (tier, tIdx) {
@@ -869,31 +953,35 @@
 
             html += '<div class="admin-tier-card" data-tier-idx="' + tIdx + '" data-tier-slug="' + esc(slug) + '">' +
                 '<div class="admin-tier-header">' +
-                    '<div>' +
-                        '<span class="admin-tier-name">' + esc(tier.label || slug) + '</span>' +
-                        ' <span class="admin-badge badge-' + slug + '">' + slug + '</span>' +
-                    '</div>' +
+                    '<div><span class="admin-tier-name">' + esc(tier.label || slug) + '</span> <span class="admin-badge badge-' + slug + '">' + slug + '</span></div>' +
                     '<div class="admin-form-inline" style="gap:0.5rem;align-items:center;">' +
                         '<label style="font-size:0.82rem;font-weight:600;color:#6b7280;">Multiplier:</label>' +
-                        '<input type="number" step="0.01" min="0.01" max="2" value="' + mult + '" ' +
-                            'class="tier-multiplier-input" data-tier="' + tIdx + '" data-slug="' + esc(slug) + '" ' +
-                            'style="width:80px;padding:0.4rem;border:1px solid #e5e7eb;border-radius:6px;font-size:0.9rem;font-weight:600;text-align:center;">' +
+                        '<input type="number" step="0.01" min="0.01" max="2" value="' + mult + '" class="tier-multiplier-input" data-tier="' + tIdx + '" data-slug="' + esc(slug) + '" style="width:80px;padding:0.4rem;border:1px solid #e5e7eb;border-radius:6px;font-size:0.9rem;font-weight:600;text-align:center;">' +
                         '<span class="tier-mult-preview" data-tier="' + tIdx + '" style="font-size:0.82rem;color:#6b7280;">(' + (mult * 100).toFixed(0) + '% of base)</span>' +
                     '</div>' +
                 '</div>';
 
-            // Product price preview grid
-            html += '<div style="margin-top:0.5rem;margin-bottom:0.25rem;font-size:0.8rem;font-weight:600;color:#6b7280;">Product Price Preview (base &times; ' + mult + ')</div>';
+            html += '<div style="margin-top:0.5rem;margin-bottom:0.25rem;font-size:0.8rem;font-weight:600;color:#6b7280;">Product Price Preview</div>';
             html += '<div class="admin-tier-products">';
 
-            BASE_PRODUCTS.forEach(function (prod) {
-                var computedPrice = Math.round(prod.basePrice * mult * 100) / 100;
-                var showStrike = mult !== 1;
+            previewProducts.forEach(function (prod) {
+                // Check for per-product tier override
+                var prodMult = mult;
+                var isLocked = false;
+                if (prod.tierOverrides && prod.tierOverrides[slug] && prod.tierOverrides[slug].multiplier !== undefined) {
+                    prodMult = prod.tierOverrides[slug].multiplier;
+                    isLocked = true;
+                }
+                var computedPrice = Math.round(prod.basePrice * prodMult * 100) / 100;
+                var showStrike = prodMult !== 1;
+
                 html += '<div class="admin-tier-product">' +
-                    '<span class="admin-tier-product-name">' + esc(prod.name) + '<span class="admin-tier-product-unit">' + esc(prod.unit) + '</span></span>' +
+                    '<span class="admin-tier-product-name">' + esc(prod.name) + '<span class="admin-tier-product-unit">/' + esc(prod.unit || 'each') + '</span>' +
+                        (isLocked ? '<span class="admin-tier-product-locked">(FIXED)</span>' : '') +
+                    '</span>' +
                     '<span>' +
                         (showStrike ? '<span class="admin-tier-product-base">$' + prod.basePrice.toFixed(2) + '</span>' : '') +
-                        '<span class="admin-tier-product-price tier-computed-price" data-tier="' + tIdx + '" data-base="' + prod.basePrice + '">$' + computedPrice.toFixed(2) + '</span>' +
+                        '<span class="admin-tier-product-price tier-computed-price" data-tier="' + tIdx + '" data-base="' + prod.basePrice + '" data-locked="' + (isLocked ? '1' : '0') + '" data-locked-mult="' + prodMult + '">$' + computedPrice.toFixed(2) + '</span>' +
                     '</span>' +
                 '</div>';
             });
@@ -903,85 +991,53 @@
 
         container.innerHTML = html;
 
-        // Live preview: update computed prices when multiplier changes
+        // Live preview
         container.querySelectorAll('.tier-multiplier-input').forEach(function (input) {
             input.addEventListener('input', function () {
                 var tIdx = input.getAttribute('data-tier');
                 var newMult = parseFloat(input.value) || 1;
-
-                // Update percentage label
                 var preview = container.querySelector('.tier-mult-preview[data-tier="' + tIdx + '"]');
                 if (preview) preview.textContent = '(' + (newMult * 100).toFixed(0) + '% of base)';
 
-                // Update all computed prices for this tier
                 container.querySelectorAll('.tier-computed-price[data-tier="' + tIdx + '"]').forEach(function (el) {
                     var base = parseFloat(el.getAttribute('data-base')) || 0;
-                    var computed = Math.round(base * newMult * 100) / 100;
+                    var locked = el.getAttribute('data-locked') === '1';
+                    var effectiveMult = locked ? parseFloat(el.getAttribute('data-locked-mult')) : newMult;
+                    var computed = Math.round(base * effectiveMult * 100) / 100;
                     el.textContent = '$' + computed.toFixed(2);
                 });
             });
         });
     }
 
-    // Save pricing: iterate per-tier PUT
     document.getElementById('admin-save-pricing-btn').addEventListener('click', function () {
         var inputs = document.querySelectorAll('.tier-multiplier-input');
-        if (inputs.length === 0) {
-            showAlert('admin-pricing-alert', 'No tiers to save', 'error');
-            return;
-        }
+        if (inputs.length === 0) { showAlert('admin-pricing-alert', 'No tiers to save', 'error'); return; }
 
         var saveBtn = document.getElementById('admin-save-pricing-btn');
-        saveBtn.textContent = 'Saving...';
-        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving...'; saveBtn.disabled = true;
 
         var promises = [];
         inputs.forEach(function (input) {
             var slug = input.getAttribute('data-slug');
             var tIdx = parseInt(input.getAttribute('data-tier'), 10);
             var newMult = parseFloat(input.value);
-
-            if (isNaN(newMult) || newMult <= 0 || newMult > 2) {
-                return; // skip invalid
-            }
-
+            if (isNaN(newMult) || newMult <= 0 || newMult > 2) return;
             var tier = _pricingTiers[tIdx];
             if (!tier) return;
-
-            // Only save if changed
             if (tier.multiplier !== newMult) {
-                promises.push(
-                    _api('PUT', '/api/admin/pricing-tiers/' + encodeURIComponent(slug), {
-                        multiplier: newMult
-                    }).then(function (updated) {
-                        // Update local cache
-                        _pricingTiers[tIdx].multiplier = updated.multiplier || newMult;
-                        return slug;
-                    })
-                );
+                promises.push(_api('PUT', '/api/admin/pricing-tiers/' + encodeURIComponent(slug), { multiplier: newMult })
+                    .then(function (updated) { _pricingTiers[tIdx].multiplier = updated.multiplier || newMult; return slug; }));
             }
         });
 
-        if (promises.length === 0) {
-            saveBtn.textContent = 'Save All Changes';
-            saveBtn.disabled = false;
-            showAlert('admin-pricing-alert', 'No changes to save', 'success');
-            return;
-        }
+        if (promises.length === 0) { saveBtn.textContent = 'Save All Changes'; saveBtn.disabled = false; showAlert('admin-pricing-alert', 'No changes to save', 'success'); return; }
 
         Promise.all(promises)
-            .then(function (savedSlugs) {
-                saveBtn.textContent = 'Save All Changes';
-                saveBtn.disabled = false;
-                showAlert('admin-pricing-alert', 'Saved ' + savedSlugs.length + ' tier(s): ' + savedSlugs.join(', '), 'success');
-            })
-            .catch(function (err) {
-                saveBtn.textContent = 'Save All Changes';
-                saveBtn.disabled = false;
-                showAlert('admin-pricing-alert', 'Save failed: ' + esc(err.message), 'error');
-            });
+            .then(function (saved) { saveBtn.textContent = 'Save All Changes'; saveBtn.disabled = false; showAlert('admin-pricing-alert', 'Saved ' + saved.length + ' tier(s): ' + saved.join(', '), 'success'); })
+            .catch(function (err) { saveBtn.textContent = 'Save All Changes'; saveBtn.disabled = false; showAlert('admin-pricing-alert', 'Save failed: ' + esc(err.message), 'error'); });
     });
 
 
-    console.log('[AmeriDex Admin] v1.3 loaded.');
+    console.log('[AmeriDex Admin] v1.4 loaded.');
 })();
