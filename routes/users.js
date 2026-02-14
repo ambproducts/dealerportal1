@@ -23,6 +23,8 @@ router.get('/', requireRole('admin', 'gm'), (req, res) => {
 });
 
 // POST /api/users
+// Admin: can create any role at any dealerCode
+// GM: can create frontdesk accounts at their own dealerCode (immediately active)
 router.post('/', requireRole('admin', 'gm'), (req, res) => {
     const { username, password, displayName, email, phone, role, dealerCode } = req.body;
 
@@ -52,7 +54,10 @@ router.post('/', requireRole('admin', 'gm'), (req, res) => {
         return res.status(409).json({ error: 'Username already exists for this dealer' });
     }
 
-    const needsApproval = req.user.role !== 'admin';
+    // Both admin and GM can create immediately active accounts.
+    // GM is the manager at the dealership and has full authority
+    // to onboard their own frontdesk staff.
+    const canActivateImmediately = (req.user.role === 'admin' || req.user.role === 'gm');
 
     const newUser = {
         id: generateId(),
@@ -63,10 +68,10 @@ router.post('/', requireRole('admin', 'gm'), (req, res) => {
         displayName: displayName || username,
         email: email || '',
         phone: phone || '',
-        status: needsApproval ? 'pending' : 'active',
+        status: canActivateImmediately ? 'active' : 'pending',
         createdBy: req.user.username,
-        approvedBy: needsApproval ? null : req.user.username,
-        approvedAt: needsApproval ? null : new Date().toISOString(),
+        approvedBy: canActivateImmediately ? req.user.username : null,
+        approvedAt: canActivateImmediately ? new Date().toISOString() : null,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         lastLogin: null,
@@ -79,7 +84,7 @@ router.post('/', requireRole('admin', 'gm'), (req, res) => {
     writeJSON(USERS_FILE, users);
 
     const { passwordHash: _, ...safe } = newUser;
-    console.log('[Users] Created: ' + newUser.username + ' (' + newUser.role + ') for ' + effectiveDealerCode + ' by ' + req.user.username);
+    console.log('[Users] Created: ' + newUser.username + ' (' + newUser.role + ') for ' + effectiveDealerCode + ' by ' + req.user.username + ' [status: ' + newUser.status + ']');
     res.status(201).json(safe);
 });
 
