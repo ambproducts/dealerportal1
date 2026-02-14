@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - Price Override System v1.0
+// AmeriDex Dealer Portal - Price Override System v1.1
 // Date: 2026-02-14
 // ============================================================
 // REQUIRES: ameridex-api.js loaded first (provides ameridexAPI,
@@ -9,6 +9,10 @@
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
 //   <script src="ameridex-overrides.js"></script>
+//
+// v1.1 Changes (2026-02-14):
+//   - ADD: Defensive escapeHTML fallback in case patches.js
+//     hasn't loaded or failed. Prevents crash in override UI.
 //
 // This module handles:
 //   - Override Price button per line item
@@ -21,6 +25,23 @@
 
 (function () {
     'use strict';
+
+    // ----------------------------------------------------------
+    // DEFENSIVE: escapeHTML fallback
+    // ----------------------------------------------------------
+    // escapeHTML is normally provided by ameridex-patches.js.
+    // If that file hasn't loaded or failed, define a local
+    // fallback to prevent undefined errors in this module.
+    // ----------------------------------------------------------
+    if (typeof window.escapeHTML !== 'function') {
+        window.escapeHTML = function (str) {
+            if (!str) return '';
+            var div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        };
+        console.warn('[Overrides] escapeHTML was not found from patches.js, using built-in fallback.');
+    }
 
     var api = window.ameridexAPI;
 
@@ -606,7 +627,7 @@
 
         createGMWidget();
         loadPendingOverrides();
-        console.log('[Overrides] v1.0 initialized for role: ' + user.role);
+        console.log('[Overrides] v1.1 initialized for role: ' + user.role);
     }
 
     // Delay init to let auth complete
@@ -625,5 +646,5 @@
         observer.observe(mainApp, { attributes: true, attributeFilter: ['class'] });
     }
 
-    console.log('[AmeriDex Overrides] v1.0 loaded.');
+    console.log('[AmeriDex Overrides] v1.1 loaded.');
 })();
