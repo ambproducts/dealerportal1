@@ -1,6 +1,6 @@
 // ============================================================
-// AmeriDex Dealer Portal - Patch File v1.0
-// Date: 2026-02-13
+// AmeriDex Dealer Portal - Patch File v1.1
+// Date: 2026-02-14
 // ============================================================
 // HOW TO USE:
 //   Add this <script> tag at the very bottom of dealer-portal.html,
@@ -243,6 +243,7 @@
     //      without escaping in the saved quotes list.
     // FIX: Override renderSavedQuotes. We wrap user strings with
     //      escapeHTML() and keep everything else identical.
+    // v1.1: Fixed loadQuote() call to pass index instead of object.
     // ---------------------------------------------------------
     var _originalRenderSavedQuotes = window.renderSavedQuotes;
     window.renderSavedQuotes = function () {
@@ -293,7 +294,10 @@
         list.querySelectorAll('.btn-load').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 var i = parseInt(btn.getAttribute('data-idx'), 10);
-                if (typeof window.loadQuote === 'function') window.loadQuote(filtered[i]);
+                if (typeof window.loadQuote === 'function') {
+                    var realIdx = savedQuotes.indexOf(filtered[i]);
+                    if (realIdx > -1) window.loadQuote(realIdx);
+                }
             });
         });
         list.querySelectorAll('.btn-delete-quote').forEach(function (btn) {
@@ -532,5 +536,5 @@
         try { window.updateTotalAndFasteners(); } catch (e) {}
     }
 
-    console.log('[AmeriDex Patches] v1.0 loaded: 13 patches applied.');
+    console.log('[AmeriDex Patches] v1.1 loaded: 13 patches applied.');
 })();
