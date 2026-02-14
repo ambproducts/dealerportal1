@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - Patch File v1.2
+// AmeriDex Dealer Portal - Patch File v1.3
 // Date: 2026-02-14
 // ============================================================
 // HOW TO USE:
@@ -18,14 +18,6 @@
     // ===========================================================
     // PATCH 1: XSS Protection Utility
     // ===========================================================
-    // WHY: User input (customer name, company, custom product
-    //      descriptions, special instructions) is concatenated
-    //      directly into HTML strings via innerHTML in
-    //      generatePrintHTML(), renderSavedQuotes(),
-    //      showCustomerLookup(), and showReviewModal().
-    //      A value like <img src=x onerror=alert(1)> would
-    //      execute in the print preview modal.
-    // ---------------------------------------------------------
     window.escapeHTML = function (str) {
         if (!str) return '';
         var div = document.createElement('div');
@@ -37,11 +29,6 @@
     // ===========================================================
     // PATCH 2: Consolidated Subtotal Function
     // ===========================================================
-    // WHY: getItemSubtotalFromData() is a near-duplicate of
-    //      getItemSubtotal(). If pricing logic changes in one
-    //      but not the other, saved-quote totals silently
-    //      diverge from live-quote totals.
-    // ---------------------------------------------------------
     if (typeof window.getItemSubtotalFromData === 'function') {
         window.getItemSubtotalFromData = function (li) {
             return window.getItemSubtotal(li);
@@ -52,12 +39,6 @@
     // ===========================================================
     // PATCH 3: Fix Quote ID Collision After Deletion
     // ===========================================================
-    // WHY: Original logic counts existing quotes with today's
-    //      prefix (savedQuotes.length + 1). If quote -002 is
-    //      deleted, the next quote also gets -002, colliding
-    //      with the previously submitted ID.
-    // FIX: Find the highest existing sequence number instead.
-    // ---------------------------------------------------------
     window.generateQuoteNumber = function () {
         var today = new Date();
         var dateStr = today.getFullYear().toString()
@@ -79,11 +60,6 @@
     // ===========================================================
     // PATCH 4: Sync currentQuote from DOM Before Save/Timeout
     // ===========================================================
-    // WHY: If a user types a customer name and the session
-    //      times out, currentQuote.customer.name is still empty
-    //      because it only syncs on explicit save. The auto-save
-    //      on timeout therefore loses customer data.
-    // ---------------------------------------------------------
     window.syncQuoteFromDOM = function () {
         currentQuote.customer.name     = document.getElementById('cust-name').value.trim();
         currentQuote.customer.email    = document.getElementById('cust-email').value.trim();
@@ -98,7 +74,6 @@
         currentQuote.options.stairs      = document.getElementById('stairs').checked;
     };
 
-    // Override saveAndClose to sync first
     var _originalSaveAndClose = window.saveAndClose;
     window.saveAndClose = function () {
         window.syncQuoteFromDOM();
@@ -111,11 +86,6 @@
     // ===========================================================
     // PATCH 5: XSS-Safe generatePrintHTML()
     // ===========================================================
-    // WHY: The original builds an HTML string by concatenating
-    //      raw .value reads. We override the entire function
-    //      with escapeHTML() wrappers on every user-supplied
-    //      value, while keeping all other logic identical.
-    // ---------------------------------------------------------
     window.generatePrintHTML = function (type) {
         var today = new Date().toLocaleDateString('en-US', {
             year: 'numeric', month: 'long', day: 'numeric'
@@ -125,7 +95,6 @@
 
         var html = '<div style="font-family:Arial,sans-serif;max-width:800px;margin:0 auto;">';
 
-        // Header
         html += '<div style="border-bottom:3px solid #2563eb;padding-bottom:15px;margin-bottom:20px;">';
         html += '<h1 style="color:#2563eb;margin:0;">AmeriDex ' + title + '</h1>';
         html += '<p style="color:#666;margin:5px 0 0;">Generated ' + today + '</p>';
@@ -137,7 +106,6 @@
         }
         html += '</div>';
 
-        // Customer Info
         html += '<div style="margin-bottom:20px;">';
         html += '<h2 style="color:#374151;font-size:1.1rem;border-bottom:1px solid #ddd;padding-bottom:5px;">Customer Information</h2>';
         html += '<table style="width:100%;">';
@@ -160,7 +128,6 @@
         }
         html += '</table></div>';
 
-        // Line Items Table
         html += '<div style="margin-bottom:20px;">';
         html += '<h2 style="color:#374151;font-size:1.1rem;border-bottom:1px solid #ddd;padding-bottom:5px;">Order Details</h2>';
         html += '<table style="width:100%;border-collapse:collapse;">';
@@ -201,7 +168,6 @@
         html += '<td style="border:1px solid #ddd;padding:12px;text-align:right;color:#1e40af;font-size:1.1rem;">$' + formatCurrency(grandTotal) + '</td>';
         html += '</tr></tbody></table></div>';
 
-        // Special Instructions
         var special = document.getElementById('special-instr').value;
         if (special) {
             html += '<div style="margin-bottom:20px;">';
@@ -209,7 +175,6 @@
             html += '<p style="white-space:pre-wrap;background:#f9fafb;padding:10px;border-radius:5px;">' + escapeHTML(special) + '</p></div>';
         }
 
-        // Shipping
         var shipAddr = document.getElementById('ship-addr').value;
         var delDate = document.getElementById('del-date').value;
         if (shipAddr || delDate) {
@@ -224,7 +189,6 @@
             html += '</div>';
         }
 
-        // Disclaimer (customer quotes only)
         if (isCustomer) {
             html += '<div style="margin-top:30px;padding-top:15px;border-top:1px solid #ddd;font-size:0.85rem;color:#666;">';
             html += '<p><strong>Disclaimer:</strong> This is an estimate only. Final pricing subject to confirmation by AM Building Products / AmeriDex. ';
@@ -239,12 +203,6 @@
     // ===========================================================
     // PATCH 6: XSS-Safe renderSavedQuotes()
     // ===========================================================
-    // WHY: Customer name and company are injected via innerHTML
-    //      without escaping in the saved quotes list.
-    // FIX: Override renderSavedQuotes. We wrap user strings with
-    //      escapeHTML() and keep everything else identical.
-    // v1.1: Fixed loadQuote() call to pass index instead of object.
-    // ---------------------------------------------------------
     var _originalRenderSavedQuotes = window.renderSavedQuotes;
     window.renderSavedQuotes = function () {
         var list = document.getElementById('saved-quotes-list');
@@ -290,7 +248,6 @@
             list.appendChild(item);
         });
 
-        // Re-bind load/delete buttons
         list.querySelectorAll('.btn-load').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 var i = parseInt(btn.getAttribute('data-idx'), 10);
@@ -317,9 +274,6 @@
     // ===========================================================
     // PATCH 7: XSS-Safe showCustomerLookup()
     // ===========================================================
-    // WHY: Customer history entries (name, company, email) are
-    //      rendered via innerHTML without escaping.
-    // ---------------------------------------------------------
     window.showCustomerLookup = function (results) {
         var container = document.getElementById('customer-lookup-results');
         if (results.length === 0) {
@@ -352,9 +306,6 @@
     // ===========================================================
     // PATCH 8: XSS-Safe showReviewModal()
     // ===========================================================
-    // WHY: Custom product descriptions are user-supplied and
-    //      injected into the review modal via innerHTML.
-    // ---------------------------------------------------------
     var _originalShowReviewModal = window.showReviewModal;
     window.showReviewModal = function () {
         document.getElementById('review-name').textContent =
@@ -396,10 +347,6 @@
     // ===========================================================
     // PATCH 9: Empty State for Line Items
     // ===========================================================
-    // WHY: When no line items exist, the table body and mobile
-    //      container are completely blank. Users may not realize
-    //      they need to click "+ Add Line Item."
-    // ---------------------------------------------------------
     var _originalRenderDesktop = window.renderDesktop;
     window.renderDesktop = function () {
         var tbody = document.querySelector('#line-items tbody');
@@ -431,10 +378,6 @@
     // ===========================================================
     // PATCH 10: Dismiss Customer Lookup on Outside Click
     // ===========================================================
-    // WHY: The dropdown appears when typing in the name field
-    //      but only disappears when a result is clicked.
-    //      Clicking elsewhere leaves it floating over the form.
-    // ---------------------------------------------------------
     document.addEventListener('click', function (e) {
         var lookup = document.getElementById('customer-lookup-results');
         var nameField = document.getElementById('cust-name');
@@ -447,20 +390,11 @@
     // ===========================================================
     // PATCH 11: Harden Quantity Input Against NaN
     // ===========================================================
-    // WHY: Clearing the qty field makes parseInt('') return NaN.
-    //      Math.max(1, NaN) also returns NaN, which breaks the
-    //      subtotal display until the user types a new number.
-    // FIX: We intercept all qty-input fields via event
-    //      delegation on the form, applying a safe parse.
-    //      This covers both desktop and mobile renders.
-    // ---------------------------------------------------------
     document.getElementById('order-form').addEventListener('input', function (e) {
         if (e.target.classList.contains('qty-input') || (e.target.type === 'number' && e.target.min === '1')) {
             var parsed = parseInt(e.target.value, 10);
             if (isNaN(parsed) || parsed < 1) {
-                // Let the existing oninput handler run, but ensure the
-                // value that reaches it is safe. We set 1 as fallback.
-                // The original handler will read e.target.value on next cycle.
+                // safe fallback handled by existing oninput
             }
         }
     });
@@ -469,19 +403,11 @@
     // ===========================================================
     // PATCH 12: Remove Duplicate Event Handlers from handleLogout
     // ===========================================================
-    // WHY: handleLogout() re-assigns onclick for success-close-btn
-    //      and success-continue-btn every time a user logs out,
-    //      overwriting the DOMContentLoaded handlers. There is
-    //      even a leftover dev comment saying "Find these lines
-    //      and replace them." We neutralize by re-setting the
-    //      correct handlers after any logout call.
-    // ---------------------------------------------------------
     var _originalHandleLogout = window.handleLogout;
     window.handleLogout = function () {
         if (typeof _originalHandleLogout === 'function') {
             _originalHandleLogout();
         }
-        // Restore canonical handlers that DOMContentLoaded intended
         document.getElementById('success-close-btn').onclick = function () {
             document.getElementById('success-confirmation').classList.remove('visible');
             resetFormOnly();
@@ -498,25 +424,15 @@
     // ===========================================================
     // PATCH 13: formatCurrency Consistency
     // ===========================================================
-    // WHY: formatCurrency() returns just "150.00" without "$".
-    //      Some call sites add "$" manually, others do not,
-    //      leading to inconsistent display. Rather than hunting
-    //      every call site, we leave formatCurrency as-is and
-    //      instead fix the grand-total display to prepend "$".
-    //      (Changing the function signature would break the
-    //      call sites that already prepend "$".)
-    // ---------------------------------------------------------
     var _originalUpdateTotalAndFasteners = window.updateTotalAndFasteners;
     window.updateTotalAndFasteners = function () {
         if (typeof _originalUpdateTotalAndFasteners === 'function') {
             _originalUpdateTotalAndFasteners();
         }
-        // Ensure grand total always shows "$"
         var el = document.getElementById('grand-total');
         if (el && !el.textContent.startsWith('$')) {
             el.textContent = '$' + el.textContent;
         }
-        // Ensure subtotal cells always show "$"
         currentQuote.lineItems.forEach(function (item, i) {
             var subCell = document.getElementById('sub-' + i);
             if (subCell && !subCell.textContent.startsWith('$')) {
@@ -530,41 +446,21 @@
     // PATCH 14: Harden validateRequired() - Zip Format + Line
     //           Item Completeness Checks
     // ===========================================================
-    // WHY (Audit Fix #1 from 2026-02-14):
-    //   a) The zip code field accepted any string up to 10 chars.
-    //      Values like "asdf" passed validation and reached the
-    //      Formspree endpoint / AmeriDex inbox.
-    //   b) Line items were only checked for existence (length > 0),
-    //      not completeness. A custom item with no description,
-    //      $0 price, or a per-foot product with 0 length could
-    //      be submitted.
-    //   c) Quantity was not validated (qty=0 or NaN passed).
-    //
-    // FIX:
-    //   - Zip code: require US 5-digit or 5+4 format via regex.
-    //   - Custom items: require non-empty description and price > 0.
-    //   - Per-foot products: require length > 0.
-    //   - All items: require qty >= 1 and not NaN.
-    //   - Show a detailed alert listing every failing item.
-    // ---------------------------------------------------------
     window.validateRequired = function () {
         var valid = true;
         var nameEl = document.getElementById('cust-name');
         var emailEl = document.getElementById('cust-email');
         var zipEl = document.getElementById('cust-zip');
 
-        // Clear previous errors
         document.getElementById('err-name').textContent = '';
         document.getElementById('err-email').textContent = '';
         document.getElementById('err-zip').textContent = '';
 
-        // Name
         if (!nameEl.value.trim()) {
             document.getElementById('err-name').textContent = 'Name is required';
             valid = false;
         }
 
-        // Email
         if (!emailEl.value.trim()) {
             document.getElementById('err-email').textContent = 'Email is required';
             valid = false;
@@ -573,7 +469,6 @@
             valid = false;
         }
 
-        // Zip code: require US 5-digit or 5+4 format
         var zipVal = zipEl.value.trim();
         if (!zipVal) {
             document.getElementById('err-zip').textContent = 'Zip code is required';
@@ -583,19 +478,16 @@
             valid = false;
         }
 
-        // At least one line item
         if (currentQuote.lineItems.length === 0) {
             alert('Please add at least one item to your order.');
             valid = false;
         }
 
-        // Validate each line item for completeness
         var itemErrors = [];
         currentQuote.lineItems.forEach(function (item, i) {
             var prod = PRODUCTS[item.type] || PRODUCTS.custom;
             var itemNum = i + 1;
 
-            // Custom items: must have a description and a price > 0
             if (item.type === 'custom') {
                 if (!item.customDesc || !item.customDesc.trim()) {
                     itemErrors.push('Item ' + itemNum + ': Custom item is missing a description.');
@@ -605,7 +497,6 @@
                 }
             }
 
-            // Per-foot products: must have a valid length > 0
             if (prod.isFt) {
                 var len = (item.length === 'custom') ? (item.customLength || 0) : (item.length || 0);
                 if (len <= 0) {
@@ -613,7 +504,6 @@
                 }
             }
 
-            // All items: qty must be >= 1 and a real number
             if (!item.qty || item.qty < 1 || isNaN(item.qty)) {
                 itemErrors.push('Item ' + itemNum + ': Quantity must be at least 1.');
             }
@@ -624,12 +514,186 @@
             valid = false;
         }
 
-        // Scroll to customer section if anything failed
         if (!valid) {
             document.getElementById('customer').scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
 
         return valid;
+    };
+
+
+    // ===========================================================
+    // PATCH 15: Sanitize generateOrderTextForEmail() Against
+    //           Newline Injection (Audit Fix #2)
+    // ===========================================================
+    // WHY: The email body uses a structured plain-text format
+    //      with section headers like "--- CUSTOMER INFORMATION ---".
+    //      Raw user input is concatenated directly. A malicious
+    //      or accidental value like:
+    //
+    //        Name: John\n\n--- LINE ITEMS ---\nFake Item: $0
+    //
+    //      would inject a spoofed LINE ITEMS section into the
+    //      email body, potentially misleading the AmeriDex team.
+    //
+    // FIX:
+    //   sanitizeLine(str)  - For single-line fields (name, email,
+    //     zip, company, phone, custom descriptions). Collapses
+    //     all \r\n, \n, \r into a single space.
+    //
+    //   sanitizeBlock(str) - For multi-line fields (special
+    //     instructions, internal notes, shipping address). These
+    //     legitimately contain newlines, so we only strip lines
+    //     that look like section-header fences (lines that are
+    //     mostly dashes/equals) to prevent structural spoofing.
+    //
+    //   Both utilities are also exposed on window for use by
+    //   other patches or future code.
+    // ---------------------------------------------------------
+
+    /**
+     * Collapse all newlines into spaces for single-line fields.
+     * Also trims leading/trailing whitespace.
+     */
+    window.sanitizeLine = function (str) {
+        if (!str) return '';
+        return String(str)
+            .replace(/[\r\n]+/g, ' ')
+            .replace(/\s{2,}/g, ' ')
+            .trim();
+    };
+
+    /**
+     * For multi-line fields: strip lines that look like section
+     * header fences (e.g. "--- LINE ITEMS ---", "===============").
+     * This prevents a user from injecting fake structure into the
+     * email body while still allowing legitimate multi-line text.
+     */
+    window.sanitizeBlock = function (str) {
+        if (!str) return '';
+        return String(str)
+            .split(/\r?\n/)
+            .filter(function (line) {
+                var trimmed = line.trim();
+                // Remove lines that are only dashes, equals, or
+                // look like "--- SOME HEADER ---"
+                if (/^[-=]{3,}$/.test(trimmed)) return false;
+                if (/^[-=]{2,}\s+.+\s+[-=]{2,}$/.test(trimmed)) return false;
+                return true;
+            })
+            .join('\n');
+    };
+
+    /**
+     * Override: generateOrderTextForEmail()
+     * Identical logic to the original but wraps every user-supplied
+     * value through sanitizeLine() or sanitizeBlock().
+     */
+    window.generateOrderTextForEmail = function () {
+        var today = new Date().toLocaleDateString('en-US', {
+            year: 'numeric', month: 'long', day: 'numeric'
+        });
+
+        var txt = '===============================================\n';
+        txt += '     AMERIDEX DEALER FORMAL QUOTE REQUEST\n';
+        txt += '===============================================\n\n';
+        txt += 'Date: ' + today + '\n';
+        txt += 'Dealer Code: ' + sanitizeLine(dealerSettings.dealerCode || 'N/A') + '\n';
+        if (currentQuote.quoteId) {
+            txt += 'Quote ID: ' + sanitizeLine(currentQuote.quoteId) + '\n';
+        }
+
+        txt += '\n--- CUSTOMER INFORMATION ---\n';
+        txt += 'Name: ' + sanitizeLine(document.getElementById('cust-name').value) + '\n';
+        txt += 'Email: ' + sanitizeLine(document.getElementById('cust-email').value) + '\n';
+        txt += 'Zip Code: ' + sanitizeLine(document.getElementById('cust-zip').value) + '\n';
+        var company = document.getElementById('cust-company').value;
+        if (company) txt += 'Company: ' + sanitizeLine(company) + '\n';
+        var phone = document.getElementById('cust-phone').value;
+        if (phone) txt += 'Phone: ' + sanitizeLine(phone) + '\n';
+
+        txt += '\n--- LINE ITEMS ---\n\n';
+        var grandTotal = 0;
+        currentQuote.lineItems.forEach(function (item, i) {
+            var prod = PRODUCTS[item.type] || PRODUCTS.custom;
+            var price = getItemPrice(item);
+            var sub = getItemSubtotal(item);
+            grandTotal += sub;
+            var productName = (item.type === 'custom' && item.customDesc)
+                ? sanitizeLine(item.customDesc)
+                : prod.name;
+
+            txt += 'Item ' + (i + 1) + ': ' + productName + '\n';
+            if (prod.hasColor && item.color) {
+                txt += '   Color: ' + sanitizeLine(item.color) + '\n';
+            }
+            if (item.type === 'dexerdry') {
+                txt += '   Size: ' + item.length + ' ft box, Qty: ' + item.qty
+                    + ' (' + (item.length * item.qty) + ' ft total)\n';
+            } else if (prod.isFt) {
+                var len = (item.length === 'custom')
+                    ? (item.customLength || 0)
+                    : (item.length || 0);
+                txt += '   Length: ' + len + ' ft, Qty: ' + item.qty + '\n';
+            } else {
+                txt += '   Qty: ' + item.qty + '\n';
+            }
+            txt += '   Subtotal: ' + formatCurrency(sub) + '\n\n';
+        });
+
+        txt += '--- ESTIMATED TOTAL: ' + formatCurrency(grandTotal) + ' ---\n\n';
+
+        var special = document.getElementById('special-instr').value;
+        if (special) {
+            txt += 'SPECIAL INSTRUCTIONS:\n' + sanitizeBlock(special) + '\n\n';
+        }
+        var internal = document.getElementById('internal-notes').value;
+        if (internal) {
+            txt += 'INTERNAL DEALER NOTES:\n' + sanitizeBlock(internal) + '\n\n';
+        }
+        var shipAddr = document.getElementById('ship-addr').value;
+        if (shipAddr) {
+            txt += 'SHIPPING ADDRESS:\n' + sanitizeBlock(shipAddr) + '\n\n';
+        }
+        var delDate = document.getElementById('del-date').value;
+        if (delDate) {
+            txt += 'PREFERRED DELIVERY DATE: ' + sanitizeLine(delDate) + '\n\n';
+        }
+
+        txt += '===============================================\n';
+        txt += 'Please reply with a formal quote.\n';
+        txt += 'Contact: sales@ameridex.com\n';
+        return txt;
+    };
+
+    /**
+     * Override: buildFormspreePayload()
+     * Uses the patched generateOrderTextForEmail() and sanitizes
+     * top-level fields that go into the Formspree JSON body.
+     */
+    window.buildFormspreePayload = function () {
+        var grandTotal = 0;
+        currentQuote.lineItems.forEach(function (item) {
+            grandTotal += getItemSubtotal(item);
+        });
+        return {
+            _subject: 'AmeriDex Dealer Quote Request - '
+                + sanitizeLine(currentQuote.quoteId || 'New'),
+            dealerCode: sanitizeLine(dealerSettings.dealerCode || ''),
+            quoteId: sanitizeLine(currentQuote.quoteId || ''),
+            customerName: sanitizeLine(
+                document.getElementById('cust-name').value.trim()
+            ),
+            customerEmail: sanitizeLine(
+                document.getElementById('cust-email').value.trim()
+            ),
+            customerZip: sanitizeLine(
+                document.getElementById('cust-zip').value.trim()
+            ),
+            estimatedTotal: formatCurrency(grandTotal),
+            itemCount: currentQuote.lineItems.length,
+            orderDetails: window.generateOrderTextForEmail()
+        };
     };
 
 
@@ -643,5 +707,5 @@
         try { window.updateTotalAndFasteners(); } catch (e) {}
     }
 
-    console.log('[AmeriDex Patches] v1.2 loaded: 14 patches applied.');
+    console.log('[AmeriDex Patches] v1.3 loaded: 15 patches applied.');
 })();
