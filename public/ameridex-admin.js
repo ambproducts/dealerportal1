@@ -1,22 +1,17 @@
 // ============================================================
-// AmeriDex Dealer Portal - Admin Panel v1.1
+// AmeriDex Dealer Portal - Admin Panel v1.2
 // Date: 2026-02-14
 // ============================================================
-// REQUIRES: ameridex-api.js (v2.1) loaded first
+// REQUIRES: ameridex-api.js (v2.1+) loaded first
 //
 // Load order in dealer-portal.html (before </body>):
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
 //   <script src="ameridex-admin.js"></script>
 //
-// This file:
-//   1. Injects the Admin Panel modal (3 tabs: Dealers, Quotes, Pricing)
-//   2. Wires the Admin header button to open it
-//   3. Full CRUD for dealers (create, edit, reset password, toggle active)
-//   4. View/manage all quotes across all dealers with status transitions
-//   5. Edit pricing tiers and multipliers with product price preview
-//   6. Export quotes to CSV
-//   7. Only accessible to role=admin users
+// v1.2 Changes (2026-02-14):
+//   - FIX: Add Dealer password field changed from type='text'
+//     to type='password' so credentials are masked on screen.
 //
 // v1.1 Changes (2026-02-14):
 //   - FIX: Pricing tier GET/PUT uses /api/admin/pricing-tiers
@@ -183,7 +178,7 @@
                             '<div class="admin-form-row">' +
                                 '<div class="admin-form-field">' +
                                     '<label>Password</label>' +
-                                    '<input type="text" id="admin-new-pw" placeholder="Min 8 characters">' +
+                                    '<input type="password" id="admin-new-pw" placeholder="Min 8 characters">' +
                                 '</div>' +
                                 '<div class="admin-form-field">' +
                                     '<label>Dealer Name</label>' +
@@ -990,5 +985,5 @@
     });
 
 
-    console.log('[AmeriDex Admin] v1.1 loaded.');
+    console.log('[AmeriDex Admin] v1.2 loaded.');
 })();
