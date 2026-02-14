@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - Role System v1.1
+// AmeriDex Dealer Portal - Role System v1.2
 // Date: 2026-02-14
 // ============================================================
 // Implements GM (General Manager) and Frontdesk (Frontman) roles
@@ -14,6 +14,10 @@
 //   admin    - Full access (AmeriDex internal staff)
 //   dealer   - Legacy role, treated as GM equivalent
 //   rep      - Internal rep, treated as GM equivalent
+//
+// v1.2 Changes (2026-02-14):
+//   - FIX: GM-created accounts are immediately active (no admin approval)
+//   - FIX: Success message updated to reflect instant activation
 //
 // v1.1 Changes (2026-02-14):
 //   - ADD: Section 6: GM User Management subsection
@@ -353,14 +357,6 @@
     // ----------------------------------------------------------
     // 6. GM USER MANAGEMENT SUBSECTION
     // ----------------------------------------------------------
-    // This widget appears on the GM dashboard between the
-    // overrides widget and the saved quotes section.
-    // It allows the GM to:
-    //   - View all frontdesk users at their dealership
-    //   - Create new frontdesk accounts
-    //   - Disable/enable frontdesk accounts
-    //   - Reset frontdesk passwords
-    // ----------------------------------------------------------
     var _usersWidgetCreated = false;
 
     function createUsersWidget() {
@@ -417,7 +413,6 @@
                 '</div>' +
             '</div>';
 
-        // Insert after overrides widget, before saved quotes
         var overridesWidget = document.getElementById('gm-overrides-widget');
         var savedSection = document.getElementById('saved-quotes-section');
         if (overridesWidget && overridesWidget.parentNode) {
@@ -431,7 +426,6 @@
             }
         }
 
-        // Wire up toggle button
         document.getElementById('gm-create-user-toggle').addEventListener('click', function () {
             var form = document.getElementById('gm-create-user-form');
             form.classList.toggle('active');
@@ -571,7 +565,6 @@
         html += '</tbody></table>';
         container.innerHTML = html;
 
-        // Wire up action buttons
         container.querySelectorAll('[data-action="disable"]').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 handleDisableUser(btn.getAttribute('data-uid'), btn.getAttribute('data-uname'));
@@ -600,7 +593,6 @@
         var email = document.getElementById('gm-new-email').value.trim();
         var phone = document.getElementById('gm-new-phone').value.trim();
 
-        // Validation
         if (!username || username.length < 3) {
             showCreateError('Username must be at least 3 characters.');
             document.getElementById('gm-new-username').focus();
@@ -632,11 +624,8 @@
             .then(function (newUser) {
                 showCreateSuccess(
                     'Account "' + newUser.username + '" created successfully. ' +
-                    (newUser.status === 'pending'
-                        ? 'Awaiting AmeriDex admin approval before they can log in.'
-                        : 'Account is active and ready to use.')
+                    'Account is active and ready to log in.'
                 );
-                // Clear form fields but keep form open to show success
                 document.getElementById('gm-new-username').value = '';
                 document.getElementById('gm-new-display-name').value = '';
                 document.getElementById('gm-new-password').value = '';
@@ -645,7 +634,6 @@
                 submitBtn.disabled = false;
                 submitBtn.textContent = 'Create Account';
 
-                // Refresh the users table
                 loadDealerUsers();
             })
             .catch(function (err) {
@@ -684,7 +672,6 @@
     }
 
     function handleResetPassword(userId, username, btn) {
-        // Check if inline input already shown
         var row = btn.closest('tr');
         var existing = row.querySelector('.reset-pw-inline');
         if (existing) {
@@ -726,7 +713,6 @@
                 });
         });
 
-        // Enter key support
         pwInput.addEventListener('keydown', function (e) {
             if (e.key === 'Enter') {
                 inline.querySelector('.reset-pw-confirm').click();
@@ -807,7 +793,6 @@
                 injectRoleBadge();
                 applyRoleVisibility();
                 patchAdminDealerForm();
-                // Refresh user management widget when app becomes visible
                 if (!_usersWidgetCreated) {
                     createUsersWidget();
                 }
@@ -832,13 +817,12 @@
         applyRoleVisibility();
         patchAdminDealerForm();
 
-        // Create user management widget for GM/Admin
         if (user.role === 'gm' || user.role === 'admin') {
             createUsersWidget();
             loadDealerUsers();
         }
 
-        console.log('[Roles] v1.1 initialized for role: ' + user.role +
+        console.log('[Roles] v1.2 initialized for role: ' + user.role +
             ' (' + getRoleLabel(user.role) + ')' +
             ' | Approver: ' + isApprover() +
             ' | Frontdesk: ' + isFrontdesk());
@@ -846,5 +830,5 @@
 
     setTimeout(initRoles, 600);
 
-    console.log('[AmeriDex Roles] v1.1 loaded: GM/Frontdesk role system + User Management.');
+    console.log('[AmeriDex Roles] v1.2 loaded: GM/Frontdesk role system + User Management.');
 })();
