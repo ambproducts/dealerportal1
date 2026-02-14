@@ -1,9 +1,8 @@
 // ============================================================
-// AmeriDex Dealer Portal - Price Override System v1.2
+// AmeriDex Dealer Portal - Price Override System v1.3
 // Date: 2026-02-14
 // ============================================================
-// REQUIRES: ameridex-api.js loaded first (provides ameridexAPI,
-//           getCurrentUser, getCurrentDealer)
+// REQUIRES: ameridex-api.js, ameridex-pricing-fix.js loaded first
 //
 // Load order (managed by script-loader.js):
 //   1. ameridex-patches.js
@@ -14,21 +13,28 @@
 //   6. ameridex-admin.js
 //   7. ameridex-admin-customers.js
 //
+// v1.3 Changes (2026-02-14):
+//   - REWRITE: Overrides now operate client-side on the live
+//     currentQuote.lineItems. No save required before overriding.
+//   - GM/Admin override is instant (status: approved, price
+//     changes on screen immediately via getDisplayPrice()).
+//   - Frontdesk override sets status: pending (price unchanged
+//     until GM approves). Persists when quote is saved.
+//   - Multiple line items can be overridden in sequence.
+//   - Server sync happens in background when quote has a server
+//     ID, but UI does not depend on the server response.
+//
 // v1.2 Changes (2026-02-14):
-//   - FIX: Force-save quote before sending override request so
-//     server has all line items (fixes "Line item not found at
-//     index N" when new items were added but not yet saved).
-//   - FIX: After successful override, merge server response back
-//     into currentQuote.lineItems and re-render so the overridden
-//     price displays immediately (fixes price not updating).
+//   - FIX: Force-save before override (removed in v1.3).
+//   - FIX: Merge server response into local state (kept, refined).
 //
 // v1.1 Changes (2026-02-14):
-//   - ADD: Defensive escapeHTML fallback in case patches.js
-//     hasn't loaded or failed. Prevents crash in override UI.
+//   - ADD: Defensive escapeHTML fallback.
 //
 // This module handles:
-//   - Override Price button per line item
-//   - Override request modal (price + reason)
+//   - Override Price modal per line item
+//   - Client-side immediate price override for GM/Admin
+//   - Client-side pending override request for Frontdesk
 //   - Visual badges (pending/approved/rejected)
 //   - GM pending overrides dashboard widget
 //   - Submit gate (blocks if pending overrides exist)
@@ -167,7 +173,7 @@
     document.body.appendChild(modalContainer.firstElementChild);
 
     // State for currently open override
-    var _overrideTarget = null; // { quoteServerId, itemIndex, tierPrice, productName }
+    var _overrideTarget = null; // { itemIndex, tierPrice, productName }
 
 
     // ----------------------------------------------------------
@@ -176,7 +182,7 @@
     function openOverrideModal(quoteServerId, itemIndex, tierPrice, productName) {
         var user = window.getCurrentUser ? window.getCurrentUser() : null;
         var role = user ? user.role : 'frontdesk';
-        var isApprover = (role === 'gm' || role === 'admin');
+        var canApprove = (role === 'gm' || role === 'admin' || role === 'dealer' || role === 'rep');
 
         _overrideTarget = {
             quoteServerId: quoteServerId,
@@ -193,7 +199,7 @@
         document.getElementById('override-error').style.display = 'none';
 
         var submitBtn = document.getElementById('override-submit-btn');
-        if (isApprover) {
+        if (canApprove) {
             submitBtn.textContent = 'Apply Override';
             document.getElementById('override-modal-title').textContent = 'Override Price (Immediate)';
         } else {
@@ -231,95 +237,20 @@
 
 
     // ----------------------------------------------------------
-    // 3b. HELPER: Ensure the current quote is saved to server
-    //     before sending an override request. This guarantees
-    //     all line items (including newly added ones) exist on
-    //     the server so the itemIndex is valid.
+    // 3b. APPLY OVERRIDE: Client-side, no save required
     // ----------------------------------------------------------
-    function ensureQuoteSaved() {
-        return new Promise(function (resolve, reject) {
-            // If we already have a server ID, save/update via the
-            // existing save mechanism to sync line items
-            if (typeof saveCurrentQuote === 'function') {
-                saveCurrentQuote();
-            }
-
-            // Poll for the server ID to be available (save is async)
-            var attempts = 0;
-            var maxAttempts = 20; // 20 x 250ms = 5s max wait
-
-            function poll() {
-                attempts++;
-                var serverId = null;
-
-                if (typeof savedQuotes !== 'undefined' && typeof currentQuote !== 'undefined' && currentQuote.quoteId) {
-                    var match = savedQuotes.find(function (q) {
-                        return q.quoteId === currentQuote.quoteId;
-                    });
-                    if (match && match._serverId) {
-                        serverId = match._serverId;
-                    }
-                }
-
-                if (serverId) {
-                    resolve(serverId);
-                } else if (attempts >= maxAttempts) {
-                    reject(new Error('Please save the quote before requesting an override.'));
-                } else {
-                    setTimeout(poll, 250);
-                }
-            }
-
-            // Small initial delay to let saveCurrentQuote() kick off
-            setTimeout(poll, 300);
-        });
-    }
-
-
-    // ----------------------------------------------------------
-    // 3c. HELPER: Merge server line items back into the local
-    //     currentQuote so renderDesktop() shows updated prices.
-    // ----------------------------------------------------------
-    function syncLocalQuoteFromServer(serverQuote) {
-        if (!serverQuote || !serverQuote.lineItems) return;
-        if (typeof currentQuote === 'undefined' || !currentQuote.lineItems) return;
-
-        // Update each line item with server-side price data
-        serverQuote.lineItems.forEach(function (serverItem, idx) {
-            if (idx < currentQuote.lineItems.length) {
-                var local = currentQuote.lineItems[idx];
-                // Sync price fields from server
-                local.price = serverItem.price;
-                local.tierPrice = serverItem.tierPrice;
-                local.basePrice = serverItem.basePrice;
-                local.total = serverItem.total;
-                local.priceOverride = serverItem.priceOverride;
-            }
-        });
-
-        // Also update the saved quote in the savedQuotes array
-        if (typeof savedQuotes !== 'undefined' && currentQuote.quoteId) {
-            var match = savedQuotes.find(function (q) {
-                return q.quoteId === currentQuote.quoteId;
-            });
-            if (match) {
-                match.lineItems = currentQuote.lineItems;
-                match.totalAmount = serverQuote.totalAmount;
-            }
-        }
-
-        // Re-render to show updated prices
-        if (typeof renderDesktop === 'function') {
-            renderDesktop();
-        }
-        if (typeof updateTotals === 'function') {
-            updateTotals();
-        }
-    }
-
-
-    // ----------------------------------------------------------
-    // 3d. SUBMIT OVERRIDE REQUEST (click handler)
+    // GM/Admin/Dealer/Rep: sets override as 'approved' directly
+    //   on the lineItem. getDisplayPrice() in pricing-fix.js
+    //   already reads approved overrides, so the price chain
+    //   picks it up immediately on re-render.
+    //
+    // Frontdesk: sets override as 'pending'. Price does NOT
+    //   change until a GM approves. The pending override is
+    //   persisted when the quote is saved.
+    //
+    // If the quote already has a server ID, we also fire the
+    // server endpoint in the background to keep it in sync,
+    // but the UI does NOT wait for or depend on the response.
     // ----------------------------------------------------------
     document.getElementById('override-submit-btn').addEventListener('click', function () {
         if (!_overrideTarget) return;
@@ -347,61 +278,141 @@
             return;
         }
 
-        submitBtn.disabled = true;
-        submitBtn.textContent = 'Saving quote...';
+        // Resolve user info
+        var user = window.getCurrentUser ? window.getCurrentUser() : null;
+        var role = user ? user.role : 'frontdesk';
+        var username = user ? user.username : 'unknown';
+        var canApprove = (role === 'gm' || role === 'admin' || role === 'dealer' || role === 'rep');
+        var idx = _overrideTarget.itemIndex;
+        var tierPrice = _overrideTarget.tierPrice;
+        var roundedPrice = Math.round(price * 100) / 100;
 
-        // Capture target values before async (closure safety)
-        var targetIndex = _overrideTarget.itemIndex;
-        var targetTierPrice = _overrideTarget.tierPrice;
+        // Validate the line item exists in local state
+        if (typeof currentQuote === 'undefined' || !currentQuote.lineItems || !currentQuote.lineItems[idx]) {
+            errorEl.textContent = 'Line item not found. Please try again.';
+            errorEl.style.display = 'block';
+            return;
+        }
 
-        // STEP 1: Force-save the quote so server has all line items
-        ensureQuoteSaved()
-            .then(function (serverId) {
-                // Update the target server ID (may have been created by save)
-                _overrideTarget.quoteServerId = serverId;
+        var item = currentQuote.lineItems[idx];
 
-                submitBtn.textContent = 'Submitting...';
+        // ----- CLIENT-SIDE: Apply override to local lineItem -----
+        item.priceOverride = {
+            requestedPrice: roundedPrice,
+            originalTierPrice: tierPrice,
+            reason: reason,
+            requestedBy: username,
+            requestedByRole: role,
+            requestedAt: new Date().toISOString(),
+            status: canApprove ? 'approved' : 'pending',
+            approvedBy: canApprove ? username : null,
+            approvedAt: canApprove ? new Date().toISOString() : null,
+            rejectedBy: null,
+            rejectedAt: null,
+            rejectedReason: null
+        };
 
-                var path = '/api/quotes/' + serverId
-                    + '/items/' + targetIndex + '/request-override';
+        // Store tierPrice on the item if not already present
+        // (needed by getDisplayPrice fallback chain)
+        if (item.tierPrice === undefined || item.tierPrice === null) {
+            item.tierPrice = tierPrice;
+        }
 
-                // STEP 2: Send the override request
-                return api('POST', path, {
-                    requestedPrice: price,
-                    reason: reason
-                });
-            })
-            .then(function (result) {
-                // STEP 3: Merge server response into local state
-                // so the price updates immediately on screen
-                if (result.quote) {
+        // Re-render immediately so price updates on screen
+        if (typeof renderDesktop === 'function') {
+            renderDesktop();
+        }
+        if (typeof renderMobile === 'function') {
+            renderMobile();
+        }
+        if (typeof updateTotals === 'function') {
+            updateTotals();
+        }
+        if (typeof updateTotalAndFasteners === 'function') {
+            updateTotalAndFasteners();
+        }
+
+        // Close modal and show feedback
+        closeOverrideModal();
+
+        if (canApprove) {
+            showOverrideToast(
+                'Price override applied: $' + tierPrice.toFixed(2) + ' changed to $' + roundedPrice.toFixed(2),
+                'success'
+            );
+        } else {
+            showOverrideToast(
+                'Price override requested for ' + _overrideTarget.productName + '. Awaiting GM approval.',
+                'pending'
+            );
+        }
+
+        // ----- BACKGROUND SERVER SYNC (fire-and-forget) -----
+        // If the quote has a server ID, sync the override to
+        // the server in the background. We do NOT block on this.
+        var serverId = null;
+        if (typeof savedQuotes !== 'undefined' && typeof currentQuote !== 'undefined' && currentQuote.quoteId) {
+            var match = savedQuotes.find(function (q) { return q.quoteId === currentQuote.quoteId; });
+            if (match && match._serverId) serverId = match._serverId;
+        }
+        // Also check the explicit target server ID
+        if (!serverId && _overrideTarget && _overrideTarget.quoteServerId) {
+            serverId = _overrideTarget.quoteServerId;
+        }
+
+        if (serverId && api) {
+            var path = '/api/quotes/' + serverId + '/items/' + idx + '/request-override';
+            api('POST', path, {
+                requestedPrice: roundedPrice,
+                reason: reason
+            }).then(function (result) {
+                console.log('[Overrides] Server sync OK for item #' + idx);
+                // If server returns updated quote, merge it
+                if (result && result.quote) {
                     syncLocalQuoteFromServer(result.quote);
                 }
-
-                closeOverrideModal();
-
-                // Refresh saved quotes list for badge updates
-                if (typeof window.loadServerQuotesAndRender === 'function') {
-                    window.loadServerQuotesAndRender();
-                }
-                // Refresh GM widget if visible
-                loadPendingOverrides();
-
-                var status = result.item.priceOverride.status;
-                var msg = (status === 'approved')
-                    ? 'Price override applied: $' + targetTierPrice.toFixed(2) + ' changed to $' + price.toFixed(2)
-                    : 'Price override requested. Awaiting GM approval.';
-                showOverrideToast(msg, status === 'approved' ? 'success' : 'pending');
-            })
-            .catch(function (err) {
-                errorEl.textContent = err.message || 'Failed to submit override';
-                errorEl.style.display = 'block';
-                submitBtn.disabled = false;
-                var user = window.getCurrentUser ? window.getCurrentUser() : null;
-                var role = user ? user.role : 'frontdesk';
-                submitBtn.textContent = (role === 'gm' || role === 'admin') ? 'Apply Override' : 'Request Override';
+            }).catch(function (err) {
+                console.warn('[Overrides] Server sync failed for item #' + idx + ':', err.message);
+                // No user-facing error. The override is already applied locally.
+                // It will be synced when the quote is saved.
             });
+        }
     });
+
+
+    // ----------------------------------------------------------
+    // 3c. HELPER: Sync server quote data into local state
+    // ----------------------------------------------------------
+    function syncLocalQuoteFromServer(serverQuote) {
+        if (!serverQuote || !serverQuote.lineItems) return;
+        if (typeof currentQuote === 'undefined' || !currentQuote.lineItems) return;
+
+        serverQuote.lineItems.forEach(function (serverItem, idx) {
+            if (idx < currentQuote.lineItems.length) {
+                var local = currentQuote.lineItems[idx];
+                // Only sync override data from server (don't clobber local overrides
+                // that haven't been synced yet)
+                if (serverItem.priceOverride && !local.priceOverride) {
+                    local.priceOverride = serverItem.priceOverride;
+                }
+                // If server has approved what was pending locally, update status
+                if (local.priceOverride && local.priceOverride.status === 'pending'
+                    && serverItem.priceOverride && serverItem.priceOverride.status === 'approved') {
+                    local.priceOverride = serverItem.priceOverride;
+                    // Re-render to show the approval
+                    if (typeof renderDesktop === 'function') renderDesktop();
+                    if (typeof updateTotals === 'function') updateTotals();
+                }
+                // Sync tierPrice and basePrice from server if we don't have them
+                if ((local.tierPrice === undefined || local.tierPrice === null) && serverItem.tierPrice) {
+                    local.tierPrice = serverItem.tierPrice;
+                }
+                if ((local.basePrice === undefined || local.basePrice === null) && serverItem.basePrice) {
+                    local.basePrice = serverItem.basePrice;
+                }
+            }
+        });
+    }
 
 
     // ----------------------------------------------------------
@@ -425,7 +436,7 @@
 
 
     // ----------------------------------------------------------
-    // 5. INJECT OVERRIDE BUTTONS INTO LINE ITEMS
+    // 5. OVERRIDE BADGE + PRICE DISPLAY HELPERS
     // ----------------------------------------------------------
     function getOverrideBadgeHTML(overrideObj) {
         if (!overrideObj) return '';
@@ -441,12 +452,12 @@
         if (!item.priceOverride) return '';
         var html = '<div class="line-item-override-info">';
         if (item.priceOverride.status === 'approved') {
-            html += '<span class="override-original-price">$' + (item.tierPrice || 0).toFixed(2) + '</span>';
+            html += '<span class="override-original-price">$' + (item.priceOverride.originalTierPrice || item.tierPrice || 0).toFixed(2) + '</span>';
             html += '<span class="override-arrow">&#8594;</span>';
             html += '<span class="override-new-price">$' + item.priceOverride.requestedPrice.toFixed(2) + '</span>';
             html += getOverrideBadgeHTML(item.priceOverride);
         } else if (item.priceOverride.status === 'pending') {
-            html += '<span class="override-original-price">$' + (item.tierPrice || 0).toFixed(2) + '</span>';
+            html += '<span class="override-original-price">$' + (item.priceOverride.originalTierPrice || item.tierPrice || 0).toFixed(2) + '</span>';
             html += '<span class="override-arrow">&#8594;</span>';
             html += '<span style="color:#f59e0b;font-weight:600;">$' + item.priceOverride.requestedPrice.toFixed(2) + '</span>';
             html += getOverrideBadgeHTML(item.priceOverride);
@@ -467,11 +478,10 @@
 
 
     // ----------------------------------------------------------
-    // 6. PATCH renderSavedQuotes TO SHOW OVERRIDE STATES
+    // 6. refreshOverrideStates placeholder
     // ----------------------------------------------------------
     function refreshOverrideStates() {
-        // Called after renders to update UI. Currently a
-        // placeholder for future saved-quotes-list decoration.
+        // Placeholder for future saved-quotes-list decoration.
     }
 
 
@@ -598,7 +608,6 @@
         api('POST', '/api/quotes/' + quoteId + '/items/' + itemIndex + '/approve-override')
             .then(function (result) {
                 showOverrideToast('Price override approved!', 'success');
-                // Sync local state if this is the currently loaded quote
                 if (result.quote) {
                     syncLocalQuoteFromServer(result.quote);
                 }
@@ -627,7 +636,6 @@
             })
                 .then(function (result) {
                     showOverrideToast('Price override rejected.', 'error');
-                    // Sync local state if this is the currently loaded quote
                     if (result.quote) {
                         syncLocalQuoteFromServer(result.quote);
                     }
@@ -660,39 +668,31 @@
         var reviewModal = document.getElementById('reviewModal');
         if (!reviewModal) return;
 
-        var currentServerId = null;
-        if (typeof savedQuotes !== 'undefined' && typeof currentQuote !== 'undefined' && currentQuote.quoteId) {
-            var match = savedQuotes.find(function (q) { return q.quoteId === currentQuote.quoteId; });
-            if (match) currentServerId = match._serverId;
+        // Check local state first (works even before server save)
+        var pendingCount = 0;
+        if (typeof currentQuote !== 'undefined' && currentQuote.lineItems) {
+            pendingCount = currentQuote.lineItems.filter(function (li) {
+                return li.priceOverride && li.priceOverride.status === 'pending';
+            }).length;
         }
 
-        if (!currentServerId) return;
-
-        api('GET', '/api/quotes/' + currentServerId)
-            .then(function (quote) {
-                var pendingCount = (quote.lineItems || []).filter(function (li) {
-                    return li.priceOverride && li.priceOverride.status === 'pending';
-                }).length;
-
-                var warningEl = document.getElementById('submit-block-warning');
-                if (pendingCount > 0) {
-                    if (!warningEl) {
-                        warningEl = document.createElement('div');
-                        warningEl.className = 'submit-block-warning';
-                        warningEl.id = 'submit-block-warning';
-                        var modalContent = reviewModal.querySelector('.modal-content') || reviewModal;
-                        modalContent.appendChild(warningEl);
-                    }
-                    warningEl.innerHTML =
-                        '<span class="warning-icon">&#9888;</span>' +
-                        '<span>This quote has <strong>' + pendingCount + ' pending price override(s)</strong>. ' +
-                        'GM approval is required before submission.</span>';
-                    warningEl.style.display = 'flex';
-                } else if (warningEl) {
-                    warningEl.style.display = 'none';
-                }
-            })
-            .catch(function () { /* silently fail */ });
+        var warningEl = document.getElementById('submit-block-warning');
+        if (pendingCount > 0) {
+            if (!warningEl) {
+                warningEl = document.createElement('div');
+                warningEl.className = 'submit-block-warning';
+                warningEl.id = 'submit-block-warning';
+                var modalContent = reviewModal.querySelector('.modal-content') || reviewModal;
+                modalContent.appendChild(warningEl);
+            }
+            warningEl.innerHTML =
+                '<span class="warning-icon">&#9888;</span>' +
+                '<span>This quote has <strong>' + pendingCount + ' pending price override(s)</strong>. ' +
+                'GM approval is required before submission.</span>';
+            warningEl.style.display = 'flex';
+        } else if (warningEl) {
+            warningEl.style.display = 'none';
+        }
     }
 
     var _origShowReviewForOverrides = window.showReviewModal;
@@ -734,7 +734,7 @@
 
         createGMWidget();
         loadPendingOverrides();
-        console.log('[Overrides] v1.2 initialized for role: ' + user.role);
+        console.log('[Overrides] v1.3 initialized for role: ' + user.role);
     }
 
     setTimeout(initOverrides, 500);
@@ -751,5 +751,5 @@
         observer.observe(mainApp, { attributes: true, attributeFilter: ['class'] });
     }
 
-    console.log('[AmeriDex Overrides] v1.2 loaded.');
+    console.log('[AmeriDex Overrides] v1.3 loaded.');
 })();
