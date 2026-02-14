@@ -21,6 +21,7 @@ app.use('/api/admin/dealers', require('./routes/admin-dealers'));
 app.use('/api/admin/quotes', require('./routes/admin-quotes'));
 app.use('/api/admin/pricing-tiers', require('./routes/admin-pricing'));
 app.use('/api/admin/customers', require('./routes/admin-customers'));
+app.use('/api/admin/products', require('./routes/admin-products'));
 app.use('/api/master', require('./routes/master'));
 
 app.get('*', (req, res) => {
