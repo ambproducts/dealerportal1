@@ -1,0 +1,233 @@
+# ============================================================
+# AmeriDex Dealer Portal - Render.com Deployment v2.0
+# Date: 2026-02-14
+# ============================================================
+# This configuration deploys the dealer portal as a single
+# Node.js web service with persistent disk storage.
+#
+# Required Environment Variables (set in Render dashboard):
+#   - JWT_SECRET (generate with: openssl rand -base64 32)
+#   - NODE_ENV (set to 'production')
+#   - PORT (auto-set by Render, defaults to 10000)
+# ============================================================
+
+services:
+  # Main web service
+  - type: web
+    name: ameridex-dealer-portal
+    runtime: node
+    plan: starter  # Change to 'standard' for production
+    region: oregon  # Change to your preferred region
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: JWT_SECRET
+        generateValue: true  # Render auto-generates secure random value
+      - key: BCRYPT_ROUNDS
+        value: 10
+    healthCheckPath: /api/health
+    autoDeploy: true
+    
+    # Persistent disk for data storage (quotes, dealers, customers, etc.)
+    disk:
+      name: ameridex-data
+      mountPath: /opt/render/project/data
+      sizeGB: 1  # Increase as needed
+    
+    # Enable auto-scaling (optional, requires higher plan)
+    # scaling:
+    #   minInstances: 1
+    #   maxInstances: 3
+    #   targetMemoryPercent: 80
+    #   targetCPUPercent: 80
+
+# ============================================================
+# Post-Deployment Setup (manual steps in Render dashboard):
+# ============================================================
+# 1. Add JWT_SECRET environment variable:
+#    - Go to Environment tab
+#    - If not auto-generated, add: JWT_SECRET = <secure-random-string>
+#    - Generate with: openssl rand -base64 32
+#
+# 2. Create initial admin user (via server SSH or local):
+#    - SSH into the service or run locally
+#    - node scripts/create-admin.js (if you create this script)
+#    - Or manually create data/dealers.json with admin entry
+#
+# 3. Upload initial data files (if migrating from existing):
+#    - Use Render's file upload or SSH/rsync to /opt/render/project/data/
+#    - Ensure dealers.json, users.json, quotes.json exist
+#    - Or let the app auto-initialize on first run
+#
+# 4. Configure custom domain (optional):
+#    - Go to Settings > Custom Domain
+#    - Add your domain (e.g., portal.ameridex.com)
+#    - Update DNS CNAME record
+#
+# 5. Enable HTTPS (automatic with Render):
+#    - SSL certificates are auto-provisioned
+#    - Force HTTPS in Settings if needed
+#
+# 6. Monitor deployment:
+#    - Check Logs tab for startup messages
+#    - Verify /api/health returns 200 OK
+#    - Test login with initial dealer credentials
+# ============================================================
+
+# ============================================================
+# File Structure Expected by This Config:
+# ============================================================
+# /
+# ├── package.json         (defines "start": "node server.js")
+# ├── server.js            (entry point)
+# ├── routes/              (all API route modules)
+# │   ├── auth.js
+# │   ├── dealers.js
+# │   ├── quotes.js
+# │   ├── products.js
+# │   ├── customers.js
+# │   ├── users.js
+# │   ├── master.js
+# │   ├── admin-dealers.js
+# │   ├── admin-quotes.js
+# │   ├── admin-pricing.js
+# │   └── admin-customers.js
+# ├── middleware/
+# │   └── auth.js          (JWT auth middleware)
+# ├── lib/
+# │   └── backup.js        (JSON data backup utilities)
+# ├── data/                (persistent disk mount, JSON files)
+# │   ├── dealers.json
+# │   ├── users.json
+# │   ├── quotes.json
+# │   ├── customers.json
+# │   ├── products.json
+# │   ├── tiers.json
+# │   └── backups/         (auto-backup directory)
+# ├── public/              (static frontend files)
+# │   ├── dealer-portal.html
+# │   ├── ameridex-patches.js
+# │   ├── ameridex-api.js
+# │   ├── ameridex-admin.js
+# │   ├── ameridex-admin-customers.js
+# │   └── colors/          (color swatch images)
+# ├── .env.example         (template for local dev)
+# └── README.md
+# ============================================================
+
+# ============================================================
+# Scaling & Performance Notes:
+# ============================================================
+# - Starter plan: 512MB RAM, 0.5 CPU, $7/month
+# - Standard plan: 2GB RAM, 1 CPU, auto-scaling, $25/month
+# - Current architecture uses file-based JSON storage
+# - For >100 concurrent users, consider migrating to PostgreSQL
+# - Disk I/O is acceptable for <1000 quotes, <100 dealers
+# - Add Redis for session caching if scaling beyond 1 instance
+# ============================================================
+
+# ============================================================
+# Backup Strategy:
+# ============================================================
+# - lib/backup.js automatically creates daily backups to data/backups/
+# - Backups are stored on the persistent disk
+# - Recommendation: Set up external backup via cron job or Render job
+# - Example external backup (add as separate job):
+#
+# jobs:
+#   - type: cron
+#     name: daily-backup
+#     schedule: "0 2 * * *"  # 2 AM daily
+#     buildCommand: npm install
+#     startCommand: node scripts/backup-to-s3.js
+#     envVars:
+#       - key: AWS_ACCESS_KEY_ID
+#         sync: false
+#       - key: AWS_SECRET_ACCESS_KEY
+#         sync: false
+#       - key: S3_BUCKET
+#         value: ameridex-portal-backups
+# ============================================================
+
+# ============================================================
+# Security Checklist:
+# ============================================================
+# ✓ JWT_SECRET is randomly generated and kept secret
+# ✓ Passwords are bcrypt-hashed (BCRYPT_ROUNDS=10)
+# ✓ HTTPS enforced by Render
+# ✓ CORS configured in server.js
+# ✓ Auth middleware protects all /api/* routes except /api/auth/login
+# ✓ Admin routes require role=admin check
+# ✓ File uploads disabled (no multer/formidable)
+# ✓ Rate limiting recommended (add express-rate-limit)
+# ✓ Helmet.js recommended for security headers
+# ============================================================
+
+# ============================================================
+# Monitoring & Logging:
+# ============================================================
+# - Render provides built-in logs (accessible via dashboard)
+# - Health check endpoint: GET /api/health
+# - Add custom logging with Winston or Pino for production
+# - Integrate with external monitoring (e.g., Sentry, Datadog)
+# - Key metrics to track:
+#   * Response time for /api/quotes (should be <500ms)
+#   * Auth failures (potential brute-force attempts)
+#   * Disk usage of /opt/render/project/data
+#   * Memory usage (watch for leaks in quote processing)
+# ============================================================
+
+# ============================================================
+# Environment-Specific Overrides (if needed):
+# ============================================================
+# For staging environment, create render-staging.yaml:
+#
+# services:
+#   - type: web
+#     name: ameridex-dealer-portal-staging
+#     runtime: node
+#     plan: starter
+#     branch: develop  # Deploy from develop branch
+#     buildCommand: npm install
+#     startCommand: npm start
+#     envVars:
+#       - key: NODE_ENV
+#         value: staging
+#       - key: JWT_SECRET
+#         generateValue: true
+#     disk:
+#       name: ameridex-data-staging
+#       mountPath: /opt/render/project/data
+#       sizeGB: 1
+# ============================================================
+
+# ============================================================
+# Troubleshooting Common Issues:
+# ============================================================
+# Issue: Service fails to start
+# → Check logs for "PORT already in use" or missing JWT_SECRET
+# → Verify package.json has "start": "node server.js"
+# → Ensure all dependencies are in package.json, not package-lock
+#
+# Issue: 404 on /api/auth/login
+# → Verify routes/auth.js is loaded in server.js
+# → Check that middleware/auth.js doesn't block login route
+#
+# Issue: Data not persisting between deploys
+# → Confirm disk is mounted at /opt/render/project/data
+# → Verify data/ directory is in .gitignore (don't commit data files)
+# → Check that JSON files are written to correct path
+#
+# Issue: CORS errors from frontend
+# → Add your Render URL to CORS whitelist in server.js
+# → Example: cors({ origin: 'https://ameridex-dealer-portal.onrender.com' })
+#
+# Issue: Slow performance after 50+ quotes
+# → Enable gzip compression in server.js
+# → Add Redis caching for product pricing
+# → Consider pagination for /api/admin/quotes
+# ============================================================
