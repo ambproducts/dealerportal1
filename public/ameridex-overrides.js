@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - Price Override System v1.3
+// AmeriDex Dealer Portal - Price Override System v1.4
 // Date: 2026-02-14
 // ============================================================
 // REQUIRES: ameridex-api.js, ameridex-pricing-fix.js loaded first
@@ -13,6 +13,14 @@
 //   6. ameridex-admin.js
 //   7. ameridex-admin-customers.js
 //
+// v1.4 Changes (2026-02-14):
+//   - ADD: Auto-save quote when frontdesk requests a pending override
+//     on an unsaved quote, so the GM sees it immediately.
+//   - ADD: After auto-save, fires the override API with the new
+//     server ID so the pending override persists on the server.
+//   - ADD: Toast feedback for frontdesk: "Quote auto-saved for GM review."
+//   - ADD: GM/Admin overrides on unsaved quotes also auto-save now.
+//
 // v1.3 Changes (2026-02-14):
 //   - REWRITE: Overrides now operate client-side on the live
 //     currentQuote.lineItems. No save required before overriding.
@@ -23,22 +31,6 @@
 //   - Multiple line items can be overridden in sequence.
 //   - Server sync happens in background when quote has a server
 //     ID, but UI does not depend on the server response.
-//
-// v1.2 Changes (2026-02-14):
-//   - FIX: Force-save before override (removed in v1.3).
-//   - FIX: Merge server response into local state (kept, refined).
-//
-// v1.1 Changes (2026-02-14):
-//   - ADD: Defensive escapeHTML fallback.
-//
-// This module handles:
-//   - Override Price modal per line item
-//   - Client-side immediate price override for GM/Admin
-//   - Client-side pending override request for Frontdesk
-//   - Visual badges (pending/approved/rejected)
-//   - GM pending overrides dashboard widget
-//   - Submit gate (blocks if pending overrides exist)
-//   - Approve/reject UI for GM role
 // ============================================================
 
 (function () {
@@ -239,19 +231,6 @@
     // ----------------------------------------------------------
     // 3b. APPLY OVERRIDE: Client-side, no save required
     // ----------------------------------------------------------
-    // GM/Admin/Dealer/Rep: sets override as 'approved' directly
-    //   on the lineItem. getDisplayPrice() in pricing-fix.js
-    //   already reads approved overrides, so the price chain
-    //   picks it up immediately on re-render.
-    //
-    // Frontdesk: sets override as 'pending'. Price does NOT
-    //   change until a GM approves. The pending override is
-    //   persisted when the quote is saved.
-    //
-    // If the quote already has a server ID, we also fire the
-    // server endpoint in the background to keep it in sync,
-    // but the UI does NOT wait for or depend on the response.
-    // ----------------------------------------------------------
     document.getElementById('override-submit-btn').addEventListener('click', function () {
         if (!_overrideTarget) return;
 
@@ -313,7 +292,6 @@
         };
 
         // Store tierPrice on the item if not already present
-        // (needed by getDisplayPrice fallback chain)
         if (item.tierPrice === undefined || item.tierPrice === null) {
             item.tierPrice = tierPrice;
         }
@@ -347,37 +325,128 @@
             );
         }
 
-        // ----- BACKGROUND SERVER SYNC (fire-and-forget) -----
-        // If the quote has a server ID, sync the override to
-        // the server in the background. We do NOT block on this.
+        // ----- BACKGROUND SERVER SYNC -----
+        // Capture values needed for async operations
+        var capturedIdx = idx;
+        var capturedPrice = roundedPrice;
+        var capturedReason = reason;
+        var isFrontdesk = (role === 'frontdesk');
+
+        // Resolve existing server ID
         var serverId = null;
         if (typeof savedQuotes !== 'undefined' && typeof currentQuote !== 'undefined' && currentQuote.quoteId) {
             var match = savedQuotes.find(function (q) { return q.quoteId === currentQuote.quoteId; });
             if (match && match._serverId) serverId = match._serverId;
         }
-        // Also check the explicit target server ID
         if (!serverId && _overrideTarget && _overrideTarget.quoteServerId) {
             serverId = _overrideTarget.quoteServerId;
         }
 
         if (serverId && api) {
-            var path = '/api/quotes/' + serverId + '/items/' + idx + '/request-override';
-            api('POST', path, {
-                requestedPrice: roundedPrice,
-                reason: reason
-            }).then(function (result) {
-                console.log('[Overrides] Server sync OK for item #' + idx);
-                // If server returns updated quote, merge it
-                if (result && result.quote) {
-                    syncLocalQuoteFromServer(result.quote);
-                }
-            }).catch(function (err) {
-                console.warn('[Overrides] Server sync failed for item #' + idx + ':', err.message);
-                // No user-facing error. The override is already applied locally.
-                // It will be synced when the quote is saved.
-            });
+            // Quote already exists on server: sync override directly
+            fireOverrideAPI(serverId, capturedIdx, capturedPrice, capturedReason);
+        } else if (api) {
+            // Quote has NO server ID yet.
+            // Auto-save the quote to the server first, then fire the override.
+            autoSaveQuoteThenOverride(capturedIdx, capturedPrice, capturedReason, isFrontdesk);
         }
     });
+
+
+    // ----------------------------------------------------------
+    // 3b-i. HELPER: Fire the override API call (fire-and-forget)
+    // ----------------------------------------------------------
+    function fireOverrideAPI(serverId, itemIdx, price, reason) {
+        var path = '/api/quotes/' + serverId + '/items/' + itemIdx + '/request-override';
+        api('POST', path, {
+            requestedPrice: price,
+            reason: reason
+        }).then(function (result) {
+            console.log('[Overrides] Server sync OK for item #' + itemIdx);
+            if (result && result.quote) {
+                syncLocalQuoteFromServer(result.quote);
+            }
+        }).catch(function (err) {
+            console.warn('[Overrides] Server sync failed for item #' + itemIdx + ':', err.message);
+        });
+    }
+
+
+    // ----------------------------------------------------------
+    // 3b-ii. HELPER: Auto-save an unsaved quote, then fire override
+    // ----------------------------------------------------------
+    // When a frontdesk user requests an override on a quote that
+    // hasn't been saved to the server yet, we need to:
+    //   1. Create the quote on the server (POST /api/quotes)
+    //   2. Store the server ID locally
+    //   3. Fire the override API with the new server ID
+    // This ensures the GM's pending overrides widget sees it.
+    // ----------------------------------------------------------
+    function autoSaveQuoteThenOverride(itemIdx, price, reason, isFrontdesk) {
+        if (typeof currentQuote === 'undefined' || !currentQuote.lineItems) {
+            console.warn('[Overrides] Cannot auto-save: no currentQuote');
+            return;
+        }
+
+        // Build the payload from local state
+        var payload = {
+            customer: currentQuote.customer || {},
+            lineItems: currentQuote.lineItems.map(function (li) {
+                return {
+                    productId: li.productId || li.id || '',
+                    productName: li.productName || li.type || li.name || '',
+                    quantity: li.quantity || li.qty || 1,
+                    basePrice: li.basePrice || li.price || 0,
+                    price: li.price || 0
+                };
+            }),
+            notes: currentQuote.notes || currentQuote.specialInstructions || ''
+        };
+
+        console.log('[Overrides] Auto-saving quote to server for override sync...');
+
+        api('POST', '/api/quotes', payload)
+            .then(function (savedQuote) {
+                console.log('[Overrides] Auto-save OK. Server ID: ' + savedQuote.id + ', Quote #: ' + savedQuote.quoteNumber);
+
+                // Store server ID in local state so future syncs work
+                if (typeof savedQuotes !== 'undefined' && typeof currentQuote !== 'undefined' && currentQuote.quoteId) {
+                    var localMatch = savedQuotes.find(function (q) { return q.quoteId === currentQuote.quoteId; });
+                    if (localMatch) {
+                        localMatch._serverId = savedQuote.id;
+                        localMatch._serverQuoteNumber = savedQuote.quoteNumber;
+                    }
+                }
+
+                // Also store on currentQuote for immediate reference
+                if (typeof currentQuote !== 'undefined') {
+                    currentQuote._serverId = savedQuote.id;
+                    currentQuote._serverQuoteNumber = savedQuote.quoteNumber;
+                }
+
+                // Now fire the override API with the new server ID
+                fireOverrideAPI(savedQuote.id, itemIdx, price, reason);
+
+                // Notify frontdesk that the quote was auto-saved
+                if (isFrontdesk) {
+                    showOverrideToast('Quote auto-saved so your GM can review the override.', 'success');
+                }
+
+                // Refresh saved quotes list if available
+                if (typeof window.loadServerQuotesAndRender === 'function') {
+                    window.loadServerQuotesAndRender();
+                }
+            })
+            .catch(function (err) {
+                console.warn('[Overrides] Auto-save failed:', err.message);
+                if (isFrontdesk) {
+                    showOverrideToast(
+                        'Could not auto-save quote. Please save manually so GM can see your override request.',
+                        'error'
+                    );
+                }
+            });
+    }
 
 
     // ----------------------------------------------------------
@@ -734,7 +803,7 @@
 
         createGMWidget();
         loadPendingOverrides();
-        console.log('[Overrides] v1.3 initialized for role: ' + user.role);
+        console.log('[Overrides] v1.4 initialized for role: ' + user.role);
     }
 
     setTimeout(initOverrides, 500);
@@ -751,5 +820,5 @@
         observer.observe(mainApp, { attributes: true, attributeFilter: ['class'] });
     }
 
-    console.log('[AmeriDex Overrides] v1.3 loaded.');
+    console.log('[AmeriDex Overrides] v1.4 loaded.');
 })();
