@@ -1,12 +1,17 @@
 // ============================================================
-// AmeriDex Dealer Portal - API Integration Patch v2.1
+// AmeriDex Dealer Portal - API Integration Patch v2.2
 // Date: 2026-02-14
 // ============================================================
-// REQUIRES: ameridex-patches.js (v1.0) loaded first
+// REQUIRES: ameridex-patches.js (v1.0+) loaded first
 //
 // Load order in dealer-portal.html (before </body>):
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
+//
+// v2.2 Changes (2026-02-14):
+//   - FIX: Section 14 loadQuote() now resolves real savedQuotes
+//     index via indexOf() instead of using filtered array index.
+//     Matches the pattern already used by the delete handler.
 //
 // v2.1 Changes (2026-02-14):
 //   - FIX: Login now sends { dealerCode, username, password } to
@@ -746,6 +751,9 @@
     // ----------------------------------------------------------
     // 14. OVERRIDE: renderSavedQuotes (status badges + duplicate)
     // ----------------------------------------------------------
+    // v2.2 FIX: loadQuote() now receives the real savedQuotes index
+    //           via indexOf(), not the filtered array index.
+    // ----------------------------------------------------------
     window.renderSavedQuotes = function () {
         var list = document.getElementById('saved-quotes-list');
         var searchQuery = (document.getElementById('quote-search').value || '').toLowerCase();
@@ -824,6 +832,7 @@
             list.appendChild(item);
         });
 
+        // v2.2: Load/View resolves the real savedQuotes index via indexOf()
         list.querySelectorAll('.btn-load').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 var i = parseInt(btn.getAttribute('data-idx'), 10);
@@ -833,7 +842,8 @@
                     duplicateQuote(filtered[i]);
                 } else {
                     if (typeof window.loadQuote === 'function') {
-                        window.loadQuote(i);
+                        var realIdx = savedQuotes.indexOf(filtered[i]);
+                        if (realIdx > -1) window.loadQuote(realIdx);
                     }
                 }
             });
@@ -974,5 +984,5 @@
         tryResumeSession();
     }
 
-    console.log('[AmeriDex API] v2.1 loaded: Auth + API integration active.');
+    console.log('[AmeriDex API] v2.2 loaded: Auth + API integration active.');
 })();
