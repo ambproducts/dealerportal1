@@ -1075,7 +1075,8 @@ function saveDealerSettings() {
 // UTILITIES
 // ============================================
 function isMobileView() { return window.innerWidth <= 768; }
-function formatCurrency(amt) { return '$' + amt.toFixed(2); }
+function formatCurrency(amt) { const n = Number(amt) || 0; return 
+n.toLocaleString('en-US', { style: 'currency', currency: 'USD' }); }
 function getItemLength(item) { return item.length === "custom" ? (item.customLength || 0) : (item.length || 0); }
 function getItemPrice(item) {
     const prod = PRODUCTS[item.type] || PRODUCTS.custom;
@@ -1453,7 +1454,7 @@ function renderDesktop() {
             td.appendChild(helpDiv);
             const priceDiv = document.createElement("div");
             priceDiv.style.cssText = "margin-top:0.3rem;font-size:0.8rem;color:#1e40af;font-weight:600";
-            priceDiv.textContent = "Price: $" + prod.price.toFixed(2) + (prod.isFt ? "/ft" : " each");
+            priceDiv.textContent = "Price: " + formatCurrency(prod.price) + (prod.isFt ? "/ft" : " each");
             td.appendChild(priceDiv);
         }
         row.appendChild(td);
