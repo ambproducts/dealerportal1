@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - Patch File v1.1
+// AmeriDex Dealer Portal - Patch File v1.2
 // Date: 2026-02-14
 // ============================================================
 // HOW TO USE:
@@ -527,6 +527,113 @@
 
 
     // ===========================================================
+    // PATCH 14: Harden validateRequired() - Zip Format + Line
+    //           Item Completeness Checks
+    // ===========================================================
+    // WHY (Audit Fix #1 from 2026-02-14):
+    //   a) The zip code field accepted any string up to 10 chars.
+    //      Values like "asdf" passed validation and reached the
+    //      Formspree endpoint / AmeriDex inbox.
+    //   b) Line items were only checked for existence (length > 0),
+    //      not completeness. A custom item with no description,
+    //      $0 price, or a per-foot product with 0 length could
+    //      be submitted.
+    //   c) Quantity was not validated (qty=0 or NaN passed).
+    //
+    // FIX:
+    //   - Zip code: require US 5-digit or 5+4 format via regex.
+    //   - Custom items: require non-empty description and price > 0.
+    //   - Per-foot products: require length > 0.
+    //   - All items: require qty >= 1 and not NaN.
+    //   - Show a detailed alert listing every failing item.
+    // ---------------------------------------------------------
+    window.validateRequired = function () {
+        var valid = true;
+        var nameEl = document.getElementById('cust-name');
+        var emailEl = document.getElementById('cust-email');
+        var zipEl = document.getElementById('cust-zip');
+
+        // Clear previous errors
+        document.getElementById('err-name').textContent = '';
+        document.getElementById('err-email').textContent = '';
+        document.getElementById('err-zip').textContent = '';
+
+        // Name
+        if (!nameEl.value.trim()) {
+            document.getElementById('err-name').textContent = 'Name is required';
+            valid = false;
+        }
+
+        // Email
+        if (!emailEl.value.trim()) {
+            document.getElementById('err-email').textContent = 'Email is required';
+            valid = false;
+        } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailEl.value.trim())) {
+            document.getElementById('err-email').textContent = 'Please enter a valid email';
+            valid = false;
+        }
+
+        // Zip code: require US 5-digit or 5+4 format
+        var zipVal = zipEl.value.trim();
+        if (!zipVal) {
+            document.getElementById('err-zip').textContent = 'Zip code is required';
+            valid = false;
+        } else if (!/^\d{5}(-\d{4})?$/.test(zipVal)) {
+            document.getElementById('err-zip').textContent = 'Enter a valid US zip (e.g. 08742 or 08742-1234)';
+            valid = false;
+        }
+
+        // At least one line item
+        if (currentQuote.lineItems.length === 0) {
+            alert('Please add at least one item to your order.');
+            valid = false;
+        }
+
+        // Validate each line item for completeness
+        var itemErrors = [];
+        currentQuote.lineItems.forEach(function (item, i) {
+            var prod = PRODUCTS[item.type] || PRODUCTS.custom;
+            var itemNum = i + 1;
+
+            // Custom items: must have a description and a price > 0
+            if (item.type === 'custom') {
+                if (!item.customDesc || !item.customDesc.trim()) {
+                    itemErrors.push('Item ' + itemNum + ': Custom item is missing a description.');
+                }
+                if (!item.customUnitPrice || item.customUnitPrice <= 0) {
+                    itemErrors.push('Item ' + itemNum + ': Custom item needs a unit price greater than $0.');
+                }
+            }
+
+            // Per-foot products: must have a valid length > 0
+            if (prod.isFt) {
+                var len = (item.length === 'custom') ? (item.customLength || 0) : (item.length || 0);
+                if (len <= 0) {
+                    itemErrors.push('Item ' + itemNum + ': ' + prod.name + ' has no length selected.');
+                }
+            }
+
+            // All items: qty must be >= 1 and a real number
+            if (!item.qty || item.qty < 1 || isNaN(item.qty)) {
+                itemErrors.push('Item ' + itemNum + ': Quantity must be at least 1.');
+            }
+        });
+
+        if (itemErrors.length > 0) {
+            alert('Please fix the following line item issues:\n\n' + itemErrors.join('\n'));
+            valid = false;
+        }
+
+        // Scroll to customer section if anything failed
+        if (!valid) {
+            document.getElementById('customer').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        return valid;
+    };
+
+
+    // ===========================================================
     // INIT: Re-render to apply empty-state and $ fixes
     // ===========================================================
     if (typeof window.render === 'function') {
@@ -536,5 +643,5 @@
         try { window.updateTotalAndFasteners(); } catch (e) {}
     }
 
-    console.log('[AmeriDex Patches] v1.1 loaded: 13 patches applied.');
+    console.log('[AmeriDex Patches] v1.2 loaded: 14 patches applied.');
 })();
