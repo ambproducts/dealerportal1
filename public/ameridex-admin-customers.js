@@ -1,9 +1,10 @@
 // ============================================================
-// AmeriDex Dealer Portal - Admin Panel Customers Tab v3.0
+// AmeriDex Dealer Portal - Admin Panel Customers Tab v3.1
 // File: ameridex-admin-customers.js
-// Date: 2026-02-13
+// Date: 2026-02-14
 // ============================================================
 // REWRITE v3: Non-destructive tab switching.
+// v3.1 (2026-02-14): Fixed token storage mismatch.
 //
 // Root cause of v2 bug:
 //   renderCustomersTab() replaced container.innerHTML, which
@@ -20,6 +21,10 @@
 //   3. Intercept clicks on ALL sibling tabs so we can hide the
 //      Customers wrapper and restore the original wrapper before
 //      the original handler runs.
+//
+// v3.1 Fix:
+//   Token storage mismatch: replaced localStorage.getItem with
+//   window.ameridexAPI() shared helper (sessionStorage-based).
 // ============================================================
 
 (function () {
@@ -218,7 +223,7 @@
         });
 
         _injected = true;
-        console.log('[ameridex-admin-customers] v3.0 Customers tab injected (non-destructive)');
+        console.log('[ameridex-admin-customers] v3.1 Customers tab injected (non-destructive)');
         return true;
     }
 
@@ -263,13 +268,16 @@
         let dealers = [];
 
         try {
-            const token = localStorage.getItem('ameridex-auth-token');
-            const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+            // Use shared API helper instead of raw fetch
+            const _api = window.ameridexAPI;
+            if (!_api) {
+                throw new Error('ameridexAPI not available');
+            }
 
             const results = await Promise.allSettled([
-                fetch('/api/admin/customers', { headers }).then(r => r.ok ? r.json() : []),
-                fetch('/api/admin/quotes', { headers }).then(r => r.ok ? r.json() : []),
-                fetch('/api/admin/dealers', { headers }).then(r => r.ok ? r.json() : [])
+                _api('GET', '/api/admin/customers'),
+                _api('GET', '/api/admin/quotes'),
+                _api('GET', '/api/admin/dealers')
             ]);
 
             customers = results[0].status === 'fulfilled' ? results[0].value : [];
@@ -540,19 +548,14 @@
             document.getElementById('admin-cust-detail-close').onclick = () => { panel.style.display = 'none'; };
             document.getElementById('admin-cust-save-notes').onclick = async () => {
                 const notes = document.getElementById('admin-cust-notes').value;
+                const _api = window.ameridexAPI;
+                if (!_api) { alert('API helper unavailable'); return; }
                 try {
-                    const token = localStorage.getItem('ameridex-auth-token');
-                    const res = await fetch('/api/admin/customers/' + id, {
-                        method: 'PUT',
-                        headers: { 'Authorization': 'Bearer ' + (token || ''), 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ notes })
-                    });
-                    if (res.ok) {
-                        c.notes = notes;
-                        const btn = document.getElementById('admin-cust-save-notes');
-                        btn.textContent = 'Saved!'; btn.style.background = '#16a34a';
-                        setTimeout(() => { btn.textContent = 'Save Notes'; btn.style.background = '#2563eb'; }, 1500);
-                    }
+                    await _api('PUT', '/api/admin/customers/' + id, { notes });
+                    c.notes = notes;
+                    const btn = document.getElementById('admin-cust-save-notes');
+                    btn.textContent = 'Saved!'; btn.style.background = '#16a34a';
+                    setTimeout(() => { btn.textContent = 'Save Notes'; btn.style.background = '#2563eb'; }, 1500);
                 } catch (err) { alert('Failed to save: ' + err.message); }
             };
         }
@@ -605,23 +608,17 @@
                     notes: document.getElementById('edit-cust-notes').value
                 };
                 if (!updates.name || !updates.email) { alert('Name and email are required.'); return; }
+
+                const _api = window.ameridexAPI;
+                if (!_api) { alert('API helper unavailable'); return; }
                 try {
-                    const token = localStorage.getItem('ameridex-auth-token');
-                    const res = await fetch('/api/admin/customers/' + id, {
-                        method: 'PUT',
-                        headers: { 'Authorization': 'Bearer ' + (token || ''), 'Content-Type': 'application/json' },
-                        body: JSON.stringify(updates)
-                    });
-                    if (res.ok) {
-                        const updated = await res.json();
-                        Object.assign(c, updated);
-                        panel.style.display = 'none';
-                        renderRows();
-                    } else {
-                        const err = await res.json().catch(() => ({}));
-                        alert('Error: ' + (err.error || 'Unknown error'));
-                    }
-                } catch (err) { alert('Failed: ' + err.message); }
+                    const updated = await _api('PUT', '/api/admin/customers/' + id, updates);
+                    Object.assign(c, updated);
+                    panel.style.display = 'none';
+                    renderRows();
+                } catch (err) {
+                    alert('Failed: ' + (err.message || 'Unknown error'));
+                }
             };
         }
     }
