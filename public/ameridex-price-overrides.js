@@ -138,7 +138,7 @@
                 btn.dataset.overridePatch = 'true';
                 const originalClick = btn.onclick;
                 btn.onclick = async (e) => {
-                    if (await hasP endingOverrides()) {
+                    if (await hasPendingOverrides()) {
                         e.preventDefault();
                         e.stopPropagation();
                         alert('This quote has pending price overrides. Please wait for GM approval before submitting.');
@@ -263,7 +263,7 @@
                 <div style="margin-bottom:1rem;">
                     <div style="font-size:0.9rem;color:#6b7280;margin-bottom:0.5rem;"><strong>Product:</strong> ${esc(item.productName || 'Unknown')}</div>
                     <div style="font-size:0.9rem;color:#6b7280;margin-bottom:0.5rem;"><strong>Tier Price:</strong> $${tierPrice.toFixed(2)}</div>
-                    <div style="padding:0.5rem;background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;font-size:0.85rem;color:#92400e;margin-bottom:0.5rem;">⏳ Waiting for GM approval</div>
+                    <div style="padding:0.5rem;background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;font-size:0.85rem;color:#92400e;margin-bottom:0.5rem;">&#9203; Waiting for GM approval</div>
                 </div>
                 <div style="margin-bottom:1rem;">
                     <label style="font-size:0.85rem;font-weight:600;color:#374151;display:block;margin-bottom:0.3rem;">Requested Price</label>
@@ -305,8 +305,8 @@
                     <textarea id="override-reject-reason-input" rows="2" placeholder="Optional: explain why this override is being rejected..." style="width:100%;padding:0.6rem;border:1px solid #e5e7eb;border-radius:8px;font-size:0.9rem;resize:vertical;"></textarea>
                 </div>
                 <div style="display:flex;gap:0.75rem;">
-                    <button id="override-approve-btn" style="flex:1;padding:0.6rem;background:#16a34a;color:white;border:none;border-radius:8px;font-size:0.95rem;font-weight:600;cursor:pointer;">✓ Approve</button>
-                    <button id="override-reject-btn" style="flex:1;padding:0.6rem;background:#ef4444;color:white;border:none;border-radius:8px;font-size:0.95rem;font-weight:600;cursor:pointer;">✗ Reject</button>
+                    <button id="override-approve-btn" style="flex:1;padding:0.6rem;background:#16a34a;color:white;border:none;border-radius:8px;font-size:0.95rem;font-weight:600;cursor:pointer;">&#10003; Approve</button>
+                    <button id="override-reject-btn" style="flex:1;padding:0.6rem;background:#ef4444;color:white;border:none;border-radius:8px;font-size:0.95rem;font-weight:600;cursor:pointer;">&#10007; Reject</button>
                 </div>
             `;
 
@@ -321,7 +321,7 @@
                     <div style="font-size:0.9rem;color:#6b7280;margin-bottom:0.5rem;"><strong>Original Tier Price:</strong> <span style="text-decoration:line-through;">$${tierPrice.toFixed(2)}</span></div>
                     <div style="font-size:0.9rem;color:#6b7280;margin-bottom:0.5rem;"><strong>Override Price:</strong> <span style="color:#16a34a;font-weight:700;font-size:1.1rem;">$${override.requestedPrice.toFixed(2)}</span></div>
                 </div>
-                <div style="padding:0.6rem;background:#dcfce7;border:1px solid #16a34a;border-radius:6px;font-size:0.85rem;color:#166534;margin-bottom:1rem;">✓ Approved by ${esc(override.approvedBy)} on ${new Date(override.approvedAt).toLocaleString()}</div>
+                <div style="padding:0.6rem;background:#dcfce7;border:1px solid #16a34a;border-radius:6px;font-size:0.85rem;color:#166534;margin-bottom:1rem;">&#10003; Approved by ${esc(override.approvedBy)} on ${new Date(override.approvedAt).toLocaleString()}</div>
                 <div style="margin-bottom:1rem;">
                     <label style="font-size:0.85rem;font-weight:600;color:#374151;display:block;margin-bottom:0.3rem;">Reason</label>
                     <div style="padding:0.6rem;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;font-size:0.9rem;color:#111827;white-space:pre-wrap;">${esc(override.reason || 'No reason provided')}</div>
@@ -339,7 +339,7 @@
                     <div style="font-size:0.9rem;color:#6b7280;margin-bottom:0.5rem;"><strong>Tier Price:</strong> $${tierPrice.toFixed(2)}</div>
                     <div style="font-size:0.9rem;color:#6b7280;margin-bottom:0.5rem;"><strong>Requested Price:</strong> <span style="text-decoration:line-through;color:#ef4444;">$${override.requestedPrice.toFixed(2)}</span></div>
                 </div>
-                <div style="padding:0.6rem;background:#fee2e2;border:1px solid #ef4444;border-radius:6px;font-size:0.85rem;color:#991b1b;margin-bottom:1rem;">✗ Rejected by ${esc(override.rejectedBy)} on ${new Date(override.rejectedAt).toLocaleString()}</div>
+                <div style="padding:0.6rem;background:#fee2e2;border:1px solid #ef4444;border-radius:6px;font-size:0.85rem;color:#991b1b;margin-bottom:1rem;">&#10007; Rejected by ${esc(override.rejectedBy)} on ${new Date(override.rejectedAt).toLocaleString()}</div>
                 <div style="margin-bottom:1rem;">
                     <label style="font-size:0.85rem;font-weight:600;color:#374151;display:block;margin-bottom:0.3rem;">Your Reason</label>
                     <div style="padding:0.6rem;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;font-size:0.9rem;color:#111827;white-space:pre-wrap;">${esc(override.reason || 'No reason provided')}</div>
@@ -496,7 +496,7 @@
             <div style="display:flex;justify-content:space-between;align-items:center;">
                 <div>
                     <h3 style="margin:0 0 0.25rem;font-size:1rem;color:#92400e;display:flex;align-items:center;gap:0.5rem;">
-                        <span style="font-size:1.2rem;">⏳</span>
+                        <span style="font-size:1.2rem;">&#9203;</span>
                         <span id="gm-override-count">0 Price Overrides</span> Need Your Approval
                     </h3>
                     <p style="margin:0;font-size:0.85rem;color:#78350f;">Review and approve price override requests from your team</p>
@@ -544,7 +544,7 @@
                     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.5rem;">
                         <div>
                             <div style="font-weight:600;color:#111827;font-size:0.95rem;">${esc(p.productName)}</div>
-                            <div style="font-size:0.8rem;color:#6b7280;margin-top:0.15rem;">Quote ${esc(p.quoteNumber)} • ${esc(p.customerName || 'N/A')}</div>
+                            <div style="font-size:0.8rem;color:#6b7280;margin-top:0.15rem;">Quote ${esc(p.quoteNumber)} | ${esc(p.customerName || 'N/A')}</div>
                         </div>
                         <div style="text-align:right;">
                             <div style="font-size:0.85rem;color:#6b7280;text-decoration:line-through;">$${p.tierPrice.toFixed(2)}</div>
@@ -554,10 +554,10 @@
                     <div style="font-size:0.85rem;color:#374151;margin-bottom:0.5rem;padding:0.5rem;background:#f9fafb;border-radius:6px;">
                         <strong>Reason:</strong> ${esc(p.reason)}
                     </div>
-                    <div style="font-size:0.75rem;color:#6b7280;margin-bottom:0.5rem;">Requested by ${esc(p.requestedBy)} • ${new Date(p.requestedAt).toLocaleString()}</div>
+                    <div style="font-size:0.75rem;color:#6b7280;margin-bottom:0.5rem;">Requested by ${esc(p.requestedBy)} | ${new Date(p.requestedAt).toLocaleString()}</div>
                     <div style="display:flex;gap:0.5rem;">
-                        <button onclick="window.ameridexPriceOverrides.quickApprove('${p.quoteId}', ${p.itemIndex})" style="flex:1;padding:0.4rem;background:#16a34a;color:white;border:none;border-radius:6px;font-size:0.8rem;font-weight:600;cursor:pointer;">✓ Approve</button>
-                        <button onclick="window.ameridexPriceOverrides.quickReject('${p.quoteId}', ${p.itemIndex})" style="flex:1;padding:0.4rem;background:#ef4444;color:white;border:none;border-radius:6px;font-size:0.8rem;font-weight:600;cursor:pointer;">✗ Reject</button>
+                        <button onclick="window.ameridexPriceOverrides.quickApprove('${p.quoteId}', ${p.itemIndex})" style="flex:1;padding:0.4rem;background:#16a34a;color:white;border:none;border-radius:6px;font-size:0.8rem;font-weight:600;cursor:pointer;">&#10003; Approve</button>
+                        <button onclick="window.ameridexPriceOverrides.quickReject('${p.quoteId}', ${p.itemIndex})" style="flex:1;padding:0.4rem;background:#ef4444;color:white;border:none;border-radius:6px;font-size:0.8rem;font-weight:600;cursor:pointer;">&#10007; Reject</button>
                         <button onclick="window.ameridexPriceOverrides.openQuote('${p.quoteId}')" style="padding:0.4rem 0.75rem;background:#f3f4f6;color:#374151;border:none;border-radius:6px;font-size:0.8rem;font-weight:600;cursor:pointer;">View Quote</button>
                     </div>
                 </div>
