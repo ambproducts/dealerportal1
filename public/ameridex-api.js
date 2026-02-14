@@ -1,6 +1,6 @@
 // ============================================================
-// AmeriDex Dealer Portal - API Integration Patch v2.0
-// Date: 2026-02-13
+// AmeriDex Dealer Portal - API Integration Patch v2.1
+// Date: 2026-02-14
 // ============================================================
 // REQUIRES: ameridex-patches.js (v1.0) loaded first
 //
@@ -8,16 +8,15 @@
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
 //
-// This file:
-//   1. Injects a password field into the login card
-//   2. Replaces client-side login with server auth
-//   3. Wires Save/Load/Delete/Submit to server API
-//   4. Applies tier-based pricing from server
-//   5. Syncs quotes to server with localStorage fallback
-//   6. Adds pricing tier badge to header
-//   7. Adds Admin button (visible only for role=admin)
-//   8. Adds Change Password to Settings modal
-//   9. Shows quote status badges in Saved Quotes list
+// v2.1 Changes (2026-02-14):
+//   - FIX: Login now sends { dealerCode, username, password } to
+//     match backend auth.js contract (username field added to UI)
+//   - FIX: Login/resume response unwraps { user, dealer } shape
+//     and merges role from user object onto _currentDealer
+//   - FIX: Session resume (GET /api/auth/me) unwraps nested response
+//   - FIX: Self password change uses POST /api/auth/change-password
+//     instead of admin-only route, with currentPassword field
+//   - ADD: Expose _authToken getter for admin-customers.js
 // ============================================================
 
 (function () {
@@ -27,18 +26,16 @@
     // CONFIG
     // ----------------------------------------------------------
     var API_BASE = window.AMERIDEX_API_BASE || '';
-    // When served by server.js, API_BASE is '' (same origin).
-    // For split hosting, set window.AMERIDEX_API_BASE before
-    // this script loads, e.g.: window.AMERIDEX_API_BASE = 'https://your-render-app.onrender.com';
 
 
     // ----------------------------------------------------------
     // SESSION STATE
     // ----------------------------------------------------------
     var _authToken = sessionStorage.getItem('ameridex-token') || null;
+    var _currentUser = null;
     var _currentDealer = null;
     var _serverOnline = true;
-    var _quoteSyncQueue = []; // pending saves when offline
+    var _quoteSyncQueue = [];
 
 
     // ----------------------------------------------------------
@@ -59,9 +56,9 @@
             .then(function (res) {
                 _serverOnline = true;
                 if (res.status === 401) {
-                    // Token expired or invalid
                     sessionStorage.removeItem('ameridex-token');
                     _authToken = null;
+                    _currentUser = null;
                     _currentDealer = null;
                     showLoginScreen();
                     showLoginError('Session expired. Please log in again.');
@@ -72,7 +69,6 @@
                         return Promise.reject(new Error(err.error || 'Request failed'));
                     });
                 }
-                // Handle CSV (no JSON parse)
                 var ct = res.headers.get('content-type') || '';
                 if (ct.includes('text/csv')) return res.text();
                 return res.json();
@@ -87,25 +83,35 @@
             });
     }
 
-    // Expose for admin panel (future)
+    // Expose for admin panel and admin-customers
     window.ameridexAPI = api;
     window.getAuthToken = function () { return _authToken; };
     window.getCurrentDealer = function () { return _currentDealer; };
+    window.getCurrentUser = function () { return _currentUser; };
 
 
     // ----------------------------------------------------------
-    // 1. INJECT PASSWORD FIELD INTO LOGIN CARD
+    // 1. INJECT USERNAME + PASSWORD FIELDS INTO LOGIN CARD
     // ----------------------------------------------------------
-    function injectPasswordField() {
+    function injectLoginFields() {
         var loginCard = document.querySelector('.login-card');
         if (!loginCard) return;
-        // Check if already injected
         if (document.getElementById('dealer-password-input')) return;
 
-        // Find the existing field div (dealer code field)
         var codeField = document.getElementById('dealer-code-input').closest('.field');
 
-        // Create password field
+        // Username field
+        var userField = document.createElement('div');
+        userField.className = 'field';
+        userField.innerHTML =
+            '<label for="dealer-username-input">Username</label>' +
+            '<input type="text" id="dealer-username-input" ' +
+            'placeholder="Enter username" autocomplete="username" ' +
+            'style="text-transform:none; letter-spacing:normal; text-align:left;">' +
+            '<div class="help-text">Your login username (provided by AmeriDex)</div>';
+        codeField.parentNode.insertBefore(userField, codeField.nextSibling);
+
+        // Password field
         var pwField = document.createElement('div');
         pwField.className = 'field';
         pwField.innerHTML =
@@ -114,28 +120,31 @@
             'placeholder="Enter password" autocomplete="current-password" ' +
             'style="text-transform:none; letter-spacing:normal; text-align:left;">' +
             '<div class="help-text">Contact AmeriDex if you need a password reset</div>';
-
-        // Insert after the code field
-        codeField.parentNode.insertBefore(pwField, codeField.nextSibling);
+        userField.parentNode.insertBefore(pwField, userField.nextSibling);
 
         // Update subtitle text
         var subtitle = loginCard.querySelector('.subtitle');
         if (subtitle) {
-            subtitle.textContent = 'Enter your dealer code and password to continue';
+            subtitle.textContent = 'Enter your dealer code, username, and password to continue';
         }
 
         // Update error text
         var errorEl = document.getElementById('dealer-code-error');
         if (errorEl) {
-            errorEl.textContent = 'Invalid dealer code or password';
+            errorEl.textContent = 'Invalid credentials';
         }
 
-        // Remove uppercase styling from code input for visual consistency
-        // (the code is still uppercased in JS)
+        // Uppercase styling on code input
         var codeInput = document.getElementById('dealer-code-input');
         codeInput.style.textTransform = 'uppercase';
 
-        // Add Enter key handler on password field
+        // Enter key handlers
+        document.getElementById('dealer-username-input').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                var pwInput = document.getElementById('dealer-password-input');
+                if (pwInput && !pwInput.value) { pwInput.focus(); } else { handleServerLogin(); }
+            }
+        });
         document.getElementById('dealer-password-input').addEventListener('keypress', function (e) {
             if (e.key === 'Enter') handleServerLogin();
         });
@@ -149,7 +158,6 @@
         var headerActions = document.querySelector('.header-actions');
         if (!headerActions) return;
 
-        // Pricing tier badge (before dealer code)
         if (!document.getElementById('header-tier-badge')) {
             var tierBadge = document.createElement('span');
             tierBadge.id = 'header-tier-badge';
@@ -161,7 +169,6 @@
             headerActions.insertBefore(tierBadge, dealerInfo);
         }
 
-        // Admin button (before Settings)
         if (!document.getElementById('admin-btn')) {
             var adminBtn = document.createElement('button');
             adminBtn.type = 'button';
@@ -172,7 +179,6 @@
                 'display:none; background:rgba(220,38,38,0.2);' +
                 'border-color:rgba(220,38,38,0.4);';
             adminBtn.addEventListener('click', function () {
-                // Admin panel will be wired up in admin patch
                 if (typeof window.toggleAdminPanel === 'function') {
                     window.toggleAdminPanel();
                 } else {
@@ -198,6 +204,11 @@
         section.innerHTML =
             '<h3>Change Password</h3>' +
             '<div class="field" style="margin-bottom:0.75rem;">' +
+                '<label for="settings-current-pw">Current Password</label>' +
+                '<input type="password" id="settings-current-pw" placeholder="Enter current password" ' +
+                'style="text-transform:none; letter-spacing:normal;">' +
+            '</div>' +
+            '<div class="field" style="margin-bottom:0.75rem;">' +
                 '<label for="settings-new-pw">New Password</label>' +
                 '<input type="password" id="settings-new-pw" placeholder="Min 8 characters" ' +
                 'style="text-transform:none; letter-spacing:normal;">' +
@@ -210,7 +221,6 @@
             '<div id="pw-change-error" style="color:var(--danger);font-size:0.85rem;margin-top:0.5rem;display:none;"></div>' +
             '<div id="pw-change-success" style="color:var(--success);font-size:0.85rem;margin-top:0.5rem;display:none;"></div>';
 
-        // Insert before the actions row
         var actionsRow = settingsContent.querySelector('.settings-actions');
         settingsContent.insertBefore(section, actionsRow);
     }
@@ -234,17 +244,23 @@
 
     function handleServerLogin() {
         var codeInput = document.getElementById('dealer-code-input');
+        var userInput = document.getElementById('dealer-username-input');
         var pwInput = document.getElementById('dealer-password-input');
         var loginBtn = document.getElementById('login-btn');
         var code = codeInput.value.trim().toUpperCase();
+        var username = userInput ? userInput.value.trim() : '';
         var password = pwInput ? pwInput.value : '';
 
         hideLoginError();
 
-        // Basic client-side checks
         if (!code || code.length !== 6) {
             showLoginError('Dealer code must be 6 characters');
             codeInput.focus();
+            return;
+        }
+        if (!username) {
+            showLoginError('Username is required');
+            if (userInput) userInput.focus();
             return;
         }
         if (!password) {
@@ -253,18 +269,25 @@
             return;
         }
 
-        // Show loading state
         loginBtn.textContent = 'Signing in...';
         loginBtn.disabled = true;
 
-        api('POST', '/api/auth/login', { dealerCode: code, password: password })
+        api('POST', '/api/auth/login', {
+            dealerCode: code,
+            username: username,
+            password: password
+        })
             .then(function (data) {
-                // Store token in sessionStorage
                 _authToken = data.token;
                 sessionStorage.setItem('ameridex-token', data.token);
-                _currentDealer = data.dealer;
 
-                // Populate dealerSettings for compatibility with existing code
+                // Backend returns { token, user, dealer }
+                _currentUser = data.user;
+                _currentDealer = data.dealer;
+                // Merge role from user onto dealer for compatibility
+                _currentDealer.role = data.user.role;
+
+                // Populate dealerSettings for compatibility
                 dealerSettings.dealerCode = data.dealer.dealerCode;
                 dealerSettings.dealerName = data.dealer.dealerName || '';
                 dealerSettings.dealerContact = data.dealer.contactPerson || '';
@@ -272,27 +295,23 @@
                 dealerSettings.lastLogin = new Date().toISOString();
                 saveDealerSettings();
 
-                // Apply tier pricing
                 applyTierPricing();
 
-                // Load quotes from server
                 loadServerQuotes().then(function () {
-                    // Show the app
                     showMainApp();
                     updateHeaderForDealer();
                     renderSavedQuotes();
                     loginBtn.textContent = 'Enter Portal';
                     loginBtn.disabled = false;
                     if (pwInput) pwInput.value = '';
-                    console.log('[Auth] Logged in as ' + data.dealer.dealerCode + ' (' + data.dealer.role + ')');
+                    console.log('[Auth] Logged in as ' + data.user.username + ' (' + data.user.role + ') | Dealer: ' + data.dealer.dealerCode);
                 });
             })
             .catch(function (err) {
                 loginBtn.textContent = 'Enter Portal';
                 loginBtn.disabled = false;
-                if (err.message === 'Unauthorized') return; // already handled
+                if (err.message === 'Unauthorized') return;
                 if (!_serverOnline) {
-                    // Offline fallback: try original client-side login
                     if (validateDealerCode(code)) {
                         showLoginError('Server unavailable. Logging in offline mode (limited features).');
                         dealerSettings.dealerCode = code;
@@ -306,7 +325,7 @@
                         showLoginError('Invalid dealer code format');
                     }
                 } else {
-                    showLoginError(err.message || 'Invalid dealer code or password');
+                    showLoginError(err.message || 'Invalid credentials');
                     if (pwInput) { pwInput.value = ''; pwInput.focus(); }
                 }
             });
@@ -315,18 +334,15 @@
     function updateHeaderForDealer() {
         if (!_currentDealer) return;
 
-        // Update dealer code display
         var dealerDisplay = _currentDealer.dealerName
             ? _currentDealer.dealerCode + ' | ' + _currentDealer.dealerName
             : 'Dealer ' + _currentDealer.dealerCode;
         document.getElementById('header-dealer-code').textContent = dealerDisplay;
 
-        // Show tier badge
         var tierBadge = document.getElementById('header-tier-badge');
         if (tierBadge && _currentDealer.pricingTier) {
             tierBadge.textContent = _currentDealer.pricingTier;
             tierBadge.style.display = 'inline-block';
-            // Color by tier
             if (_currentDealer.pricingTier === 'vip') {
                 tierBadge.style.background = 'rgba(250,204,21,0.3)';
                 tierBadge.style.color = '#fef9c3';
@@ -336,7 +352,7 @@
             }
         }
 
-        // Show/hide admin button
+        // Role comes from _currentDealer.role (merged from user object)
         var adminBtn = document.getElementById('admin-btn');
         if (adminBtn) {
             adminBtn.style.display = (_currentDealer.role === 'admin') ? 'inline-block' : 'none';
@@ -352,14 +368,12 @@
             .then(function (data) {
                 if (!data || !data.products) return;
 
-                // Override the global PRODUCTS object with tier-adjusted prices
                 Object.keys(data.products).forEach(function (key) {
                     if (PRODUCTS[key]) {
                         PRODUCTS[key].price = data.products[key].price;
                     }
                 });
 
-                // Also update PRODUCT_CONFIG for the product selectors
                 Object.values(PRODUCT_CONFIG.categories).forEach(function (cat) {
                     Object.keys(cat.products).forEach(function (prodKey) {
                         if (data.products[prodKey]) {
@@ -368,11 +382,9 @@
                     });
                 });
 
-                // Store tier info
                 window._currentTier = data.tier;
                 console.log('[Pricing] Tier: ' + data.tier.label + ' (x' + data.tier.multiplier + ')');
 
-                // Re-render if items exist
                 if (currentQuote.lineItems.length > 0) {
                     render();
                     updateTotalAndFasteners();
@@ -390,17 +402,14 @@
     function loadServerQuotes() {
         return api('GET', '/api/quotes')
             .then(function (serverQuotes) {
-                // Merge: server is source of truth, but keep any
-                // localStorage drafts that haven't been synced yet
                 var localOnly = savedQuotes.filter(function (lq) {
                     return !lq._serverId && lq.lineItems.length > 0;
                 });
 
-                // Map server quotes to the format the frontend expects
                 savedQuotes = serverQuotes.map(function (sq) {
                     return {
                         _serverId: sq.id,
-                        quoteId: sq.quoteNumber || sq.quoteNumber,
+                        quoteId: sq.quoteNumber,
                         status: sq.status,
                         customer: sq.customer || { name: '', email: '', zipCode: '', company: '', phone: '' },
                         lineItems: sq.lineItems || [],
@@ -415,10 +424,8 @@
                     };
                 });
 
-                // Append any unsynced local drafts
                 localOnly.forEach(function (lq) {
                     savedQuotes.push(lq);
-                    // Try to sync to server in background
                     syncQuoteToServer(lq);
                 });
 
@@ -426,7 +433,6 @@
                 return savedQuotes;
             })
             .catch(function () {
-                // Offline: just use localStorage
                 console.warn('[Quotes] Using localStorage quotes (offline)');
                 return savedQuotes;
             });
@@ -450,7 +456,6 @@
         };
 
         if (quote._serverId) {
-            // Update existing
             return api('PUT', '/api/quotes/' + quote._serverId, payload)
                 .then(function (updated) {
                     quote._serverId = updated.id;
@@ -462,7 +467,6 @@
                     return null;
                 });
         } else {
-            // Create new
             return api('POST', '/api/quotes', payload)
                 .then(function (created) {
                     quote._serverId = created.id;
@@ -482,17 +486,14 @@
     // ----------------------------------------------------------
     var _origSaveCurrentQuote = window.saveCurrentQuote;
     window.saveCurrentQuote = function () {
-        // Sync DOM to state (from patches v1)
         if (typeof window.syncQuoteFromDOM === 'function') {
             window.syncQuoteFromDOM();
         }
 
-        // Generate quote ID if needed
         if (!currentQuote.quoteId) {
             currentQuote.quoteId = generateQuoteNumber();
         }
 
-        // Find existing or add new (local)
         var existingIdx = savedQuotes.findIndex(function (q) {
             return q.quoteId === currentQuote.quoteId;
         });
@@ -501,7 +502,6 @@
         quoteData.updatedAt = new Date().toISOString();
 
         if (existingIdx >= 0) {
-            // Preserve server ID
             quoteData._serverId = savedQuotes[existingIdx]._serverId;
             savedQuotes[existingIdx] = quoteData;
         } else {
@@ -510,12 +510,10 @@
             existingIdx = savedQuotes.length - 1;
         }
 
-        // Save to localStorage immediately (fast, offline-safe)
         saveToStorage();
         updateCustomerHistory();
         renderSavedQuotes();
 
-        // Then sync to server in background
         syncQuoteToServer(savedQuotes[existingIdx >= 0 ? existingIdx : savedQuotes.length - 1]);
 
         return currentQuote.quoteId;
@@ -525,20 +523,22 @@
     // ----------------------------------------------------------
     // 8. OVERRIDE: handleLogin (use server auth)
     // ----------------------------------------------------------
-    // Remove the original click handler and replace
     document.getElementById('login-btn').onclick = null;
     document.getElementById('login-btn').addEventListener('click', handleServerLogin);
 
-    // Also override Enter key on dealer code input
     document.getElementById('dealer-code-input').onkeypress = null;
     document.getElementById('dealer-code-input').addEventListener('keypress', function (e) {
         if (e.key === 'Enter') {
-            // If password field exists and is empty, focus it
-            var pwInput = document.getElementById('dealer-password-input');
-            if (pwInput && !pwInput.value) {
-                pwInput.focus();
+            var userInput = document.getElementById('dealer-username-input');
+            if (userInput && !userInput.value) {
+                userInput.focus();
             } else {
-                handleServerLogin();
+                var pwInput = document.getElementById('dealer-password-input');
+                if (pwInput && !pwInput.value) {
+                    pwInput.focus();
+                } else {
+                    handleServerLogin();
+                }
             }
         }
     });
@@ -555,42 +555,36 @@
             }
         }
 
-        // Tell server (fire and forget)
         if (_authToken) {
             api('POST', '/api/auth/logout').catch(function () {});
         }
 
-        // Clear session
         _authToken = null;
+        _currentUser = null;
         _currentDealer = null;
         sessionStorage.removeItem('ameridex-token');
 
-        // Clear timers
         clearTimeout(idleTimer);
         clearTimeout(warningTimer);
         clearInterval(countdownInterval);
 
-        // Clear dealer code
         dealerSettings.dealerCode = '';
         saveDealerSettings();
 
-        // Reset form
         resetFormOnly();
 
-        // Clear inputs
         document.getElementById('dealer-code-input').value = '';
+        var userInput = document.getElementById('dealer-username-input');
+        if (userInput) userInput.value = '';
         var pwInput = document.getElementById('dealer-password-input');
         if (pwInput) pwInput.value = '';
 
-        // Hide admin button
         var adminBtn = document.getElementById('admin-btn');
         if (adminBtn) adminBtn.style.display = 'none';
 
-        // Hide tier badge
         var tierBadge = document.getElementById('header-tier-badge');
         if (tierBadge) tierBadge.style.display = 'none';
 
-        // Switch views
         document.getElementById('main-app').classList.add('app-hidden');
         document.getElementById('login-screen').style.display = 'flex';
         document.getElementById('dealer-code-input').focus();
@@ -600,14 +594,10 @@
     // ----------------------------------------------------------
     // 10. OVERRIDE: deleteQuote (server + local)
     // ----------------------------------------------------------
-    // The original renderSavedQuotes (from patches v1) calls
-    // savedQuotes.splice + saveToStorage. We add server-side
-    // deletion by overriding the splice approach.
     var _origRenderSavedQuotes = window.renderSavedQuotes;
     window.deleteQuoteFromServer = function (quote) {
         if (quote._serverId && _authToken) {
             api('DELETE', '/api/quotes/' + quote._serverId).catch(function (err) {
-                // If it fails (e.g., not a draft), just log it
                 console.warn('[Delete] Server delete failed:', err.message);
             });
         }
@@ -619,22 +609,18 @@
     // ----------------------------------------------------------
     var _origSendFormalRequest = window.sendFormalRequest;
     window.sendFormalRequest = function () {
-        // First, save the quote
         var quoteId = saveCurrentQuote();
 
-        // Find the saved quote with server ID
         var quote = savedQuotes.find(function (q) {
             return q.quoteId === quoteId;
         });
 
         if (quote && quote._serverId && _authToken) {
-            // Submit via server API
             api('POST', '/api/quotes/' + quote._serverId + '/submit')
                 .then(function (result) {
                     quote.status = 'submitted';
                     saveToStorage();
 
-                    // Show success modal
                     document.getElementById('reviewModal').classList.remove('active');
                     document.getElementById('success-order-number').textContent = quoteId;
                     document.getElementById('success-confirmation').classList.add('visible');
@@ -643,13 +629,11 @@
                 })
                 .catch(function (err) {
                     console.warn('[Submit] Server submit failed, falling back to email:', err.message);
-                    // Fall back to original email-based submission
                     if (typeof _origSendFormalRequest === 'function') {
                         _origSendFormalRequest();
                     }
                 });
         } else {
-            // No server connection: use original email flow
             if (typeof _origSendFormalRequest === 'function') {
                 _origSendFormalRequest();
             }
@@ -658,7 +642,7 @@
 
 
     // ----------------------------------------------------------
-    // 12. OVERRIDE: Settings save (server + local)
+    // 12. OVERRIDE: Settings save (server + local + password)
     // ----------------------------------------------------------
     document.getElementById('settings-save').onclick = null;
     document.getElementById('settings-save').addEventListener('click', function () {
@@ -666,13 +650,11 @@
         var newContact = document.getElementById('settings-dealer-contact').value.trim();
         var newPhone = document.getElementById('settings-dealer-phone').value.trim();
 
-        // Save locally
         dealerSettings.dealerName = newName;
         dealerSettings.dealerContact = newContact;
         dealerSettings.dealerPhone = newPhone;
         saveDealerSettings();
 
-        // Save to server
         if (_authToken) {
             api('PUT', '/api/dealer/profile', {
                 dealerName: newName,
@@ -690,7 +672,8 @@
             });
         }
 
-        // Handle password change if fields are filled
+        // Handle password change using /api/auth/change-password
+        var currentPw = document.getElementById('settings-current-pw');
         var newPw = document.getElementById('settings-new-pw');
         var confirmPw = document.getElementById('settings-confirm-pw');
         var pwError = document.getElementById('pw-change-error');
@@ -700,6 +683,11 @@
             pwError.style.display = 'none';
             pwSuccess.style.display = 'none';
 
+            if (!currentPw || !currentPw.value) {
+                pwError.textContent = 'Current password is required';
+                pwError.style.display = 'block';
+                return;
+            }
             if (newPw.value.length < 8) {
                 pwError.textContent = 'Password must be at least 8 characters';
                 pwError.style.display = 'block';
@@ -711,12 +699,14 @@
                 return;
             }
 
-            if (_authToken && _currentDealer) {
-                api('POST', '/api/admin/dealers/' + _currentDealer.id + '/change-password', {
+            if (_authToken) {
+                api('POST', '/api/auth/change-password', {
+                    currentPassword: currentPw.value,
                     newPassword: newPw.value
                 }).then(function () {
                     pwSuccess.textContent = 'Password changed successfully!';
                     pwSuccess.style.display = 'block';
+                    currentPw.value = '';
                     newPw.value = '';
                     confirmPw.value = '';
                     setTimeout(function () { pwSuccess.style.display = 'none'; }, 3000);
@@ -725,7 +715,7 @@
                     pwError.style.display = 'block';
                 });
             }
-            return; // Don't close modal until password operation completes
+            return;
         }
 
         document.getElementById('settingsModal').classList.remove('active');
@@ -734,7 +724,7 @@
 
 
     // ----------------------------------------------------------
-    // 13. OVERRIDE: saveAndClose (sync to server before closing)
+    // 13. OVERRIDE: saveAndClose
     // ----------------------------------------------------------
     window.saveAndClose = function () {
         document.getElementById('timeout-warning').classList.remove('visible');
@@ -754,7 +744,7 @@
 
 
     // ----------------------------------------------------------
-    // 14. OVERRIDE: renderSavedQuotes (add status badges + duplicate btn)
+    // 14. OVERRIDE: renderSavedQuotes (status badges + duplicate)
     // ----------------------------------------------------------
     window.renderSavedQuotes = function () {
         var list = document.getElementById('saved-quotes-list');
@@ -789,7 +779,6 @@
                 return sum + getItemSubtotal(li);
             }, 0);
 
-            // Status badge
             var statusHTML = '';
             var status = quote.status || 'draft';
             var statusColors = {
@@ -804,7 +793,6 @@
                 (statusColors[status] || statusColors.draft) + '">' +
                 status + '</span>';
 
-            // Determine if quote is editable
             var editable = ['draft', 'revision'].includes(status);
             var syncIndicator = quote._serverId
                 ? '<span title="Synced to server" style="color:#16a34a;font-size:0.7rem;margin-left:0.35rem;">&#9679;</span>'
@@ -836,7 +824,6 @@
             list.appendChild(item);
         });
 
-        // Bind load buttons
         list.querySelectorAll('.btn-load').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 var i = parseInt(btn.getAttribute('data-idx'), 10);
@@ -852,15 +839,12 @@
             });
         });
 
-        // Bind delete buttons
         list.querySelectorAll('.btn-delete-quote').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 var i = parseInt(btn.getAttribute('data-idx'), 10);
                 if (confirm('Delete this quote?')) {
                     var quote = filtered[i];
-                    // Delete from server
                     deleteQuoteFromServer(quote);
-                    // Delete locally
                     var qIdx = savedQuotes.indexOf(quote);
                     if (qIdx > -1) savedQuotes.splice(qIdx, 1);
                     saveToStorage();
@@ -879,7 +863,6 @@
             if (!confirm('This will replace your current work with a copy. Continue?')) return;
         }
 
-        // Deep clone line items and options
         currentQuote = {
             quoteId: null,
             status: 'draft',
@@ -892,20 +875,17 @@
             deliveryDate: ''
         };
 
-        // Clear customer fields in DOM
         document.getElementById('cust-name').value = '';
         document.getElementById('cust-email').value = '';
         document.getElementById('cust-zip').value = '';
         document.getElementById('cust-company').value = '';
         document.getElementById('cust-phone').value = '';
 
-        // Apply options
         document.getElementById('pic-frame').checked = currentQuote.options.pictureFrame;
         document.getElementById('stairs').checked = currentQuote.options.stairs;
         document.getElementById('pic-frame-note').style.display = currentQuote.options.pictureFrame ? 'block' : 'none';
         document.getElementById('stairs-note').style.display = currentQuote.options.stairs ? 'block' : 'none';
 
-        // Apply special instructions
         document.getElementById('special-instr').value = currentQuote.specialInstructions;
         document.getElementById('internal-notes').value = '';
         document.getElementById('ship-addr').value = '';
@@ -915,14 +895,11 @@
         updateTotalAndFasteners();
         updateCustomerProgress();
 
-        // Scroll to customer section so they fill in the new customer
         document.getElementById('customer').scrollIntoView({ behavior: 'smooth' });
 
-        // Also sync to server
         if (original._serverId && _authToken) {
             api('POST', '/api/quotes/' + original._serverId + '/duplicate')
                 .then(function (dup) {
-                    // Store server ID on the current working quote for when they save
                     currentQuote._serverId = dup.id;
                     console.log('[Duplicate] Server copy created:', dup.id);
                 })
@@ -940,12 +917,16 @@
         if (!_authToken) return;
 
         api('GET', '/api/auth/me')
-            .then(function (dealer) {
-                _currentDealer = dealer;
-                dealerSettings.dealerCode = dealer.dealerCode;
-                dealerSettings.dealerName = dealer.dealerName || '';
-                dealerSettings.dealerContact = dealer.contactPerson || '';
-                dealerSettings.dealerPhone = dealer.phone || '';
+            .then(function (data) {
+                // Backend returns { user: {...}, dealer: {...} }
+                _currentUser = data.user;
+                _currentDealer = data.dealer;
+                _currentDealer.role = data.user.role;
+
+                dealerSettings.dealerCode = data.dealer.dealerCode;
+                dealerSettings.dealerName = data.dealer.dealerName || '';
+                dealerSettings.dealerContact = data.dealer.contactPerson || '';
+                dealerSettings.dealerPhone = data.dealer.phone || '';
                 saveDealerSettings();
 
                 return applyTierPricing().then(function () {
@@ -956,12 +937,12 @@
                 showMainApp();
                 updateHeaderForDealer();
                 renderSavedQuotes();
-                console.log('[Session] Resumed as ' + _currentDealer.dealerCode);
+                console.log('[Session] Resumed as ' + _currentUser.username + ' (' + _currentUser.role + ')');
             })
             .catch(function () {
-                // Token invalid or server down
                 sessionStorage.removeItem('ameridex-token');
                 _authToken = null;
+                _currentUser = null;
                 _currentDealer = null;
                 showLoginScreen();
             });
@@ -974,7 +955,6 @@
     window.addEventListener('online', function () {
         _serverOnline = true;
         console.log('[Network] Back online, syncing...');
-        // Re-sync any locally saved quotes
         savedQuotes.forEach(function (q) {
             if (!q._serverId && q.lineItems.length > 0) {
                 syncQuoteToServer(q);
@@ -986,15 +966,13 @@
     // ----------------------------------------------------------
     // INIT
     // ----------------------------------------------------------
-    injectPasswordField();
+    injectLoginFields();
     injectHeaderElements();
     injectChangePassword();
 
-    // If there's a valid token in sessionStorage, try to resume
     if (_authToken) {
         tryResumeSession();
     }
-    // Otherwise the user will see the login screen as normal
 
-    console.log('[AmeriDex API] v2.0 loaded: Auth + API integration active.');
+    console.log('[AmeriDex API] v2.1 loaded: Auth + API integration active.');
 })();
