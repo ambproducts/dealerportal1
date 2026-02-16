@@ -1,6 +1,6 @@
 // ============================================================
-// AmeriDex Dealer Portal - Price Override System v1.6
-// Date: 2026-02-14
+// AmeriDex Dealer Portal - Price Override System v1.7
+// Date: 2026-02-16
 // ============================================================
 // REQUIRES: ameridex-api.js, ameridex-pricing-fix.js loaded first
 //
@@ -12,6 +12,18 @@
 //   5. ameridex-roles.js
 //   6. ameridex-admin.js
 //   7. ameridex-admin-customers.js
+//
+// v1.7 Changes (2026-02-16):
+//   - ADD: Section 12 - injectOverrideButtons(). Post-render hook
+//     that appends an "Override" button + badge/price display into
+//     every non-custom line item row. Wired into renderDesktop and
+//     renderMobile via wrapper patches.
+//   - FIX: Init now uses 'ameridex-login' event instead of fragile
+//     setTimeout. Widget creation, pending-load, and polling all
+//     start reliably after auth completes.
+//   - FIX: Post-render hooks are installed once on ameridex-login,
+//     not on DOMContentLoaded, so they fire after auth globals
+//     (_currentUser, _currentDealer) are populated.
 //
 // v1.6 Changes (2026-02-14):
 //   - FIX: Race condition where override vanishes after save.
@@ -137,7 +149,11 @@
         '.submit-block-warning .warning-icon{font-size:1.1rem;}',
         '',
         '/* Reject reason modal */',
-        '.reject-reason-input{margin-top:0.5rem;width:100%;padding:0.5rem;border:1px solid #d1d5db;border-radius:6px;font-size:0.85rem;resize:vertical;min-height:60px;}'
+        '.reject-reason-input{margin-top:0.5rem;width:100%;padding:0.5rem;border:1px solid #d1d5db;border-radius:6px;font-size:0.85rem;resize:vertical;min-height:60px;}',
+        '',
+        '/* Override button in line item actions cell */',
+        '.override-btn-wrapper{display:inline-block;margin-left:0.35rem;vertical-align:middle;}',
+        '.override-info-row{margin-top:0.3rem;clear:both;}'
     ].join('\n');
     document.head.appendChild(overrideCSS);
 
@@ -490,22 +506,16 @@
             var local = currentQuote.lineItems[idx];
 
             // ---- GUARD: If lock is active, skip override sync ----
-            // The local state is authoritative while an override
-            // is being applied and synced to the server.
             if (_localOverrideLock && local.priceOverride) {
                 return;
             }
 
             // ---- RULE 1: Never downgrade local override to null ----
-            // If local has an override but server doesn't, keep local.
-            // This happens when the server quote was saved before the
-            // override API completed.
             if (local.priceOverride && !serverItem.priceOverride) {
                 return;
             }
 
             // ---- RULE 2: Upgrade pending to approved ----
-            // If local is pending and server is approved, accept server.
             if (local.priceOverride && local.priceOverride.status === 'pending'
                 && serverItem.priceOverride && serverItem.priceOverride.status === 'approved') {
                 local.priceOverride = serverItem.priceOverride;
@@ -515,7 +525,6 @@
             }
 
             // ---- RULE 3: Upgrade pending to rejected ----
-            // If local is pending and server is rejected, accept server.
             if (local.priceOverride && local.priceOverride.status === 'pending'
                 && serverItem.priceOverride && serverItem.priceOverride.status === 'rejected') {
                 local.priceOverride = serverItem.priceOverride;
@@ -525,16 +534,13 @@
             }
 
             // ---- RULE 4: Never overwrite a local approved with an older server approved ----
-            // Compare timestamps to ensure we only move forward.
             if (local.priceOverride && local.priceOverride.status === 'approved'
                 && serverItem.priceOverride && serverItem.priceOverride.status === 'approved') {
                 var localTime = new Date(local.priceOverride.approvedAt || 0).getTime();
                 var serverTime = new Date(serverItem.priceOverride.approvedAt || 0).getTime();
                 if (serverTime > localTime) {
-                    // Server has a newer approval (e.g., re-override). Accept it.
                     local.priceOverride = serverItem.priceOverride;
                 }
-                // Otherwise keep local (it's the same or newer).
                 return;
             }
 
@@ -938,13 +944,17 @@
 
     // ----------------------------------------------------------
     // 11. INIT: Create widget + load pending + start polling
+    //     Now triggered by 'ameridex-login' event from api.js
+    //     instead of fragile setTimeout.
     // ----------------------------------------------------------
+    var _overridesInitialized = false;
+
     function initOverrides() {
+        if (_overridesInitialized) return;
         var user = window.getCurrentUser ? window.getCurrentUser() : null;
-        if (!user) {
-            setTimeout(initOverrides, 1000);
-            return;
-        }
+        if (!user) return;
+
+        _overridesInitialized = true;
 
         createGMWidget();
         loadPendingOverrides();
@@ -953,15 +963,278 @@
             startPolling();
         }
 
-        console.log('[Overrides] v1.6 initialized for role: ' + user.role);
+        // Install the post-render hooks now that auth is ready
+        installPostRenderHooks();
+
+        console.log('[Overrides] v1.7 initialized for role: ' + user.role);
     }
 
-    setTimeout(initOverrides, 500);
+    // Listen for the login event dispatched by ameridex-api.js v2.4+
+    window.addEventListener('ameridex-login', function () {
+        console.log('[Overrides] ameridex-login event received, initializing...');
+        initOverrides();
+    });
+
+    // Fallback: if ameridex-login already fired before this script loaded
+    // (unlikely given load order, but defensive)
+    if (window.getCurrentUser && window.getCurrentUser()) {
+        setTimeout(initOverrides, 200);
+    }
 
     var mainApp = document.getElementById('main-app');
     if (mainApp) {
         _pollObserver.observe(mainApp, { attributes: true, attributeFilter: ['class'] });
     }
 
-    console.log('[AmeriDex Overrides] v1.6 loaded.');
+
+    // ----------------------------------------------------------
+    // 12. POST-RENDER HOOK: Inject Override Buttons Into Rows
+    // ----------------------------------------------------------
+    // After each renderDesktop/renderMobile call, this scans the
+    // line item table rows and appends:
+    //   a) An "Override" button (opens the modal)
+    //   b) Override badge + price info if an override exists
+    //
+    // We avoid modifying the original render function in the
+    // inline HTML. Instead we wrap the CURRENT renderDesktop
+    // (which is already wrapped by patches.js and pricing-fix.js)
+    // with one more layer that calls injectOverrideButtons()
+    // after the inner function completes.
+    // ----------------------------------------------------------
+    var _postRenderHooksInstalled = false;
+
+    function installPostRenderHooks() {
+        if (_postRenderHooksInstalled) return;
+        _postRenderHooksInstalled = true;
+
+        // Wrap renderDesktop
+        var _prevRenderDesktopForOverrides = window.renderDesktop;
+        window.renderDesktop = function () {
+            if (typeof _prevRenderDesktopForOverrides === 'function') {
+                _prevRenderDesktopForOverrides();
+            }
+            injectOverrideButtonsDesktop();
+        };
+
+        // Wrap renderMobile
+        var _prevRenderMobileForOverrides = window.renderMobile;
+        window.renderMobile = function () {
+            if (typeof _prevRenderMobileForOverrides === 'function') {
+                _prevRenderMobileForOverrides();
+            }
+            injectOverrideButtonsMobile();
+        };
+
+        console.log('[Overrides] Post-render hooks installed for override button injection.');
+    }
+
+    /**
+     * DESKTOP: Scan #line-items tbody rows and inject override
+     * button + badge into each product row.
+     *
+     * Row structure (from inline dealer-portal.html):
+     *   <tr>
+     *     <td> Product name, color, price text </td>
+     *     <td> Length select/input </td>
+     *     <td> Qty input </td>
+     *     <td id="sub-{i}"> Subtotal </td>
+     *     <td> Remove button </td>
+     *   </tr>
+     *
+     * We target the last cell (actions/remove cell) to append
+     * the override button, and the first cell to append the
+     * override badge/price info below the product details.
+     */
+    function injectOverrideButtonsDesktop() {
+        if (typeof currentQuote === 'undefined' || !currentQuote.lineItems) return;
+
+        var tbody = document.querySelector('#line-items tbody');
+        if (!tbody) return;
+
+        var rows = tbody.querySelectorAll('tr');
+        if (!rows.length) return;
+
+        // Resolve the quote's server ID for the API call
+        var quoteServerId = resolveQuoteServerId();
+
+        currentQuote.lineItems.forEach(function (item, idx) {
+            var row = rows[idx];
+            if (!row) return;
+
+            // Skip if already injected (idempotency)
+            if (row.querySelector('.btn-override')) return;
+
+            // Skip custom items (no tier price to override)
+            if (item.type === 'custom') return;
+
+            var cells = row.querySelectorAll('td');
+            if (!cells.length) return;
+
+            var firstCell = cells[0];
+            var lastCell = cells[cells.length - 1];
+
+            // ---- A) Inject Override Button into actions cell ----
+            var tierPrice = window.getDisplayPrice ? window.getDisplayPrice(item) : 0;
+            var prod = (typeof PRODUCTS !== 'undefined' && PRODUCTS[item.type]) ? PRODUCTS[item.type] : null;
+            var productName = prod ? prod.name : item.type;
+
+            // Determine button label based on override state
+            var btnClass = 'btn-override';
+            var btnLabel = 'Override';
+            if (item.priceOverride) {
+                if (item.priceOverride.status === 'pending') {
+                    btnClass += ' btn-override--active';
+                    btnLabel = 'Pending...';
+                } else if (item.priceOverride.status === 'approved') {
+                    btnLabel = 'Re-Override';
+                } else if (item.priceOverride.status === 'rejected') {
+                    btnLabel = 'Retry Override';
+                }
+            }
+
+            var wrapper = document.createElement('span');
+            wrapper.className = 'override-btn-wrapper';
+
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = btnClass;
+            btn.textContent = btnLabel;
+            btn.title = 'Request a price override for ' + productName;
+            btn.setAttribute('data-item-idx', idx);
+
+            // Closure to capture index, price, name
+            (function (capturedIdx, capturedTierPrice, capturedName, capturedServerId) {
+                btn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    // Re-resolve tier price at click time in case it changed
+                    var freshTierPrice = window.getDisplayPrice
+                        ? window.getDisplayPrice(currentQuote.lineItems[capturedIdx])
+                        : capturedTierPrice;
+                    // If item has an approved override, the "tier price"
+                    // for re-override should be the original tier price
+                    var lineItem = currentQuote.lineItems[capturedIdx];
+                    if (lineItem && lineItem.priceOverride && lineItem.priceOverride.originalTierPrice) {
+                        freshTierPrice = lineItem.priceOverride.originalTierPrice;
+                    }
+                    openOverrideModal(
+                        capturedServerId || resolveQuoteServerId(),
+                        capturedIdx,
+                        freshTierPrice,
+                        capturedName
+                    );
+                });
+            })(idx, tierPrice, productName, quoteServerId);
+
+            wrapper.appendChild(btn);
+            lastCell.appendChild(wrapper);
+
+            // ---- B) Inject Override Badge + Price Info below product details ----
+            if (item.priceOverride) {
+                var infoDiv = document.createElement('div');
+                infoDiv.className = 'override-info-row';
+                infoDiv.innerHTML = getOverridePriceHTML(item);
+                firstCell.appendChild(infoDiv);
+            }
+        });
+    }
+
+    /**
+     * MOBILE: Scan #mobile-items-container cards and inject
+     * override button + badge.
+     *
+     * Mobile cards are structured as divs with class
+     * 'mobile-item-card' (or similar). We look for the
+     * actions area or append after the last child.
+     */
+    function injectOverrideButtonsMobile() {
+        if (typeof currentQuote === 'undefined' || !currentQuote.lineItems) return;
+
+        var container = document.getElementById('mobile-items-container');
+        if (!container) return;
+
+        var cards = container.children;
+        if (!cards.length) return;
+
+        var quoteServerId = resolveQuoteServerId();
+
+        currentQuote.lineItems.forEach(function (item, idx) {
+            var card = cards[idx];
+            if (!card) return;
+
+            // Skip if already injected
+            if (card.querySelector('.btn-override')) return;
+
+            // Skip custom items
+            if (item.type === 'custom') return;
+
+            var tierPrice = window.getDisplayPrice ? window.getDisplayPrice(item) : 0;
+            var prod = (typeof PRODUCTS !== 'undefined' && PRODUCTS[item.type]) ? PRODUCTS[item.type] : null;
+            var productName = prod ? prod.name : item.type;
+
+            // Create a row for the override button
+            var overrideRow = document.createElement('div');
+            overrideRow.style.cssText = 'display:flex;align-items:center;gap:0.5rem;margin-top:0.5rem;flex-wrap:wrap;';
+
+            var btnClass = 'btn-override';
+            var btnLabel = 'Override Price';
+            if (item.priceOverride) {
+                if (item.priceOverride.status === 'pending') {
+                    btnClass += ' btn-override--active';
+                    btnLabel = 'Pending...';
+                } else if (item.priceOverride.status === 'approved') {
+                    btnLabel = 'Re-Override';
+                } else if (item.priceOverride.status === 'rejected') {
+                    btnLabel = 'Retry Override';
+                }
+            }
+
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = btnClass;
+            btn.textContent = btnLabel;
+
+            (function (capturedIdx, capturedTierPrice, capturedName, capturedServerId) {
+                btn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    var freshTierPrice = window.getDisplayPrice
+                        ? window.getDisplayPrice(currentQuote.lineItems[capturedIdx])
+                        : capturedTierPrice;
+                    var lineItem = currentQuote.lineItems[capturedIdx];
+                    if (lineItem && lineItem.priceOverride && lineItem.priceOverride.originalTierPrice) {
+                        freshTierPrice = lineItem.priceOverride.originalTierPrice;
+                    }
+                    openOverrideModal(
+                        capturedServerId || resolveQuoteServerId(),
+                        capturedIdx,
+                        freshTierPrice,
+                        capturedName
+                    );
+                });
+            })(idx, tierPrice, productName, quoteServerId);
+
+            overrideRow.appendChild(btn);
+
+            // Add badge if override exists
+            if (item.priceOverride) {
+                var badgeSpan = document.createElement('span');
+                badgeSpan.innerHTML = getOverridePriceHTML(item);
+                overrideRow.appendChild(badgeSpan);
+            }
+
+            card.appendChild(overrideRow);
+        });
+    }
+
+    /**
+     * HELPER: Resolve the current quote's server ID from savedQuotes.
+     */
+    function resolveQuoteServerId() {
+        if (typeof savedQuotes === 'undefined' || typeof currentQuote === 'undefined') return null;
+        if (!currentQuote.quoteId) return null;
+        var match = savedQuotes.find(function (q) { return q.quoteId === currentQuote.quoteId; });
+        return (match && match._serverId) ? match._serverId : null;
+    }
+
+
+    console.log('[AmeriDex Overrides] v1.7 loaded.');
 })();
