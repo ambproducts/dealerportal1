@@ -1,12 +1,12 @@
 # ============================================================
 # AmeriDex Dealer Portal - Render.com Deployment v2.0
-# Date: 2026-02-14
+# Date: 2026-02-16
 # ============================================================
 # This configuration deploys the dealer portal as a single
 # Node.js web service with persistent disk storage.
 #
 # Required Environment Variables (set in Render dashboard):
-#   - JWT_SECRET (generate with: openssl rand -base64 32)
+#   - TOKEN_SECRET (generate with: openssl rand -base64 32)
 #   - NODE_ENV (set to 'production')
 #   - PORT (auto-set by Render, defaults to 10000)
 # ============================================================
@@ -25,10 +25,12 @@ services:
         value: production
       - key: PORT
         value: 10000
-      - key: JWT_SECRET
+      - key: TOKEN_SECRET
         generateValue: true  # Render auto-generates secure random value
-      - key: BCRYPT_ROUNDS
-        value: 10
+      - key: MASTER_KEY
+        generateValue: true  # Render auto-generates secure random value
+      - key: DATA_DIR
+        value: /opt/render/project/data
     healthCheckPath: /api/health
     autoDeploy: true
     
@@ -48,9 +50,9 @@ services:
 # ============================================================
 # Post-Deployment Setup (manual steps in Render dashboard):
 # ============================================================
-# 1. Add JWT_SECRET environment variable:
+# 1. Verify TOKEN_SECRET environment variable:
 #    - Go to Environment tab
-#    - If not auto-generated, add: JWT_SECRET = <secure-random-string>
+#    - If not auto-generated, add: TOKEN_SECRET = <secure-random-string>
 #    - Generate with: openssl rand -base64 32
 #
 # 2. Create initial admin user (via server SSH or local):
@@ -95,10 +97,15 @@ services:
 # │   ├── admin-dealers.js
 # │   ├── admin-quotes.js
 # │   ├── admin-pricing.js
+# │   ├── admin-users.js
 # │   └── admin-customers.js
 # ├── middleware/
-# │   └── auth.js          (JWT auth middleware)
+# │   └── auth.js          (token auth middleware)
 # ├── lib/
+# │   ├── token.js         (HMAC-SHA256 token signing)
+# │   ├── password.js      (password hashing)
+# │   ├── helpers.js       (JSON file I/O, ID generation)
+# │   ├── data-init.js     (initial data seeding)
 # │   └── backup.js        (JSON data backup utilities)
 # ├── data/                (persistent disk mount, JSON files)
 # │   ├── dealers.json
@@ -106,7 +113,7 @@ services:
 # │   ├── quotes.json
 # │   ├── customers.json
 # │   ├── products.json
-# │   ├── tiers.json
+# │   ├── pricing-tiers.json
 # │   └── backups/         (auto-backup directory)
 # ├── public/              (static frontend files)
 # │   ├── dealer-portal.html
@@ -156,8 +163,8 @@ services:
 # ============================================================
 # Security Checklist:
 # ============================================================
-# ✓ JWT_SECRET is randomly generated and kept secret
-# ✓ Passwords are bcrypt-hashed (BCRYPT_ROUNDS=10)
+# ✓ TOKEN_SECRET is randomly generated and kept secret
+# ✓ Passwords are hashed with HMAC-SHA256
 # ✓ HTTPS enforced by Render
 # ✓ CORS configured in server.js
 # ✓ Auth middleware protects all /api/* routes except /api/auth/login
@@ -182,34 +189,10 @@ services:
 # ============================================================
 
 # ============================================================
-# Environment-Specific Overrides (if needed):
-# ============================================================
-# For staging environment, create render-staging.yaml:
-#
-# services:
-#   - type: web
-#     name: ameridex-dealer-portal-staging
-#     runtime: node
-#     plan: starter
-#     branch: develop  # Deploy from develop branch
-#     buildCommand: npm install
-#     startCommand: npm start
-#     envVars:
-#       - key: NODE_ENV
-#         value: staging
-#       - key: JWT_SECRET
-#         generateValue: true
-#     disk:
-#       name: ameridex-data-staging
-#       mountPath: /opt/render/project/data
-#       sizeGB: 1
-# ============================================================
-
-# ============================================================
 # Troubleshooting Common Issues:
 # ============================================================
 # Issue: Service fails to start
-# → Check logs for "PORT already in use" or missing JWT_SECRET
+# → Check logs for "PORT already in use" or missing TOKEN_SECRET
 # → Verify package.json has "start": "node server.js"
 # → Ensure all dependencies are in package.json, not package-lock
 #

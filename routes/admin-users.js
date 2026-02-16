@@ -17,7 +17,7 @@
 
 const express = require('express');
 const router = express.Router();
-const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 
 // In-memory store (replace with DB later)
 let users = [
@@ -177,7 +177,7 @@ router.post('/', (req, res) => {
     }
 
     const newUser = {
-        id: 'u-' + uuidv4().slice(0, 8),
+        id: 'u-' + crypto.randomUUID().slice(0, 8),
         dealerCode: dealerCode.toUpperCase(),
         username: username.toLowerCase(),
         displayName: displayName || username,
