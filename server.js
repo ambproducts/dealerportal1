@@ -22,6 +22,7 @@ app.use('/api/admin/quotes', require('./routes/admin-quotes'));
 app.use('/api/admin/pricing-tiers', require('./routes/admin-pricing'));
 app.use('/api/admin/customers', require('./routes/admin-customers'));
 app.use('/api/admin/products', require('./routes/admin-products'));
+app.use('/api/admin/users', require('./routes/admin-users'));
 app.use('/api/master', require('./routes/master'));
 
 app.get('*', (req, res) => {
@@ -31,7 +32,7 @@ app.get('*', (req, res) => {
 app.listen(PORT, () => {
     console.log('');
     console.log('==============================================');
-    console.log('  AmeriDex Dealer Portal Server v2.0');
+    console.log('  AmeriDex Dealer Portal Server v2.1');
     console.log('  Running on http://localhost:' + PORT);
     console.log('  Data stored in ./data/');
     console.log('  User accounts: ./data/users.json');

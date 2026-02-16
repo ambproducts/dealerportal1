@@ -1,6 +1,6 @@
 // ============================================================
-// AmeriDex Dealer Portal - Role System v1.2
-// Date: 2026-02-14
+// AmeriDex Dealer Portal - Role System v2.0
+// Date: 2026-02-16
 // ============================================================
 // Implements GM (General Manager) and Frontdesk (Frontman) roles
 // at the dealer location level.
@@ -8,22 +8,22 @@
 // ROLES:
 //   gm       - Can create quotes, override prices immediately,
 //              approve/reject override requests from frontdesk,
-//              manage frontdesk user accounts
+//              manage frontdesk user accounts (via Team modal)
 //   frontdesk - Can create quotes, must REQUEST price overrides
 //              (requires GM approval before submission)
+//              NO access to user management
 //   admin    - Full access (AmeriDex internal staff)
 //   dealer   - Legacy role, treated as GM equivalent
 //   rep      - Internal rep, treated as GM equivalent
 //
+// v2.0 Changes (2026-02-16):
+//   - REMOVE: User management widget from main portal page
+//   - ADD: GM Team panel (modal with Team tab) for managing frontdesk
+//   - FIX: Frontdesk explicitly blocked from all user management UI
+//   - FIX: Users categorized by dealer code in admin panel
+//
 // v1.2 Changes (2026-02-14):
 //   - FIX: GM-created accounts are immediately active (no admin approval)
-//   - FIX: Success message updated to reflect instant activation
-//
-// v1.1 Changes (2026-02-14):
-//   - ADD: Section 6: GM User Management subsection
-//   - GM can list, create, disable/enable, reset-password for frontdesk
-//   - User table with status badges (active/pending/disabled)
-//   - Create form with validation
 //
 // REQUIRES: ameridex-patches.js, ameridex-api.js,
 //           ameridex-pricing-fix.js, ameridex-overrides.js
@@ -74,7 +74,6 @@
         return colors[role] || colors.frontdesk;
     }
 
-    // Expose helpers globally
     window.getUserRole = getUserRole;
     window.isApprover = isApprover;
     window.isFrontdesk = isFrontdesk;
@@ -106,18 +105,29 @@
         '/* Override column in table */',
         '.override-cell{white-space:nowrap;text-align:center;min-width:90px;}',
         '',
-        '/* --- User Management Widget (GM) --- */',
-        '.gm-users-widget{background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:1rem 1.25rem;margin-bottom:1.5rem;}',
-        '.gm-users-widget h3{margin:0 0 0.75rem;font-size:1rem;color:#0369a1;display:flex;align-items:center;gap:0.5rem;}',
-        '.gm-users-widget h3 .users-icon{font-size:1.15rem;}',
-        '.gm-users-widget .users-count{background:#0ea5e9;color:#fff;font-size:0.75rem;font-weight:700;padding:0.15rem 0.55rem;border-radius:999px;min-width:1.5rem;text-align:center;}',
+        '/* --- GM Team Panel (Modal) --- */',
+        '#gm-team-modal{display:none;position:fixed;inset:0;background:rgba(15,23,42,0.6);z-index:1900;justify-content:center;align-items:flex-start;padding:2rem 1rem;overflow-y:auto;}',
+        '#gm-team-modal.active{display:flex;}',
+        '#gm-team-panel{background:#fff;border-radius:14px;width:100%;max-width:720px;box-shadow:0 25px 50px rgba(0,0,0,0.25);max-height:90vh;display:flex;flex-direction:column;}',
+        '.gm-team-header{background:linear-gradient(135deg,#0369a1,#0c4a6e);color:#fff;padding:1.25rem 1.5rem;border-radius:14px 14px 0 0;display:flex;justify-content:space-between;align-items:center;}',
+        '.gm-team-header h2{margin:0;font-size:1.25rem;}',
+        '.gm-team-close{background:none;border:none;color:#fff;font-size:1.5rem;cursor:pointer;padding:0.5rem;opacity:0.8;}',
+        '.gm-team-close:hover{opacity:1;}',
+        '.gm-team-body{padding:1.5rem;overflow-y:auto;flex:1;}',
         '',
-        '/* User table */',
-        '.gm-users-table{width:100%;border-collapse:collapse;font-size:0.82rem;margin-bottom:0.75rem;}',
-        '.gm-users-table th{text-align:left;padding:0.45rem 0.6rem;background:#e0f2fe;color:#0c4a6e;font-weight:700;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.04em;border-bottom:2px solid #bae6fd;}',
-        '.gm-users-table td{padding:0.45rem 0.6rem;border-bottom:1px solid #e0f2fe;vertical-align:middle;}',
-        '.gm-users-table tr:last-child td{border-bottom:none;}',
-        '.gm-users-table tr:hover td{background:#f0f9ff;}',
+        '/* Team button in header */',
+        '.gm-team-btn{display:none;padding:0.35rem 0.75rem;border:1px solid #0ea5e9;border-radius:6px;background:#e0f2fe;color:#0369a1;font-size:0.78rem;font-weight:700;cursor:pointer;transition:all 0.15s;margin-right:0.35rem;}',
+        '.gm-team-btn:hover{background:#bae6fd;}',
+        '',
+        '/* Reuse admin table styles for GM team */',
+        '.gm-team-table{width:100%;border-collapse:collapse;font-size:0.85rem;margin-bottom:1rem;}',
+        '.gm-team-table th{background:#f0f9ff;padding:0.6rem 0.7rem;text-align:left;font-weight:700;color:#0c4a6e;border-bottom:2px solid #bae6fd;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.04em;}',
+        '.gm-team-table td{padding:0.55rem 0.7rem;border-bottom:1px solid #e0f2fe;vertical-align:middle;}',
+        '.gm-team-table tr:hover td{background:#f0f9ff;}',
+        '.gm-team-stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:0.75rem;margin-bottom:1rem;}',
+        '.gm-team-stat{background:#f0f9ff;border-radius:8px;padding:0.75rem;text-align:center;border:1px solid #bae6fd;}',
+        '.gm-team-stat-value{font-size:1.35rem;font-weight:700;color:#0369a1;}',
+        '.gm-team-stat-label{font-size:0.72rem;color:#6b7280;margin-top:0.15rem;}',
         '',
         '/* Status badges */',
         '.user-status-badge{display:inline-flex;align-items:center;padding:0.12rem 0.45rem;border-radius:999px;font-size:0.65rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;}',
@@ -135,10 +145,10 @@
         '.user-action-btn--reset{background:#fff;color:#0369a1;border-color:#7dd3fc;}',
         '.user-action-btn--reset:hover{background:#e0f2fe;}',
         '',
-        '/* Create user form */',
-        '.gm-create-user-toggle{font-size:0.8rem;padding:0.4rem 0.85rem;border:1px solid #0ea5e9;border-radius:6px;background:#fff;color:#0369a1;cursor:pointer;font-weight:600;transition:all 0.15s;}',
+        '/* Create user form inside GM team panel */',
+        '.gm-create-user-toggle{font-size:0.82rem;padding:0.45rem 0.9rem;border:1px solid #0ea5e9;border-radius:6px;background:#fff;color:#0369a1;cursor:pointer;font-weight:600;transition:all 0.15s;}',
         '.gm-create-user-toggle:hover{background:#e0f2fe;}',
-        '.gm-create-user-form{background:#fff;border:1px solid #bae6fd;border-radius:8px;padding:1rem;margin-top:0.75rem;display:none;}',
+        '.gm-create-user-form{background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:1rem;margin-top:0.75rem;display:none;}',
         '.gm-create-user-form.active{display:block;}',
         '.gm-create-user-form .form-row{display:flex;gap:0.75rem;margin-bottom:0.65rem;flex-wrap:wrap;}',
         '.gm-create-user-form .form-field{flex:1;min-width:180px;}',
@@ -155,7 +165,12 @@
         '/* Reset password inline */',
         '.reset-pw-inline{display:inline-flex;align-items:center;gap:0.35rem;margin-top:0.25rem;}',
         '.reset-pw-inline input{width:140px;padding:0.25rem 0.4rem;border:1px solid #d1d5db;border-radius:4px;font-size:0.75rem;}',
-        '.reset-pw-inline button{font-size:0.68rem;padding:0.2rem 0.45rem;border-radius:4px;border:1px solid #0ea5e9;background:#e0f2fe;color:#0369a1;cursor:pointer;font-weight:600;}'
+        '.reset-pw-inline button{font-size:0.68rem;padding:0.2rem 0.45rem;border-radius:4px;border:1px solid #0ea5e9;background:#e0f2fe;color:#0369a1;cursor:pointer;font-weight:600;}',
+        '',
+        '@media (max-width:600px){',
+        '  #gm-team-panel{max-width:100%;margin:0;border-radius:10px;}',
+        '  .gm-create-user-form .form-row{flex-direction:column;}',
+        '}'
     ].join('\n');
     document.head.appendChild(roleCSS);
 
@@ -194,7 +209,7 @@
             }
         }
 
-        if (dealerCode && user.username) {
+        if (typeof dealerCode !== 'undefined' && dealerCode && user.username) {
             var currentText = dealerCode.textContent || '';
             if (currentText.indexOf('|') !== -1 && currentText.indexOf(user.username) === -1) {
             } else if (currentText.indexOf(user.username) === -1) {
@@ -335,11 +350,12 @@
 
 
     // ----------------------------------------------------------
-    // 5. VISIBILITY CONTROL FOR GM-ONLY UI
+    // 5. VISIBILITY CONTROL FOR ROLE-BASED UI
     // ----------------------------------------------------------
     function applyRoleVisibility() {
         var role = getUserRole();
 
+        // GM overrides widget
         var gmWidget = document.getElementById('gm-overrides-widget');
         if (gmWidget) {
             if (!isApprover()) {
@@ -347,85 +363,142 @@
             }
         }
 
+        // Admin button: admin only
         var adminBtn = document.getElementById('admin-btn');
         if (adminBtn) {
             adminBtn.style.display = (role === 'admin') ? 'inline-block' : 'none';
+        }
+
+        // GM Team button: gm only (not frontdesk, not admin since admin has full panel)
+        var teamBtn = document.getElementById('gm-team-btn');
+        if (teamBtn) {
+            teamBtn.style.display = (role === 'gm') ? 'inline-block' : 'none';
+        }
+
+        // Legacy users widget: hide for everyone (moved to GM Team modal / Admin panel)
+        var usersWidget = document.getElementById('gm-users-widget');
+        if (usersWidget) {
+            usersWidget.style.display = 'none';
         }
     }
 
 
     // ----------------------------------------------------------
-    // 6. GM USER MANAGEMENT SUBSECTION
+    // 6. GM TEAM PANEL (MODAL)
     // ----------------------------------------------------------
-    var _usersWidgetCreated = false;
+    var _gmTeamModalCreated = false;
 
-    function createUsersWidget() {
+    function createGMTeamModal() {
+        if (_gmTeamModalCreated) return;
+        if (document.getElementById('gm-team-modal')) return;
+
         var user = window.getCurrentUser ? window.getCurrentUser() : null;
-        if (!user || (user.role !== 'gm' && user.role !== 'admin')) return;
-        if (document.getElementById('gm-users-widget')) return;
+        if (!user || user.role !== 'gm') return;
 
-        var widget = document.createElement('div');
-        widget.className = 'gm-users-widget';
-        widget.id = 'gm-users-widget';
-        widget.innerHTML =
-            '<h3>' +
-                '<span class="users-icon">&#128101;</span> ' +
-                'User Management ' +
-                '<span class="users-count" id="gm-users-count">0</span>' +
-            '</h3>' +
-            '<div id="gm-users-table-container"></div>' +
-            '<button type="button" class="gm-create-user-toggle" id="gm-create-user-toggle">' +
-                '+ Create Frontdesk Account' +
-            '</button>' +
-            '<div class="gm-create-user-form" id="gm-create-user-form">' +
-                '<div class="form-row">' +
-                    '<div class="form-field">' +
-                        '<label for="gm-new-username">Username</label>' +
-                        '<input type="text" id="gm-new-username" placeholder="e.g., jsmith" autocomplete="off">' +
-                    '</div>' +
-                    '<div class="form-field">' +
-                        '<label for="gm-new-display-name">Display Name</label>' +
-                        '<input type="text" id="gm-new-display-name" placeholder="e.g., John Smith">' +
-                    '</div>' +
-                '</div>' +
-                '<div class="form-row">' +
-                    '<div class="form-field">' +
-                        '<label for="gm-new-password">Password (min 8 chars)</label>' +
-                        '<input type="password" id="gm-new-password" placeholder="Temporary password" autocomplete="new-password">' +
-                    '</div>' +
-                    '<div class="form-field">' +
-                        '<label for="gm-new-email">Email (optional)</label>' +
-                        '<input type="email" id="gm-new-email" placeholder="john@example.com">' +
-                    '</div>' +
-                '</div>' +
-                '<div class="form-row">' +
-                    '<div class="form-field">' +
-                        '<label for="gm-new-phone">Phone (optional)</label>' +
-                        '<input type="tel" id="gm-new-phone" placeholder="(555) 123-4567">' +
-                    '</div>' +
-                    '<div class="form-field"></div>' +
-                '</div>' +
-                '<div class="form-error" id="gm-create-error"></div>' +
-                '<div class="form-success" id="gm-create-success"></div>' +
-                '<div class="form-actions">' +
-                    '<button type="button" class="btn-create-user" id="gm-create-submit">Create Account</button>' +
-                    '<button type="button" class="btn-cancel-create" id="gm-create-cancel">Cancel</button>' +
-                '</div>' +
-            '</div>';
+        // Create "Team" button in header
+        var headerActions = document.querySelector('.header-actions');
+        if (headerActions && !document.getElementById('gm-team-btn')) {
+            var teamBtn = document.createElement('button');
+            teamBtn.type = 'button';
+            teamBtn.id = 'gm-team-btn';
+            teamBtn.className = 'gm-team-btn';
+            teamBtn.innerHTML = '&#128101; Team';
+            teamBtn.style.display = 'inline-block';
+            teamBtn.addEventListener('click', function () {
+                var modal = document.getElementById('gm-team-modal');
+                if (modal) {
+                    modal.classList.add('active');
+                    loadGMTeamUsers();
+                }
+            });
 
-        var overridesWidget = document.getElementById('gm-overrides-widget');
-        var savedSection = document.getElementById('saved-quotes-section');
-        if (overridesWidget && overridesWidget.parentNode) {
-            overridesWidget.parentNode.insertBefore(widget, overridesWidget.nextSibling);
-        } else if (savedSection && savedSection.parentNode) {
-            savedSection.parentNode.insertBefore(widget, savedSection);
-        } else {
-            var mainApp = document.getElementById('main-app');
-            if (mainApp && mainApp.firstChild) {
-                mainApp.insertBefore(widget, mainApp.firstChild);
+            var adminBtn = document.getElementById('admin-btn');
+            if (adminBtn) {
+                headerActions.insertBefore(teamBtn, adminBtn);
+            } else {
+                var logoutBtn = document.getElementById('logout-btn');
+                if (logoutBtn) {
+                    headerActions.insertBefore(teamBtn, logoutBtn);
+                } else {
+                    headerActions.appendChild(teamBtn);
+                }
             }
         }
 
+        // Create modal
+        var modal = document.createElement('div');
+        modal.id = 'gm-team-modal';
+        modal.setAttribute('role', 'dialog');
+        modal.setAttribute('aria-modal', 'true');
+        modal.innerHTML =
+            '<div id="gm-team-panel">' +
+                '<div class="gm-team-header">' +
+                    '<h2>&#128101; My Team</h2>' +
+                    '<button class="gm-team-close" id="gm-team-close-btn" aria-label="Close">&times;</button>' +
+                '</div>' +
+                '<div class="gm-team-body">' +
+                    '<div id="gm-team-stats" class="gm-team-stat-row"></div>' +
+                    '<div id="gm-team-alert"></div>' +
+                    '<div id="gm-team-table-container"></div>' +
+                    '<div style="margin-top:1rem;">' +
+                        '<button type="button" class="gm-create-user-toggle" id="gm-create-user-toggle">' +
+                            '+ Create Frontdesk Account' +
+                        '</button>' +
+                    '</div>' +
+                    '<div class="gm-create-user-form" id="gm-create-user-form">' +
+                        '<div class="form-row">' +
+                            '<div class="form-field">' +
+                                '<label for="gm-new-username">Username</label>' +
+                                '<input type="text" id="gm-new-username" placeholder="e.g., jsmith" autocomplete="off">' +
+                            '</div>' +
+                            '<div class="form-field">' +
+                                '<label for="gm-new-display-name">Display Name</label>' +
+                                '<input type="text" id="gm-new-display-name" placeholder="e.g., John Smith">' +
+                            '</div>' +
+                        '</div>' +
+                        '<div class="form-row">' +
+                            '<div class="form-field">' +
+                                '<label for="gm-new-password">Password (min 8 chars)</label>' +
+                                '<input type="password" id="gm-new-password" placeholder="Temporary password" autocomplete="new-password">' +
+                            '</div>' +
+                            '<div class="form-field">' +
+                                '<label for="gm-new-email">Email (optional)</label>' +
+                                '<input type="email" id="gm-new-email" placeholder="john@example.com">' +
+                            '</div>' +
+                        '</div>' +
+                        '<div class="form-row">' +
+                            '<div class="form-field">' +
+                                '<label for="gm-new-phone">Phone (optional)</label>' +
+                                '<input type="tel" id="gm-new-phone" placeholder="(555) 123-4567">' +
+                            '</div>' +
+                            '<div class="form-field"></div>' +
+                        '</div>' +
+                        '<div class="form-error" id="gm-create-error"></div>' +
+                        '<div class="form-success" id="gm-create-success"></div>' +
+                        '<div class="form-actions">' +
+                            '<button type="button" class="btn-create-user" id="gm-create-submit">Create Account</button>' +
+                            '<button type="button" class="btn-cancel-create" id="gm-create-cancel">Cancel</button>' +
+                        '</div>' +
+                    '</div>' +
+                '</div>' +
+            '</div>';
+
+        document.body.appendChild(modal);
+
+        // Close handlers
+        document.getElementById('gm-team-close-btn').addEventListener('click', function () {
+            modal.classList.remove('active');
+        });
+        modal.addEventListener('click', function (e) {
+            if (e.target === modal) modal.classList.remove('active');
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && modal.classList.contains('active')) {
+                modal.classList.remove('active');
+            }
+        });
+
+        // Toggle create form
         document.getElementById('gm-create-user-toggle').addEventListener('click', function () {
             var form = document.getElementById('gm-create-user-form');
             form.classList.toggle('active');
@@ -446,48 +519,58 @@
 
         document.getElementById('gm-create-submit').addEventListener('click', handleCreateUser);
 
-        _usersWidgetCreated = true;
+        _gmTeamModalCreated = true;
     }
 
-    function clearCreateForm() {
-        document.getElementById('gm-new-username').value = '';
-        document.getElementById('gm-new-display-name').value = '';
-        document.getElementById('gm-new-password').value = '';
-        document.getElementById('gm-new-email').value = '';
-        document.getElementById('gm-new-phone').value = '';
-        document.getElementById('gm-create-error').style.display = 'none';
-        document.getElementById('gm-create-success').style.display = 'none';
-    }
-
-    function showCreateError(msg) {
-        var el = document.getElementById('gm-create-error');
-        el.textContent = msg;
-        el.style.display = 'block';
-        document.getElementById('gm-create-success').style.display = 'none';
-    }
-
-    function showCreateSuccess(msg) {
-        var el = document.getElementById('gm-create-success');
-        el.textContent = msg;
-        el.style.display = 'block';
-        document.getElementById('gm-create-error').style.display = 'none';
-    }
-
-
-    // ----------------------------------------------------------
-    // 6a. LOAD AND RENDER USERS TABLE
-    // ----------------------------------------------------------
-    function loadDealerUsers() {
+    // Expose toggle for external use
+    window.toggleGMTeamPanel = function () {
         var user = window.getCurrentUser ? window.getCurrentUser() : null;
-        if (!user || (user.role !== 'gm' && user.role !== 'admin')) return;
+        if (!user || user.role !== 'gm') {
+            alert('GM access required.');
+            return;
+        }
+        var modal = document.getElementById('gm-team-modal');
+        if (modal) {
+            modal.classList.toggle('active');
+            if (modal.classList.contains('active')) {
+                loadGMTeamUsers();
+            }
+        }
+    };
+
+
+    // ----------------------------------------------------------
+    // 6a. LOAD AND RENDER TEAM USERS TABLE
+    // ----------------------------------------------------------
+    function loadGMTeamUsers() {
+        var user = window.getCurrentUser ? window.getCurrentUser() : null;
+        if (!user || user.role !== 'gm') return;
 
         api('GET', '/api/users')
             .then(function (users) {
-                renderUsersTable(users);
+                renderGMTeamStats(users);
+                renderGMTeamTable(users);
             })
             .catch(function (err) {
-                console.warn('[Roles] Failed to load users:', err.message);
+                var container = document.getElementById('gm-team-table-container');
+                if (container) {
+                    container.innerHTML = '<div style="color:#dc2626;font-size:0.88rem;">Failed to load team: ' + (err.message || 'Unknown error') + '</div>';
+                }
             });
+    }
+
+    function renderGMTeamStats(users) {
+        var statsEl = document.getElementById('gm-team-stats');
+        if (!statsEl) return;
+
+        var total = users.length;
+        var active = users.filter(function (u) { return u.status === 'active'; }).length;
+        var frontdeskCount = users.filter(function (u) { return u.role === 'frontdesk'; }).length;
+
+        statsEl.innerHTML =
+            '<div class="gm-team-stat"><div class="gm-team-stat-value">' + total + '</div><div class="gm-team-stat-label">Total Users</div></div>' +
+            '<div class="gm-team-stat"><div class="gm-team-stat-value">' + active + '</div><div class="gm-team-stat-label">Active</div></div>' +
+            '<div class="gm-team-stat"><div class="gm-team-stat-value">' + frontdeskCount + '</div><div class="gm-team-stat-label">Frontdesk</div></div>';
     }
 
     function getStatusBadgeHTML(status) {
@@ -500,22 +583,19 @@
         return '<span class="' + cls + '">' + label + '</span>';
     }
 
-    function renderUsersTable(users) {
-        var container = document.getElementById('gm-users-table-container');
+    function renderGMTeamTable(users) {
+        var container = document.getElementById('gm-team-table-container');
         if (!container) return;
 
-        var countEl = document.getElementById('gm-users-count');
-        if (countEl) countEl.textContent = users.length;
-
         if (users.length === 0) {
-            container.innerHTML = '<p style="color:#6b7280;font-size:0.82rem;margin:0.5rem 0;">No users found at this dealership.</p>';
+            container.innerHTML = '<p style="color:#6b7280;font-size:0.85rem;margin:0.5rem 0;">No team members found. Create a frontdesk account below.</p>';
             return;
         }
 
         var currentUser = window.getCurrentUser ? window.getCurrentUser() : null;
         var escapeHTML = window.escapeHTML || function (s) { return s; };
 
-        var html = '<table class="gm-users-table">';
+        var html = '<table class="gm-team-table">';
         html += '<thead><tr>';
         html += '<th>Username</th>';
         html += '<th>Display Name</th>';
@@ -536,7 +616,7 @@
             html += '<td>' + escapeHTML(u.displayName || u.username) + '</td>';
             html += '<td>' + getRoleLabel(u.role) + '</td>';
             html += '<td>' + getStatusBadgeHTML(u.status) + '</td>';
-            html += '<td style="font-size:0.75rem;color:#6b7280;">';
+            html += '<td style="font-size:0.78rem;color:#6b7280;">';
             if (u.lastLogin) {
                 html += new Date(u.lastLogin).toLocaleDateString();
             } else {
@@ -565,6 +645,7 @@
         html += '</tbody></table>';
         container.innerHTML = html;
 
+        // Wire action buttons
         container.querySelectorAll('[data-action="disable"]').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 handleDisableUser(btn.getAttribute('data-uid'), btn.getAttribute('data-uname'));
@@ -586,6 +667,30 @@
     // ----------------------------------------------------------
     // 6b. CREATE FRONTDESK ACCOUNT
     // ----------------------------------------------------------
+    function clearCreateForm() {
+        document.getElementById('gm-new-username').value = '';
+        document.getElementById('gm-new-display-name').value = '';
+        document.getElementById('gm-new-password').value = '';
+        document.getElementById('gm-new-email').value = '';
+        document.getElementById('gm-new-phone').value = '';
+        document.getElementById('gm-create-error').style.display = 'none';
+        document.getElementById('gm-create-success').style.display = 'none';
+    }
+
+    function showCreateError(msg) {
+        var el = document.getElementById('gm-create-error');
+        el.textContent = msg;
+        el.style.display = 'block';
+        document.getElementById('gm-create-success').style.display = 'none';
+    }
+
+    function showCreateSuccess(msg) {
+        var el = document.getElementById('gm-create-success');
+        el.textContent = msg;
+        el.style.display = 'block';
+        document.getElementById('gm-create-error').style.display = 'none';
+    }
+
     function handleCreateUser() {
         var username = document.getElementById('gm-new-username').value.trim();
         var displayName = document.getElementById('gm-new-display-name').value.trim();
@@ -626,15 +731,10 @@
                     'Account "' + newUser.username + '" created successfully. ' +
                     'Account is active and ready to log in.'
                 );
-                document.getElementById('gm-new-username').value = '';
-                document.getElementById('gm-new-display-name').value = '';
-                document.getElementById('gm-new-password').value = '';
-                document.getElementById('gm-new-email').value = '';
-                document.getElementById('gm-new-phone').value = '';
+                clearCreateForm();
                 submitBtn.disabled = false;
                 submitBtn.textContent = 'Create Account';
-
-                loadDealerUsers();
+                loadGMTeamUsers();
             })
             .catch(function (err) {
                 showCreateError(err.message || 'Failed to create account.');
@@ -647,15 +747,25 @@
     // ----------------------------------------------------------
     // 6c. DISABLE / ENABLE / RESET PASSWORD
     // ----------------------------------------------------------
+    function showTeamAlert(msg, type) {
+        var el = document.getElementById('gm-team-alert');
+        if (!el) return;
+        el.innerHTML = '<div style="padding:0.6rem 0.8rem;border-radius:6px;font-size:0.85rem;margin-bottom:0.75rem;' +
+            (type === 'error' ? 'background:#fee2e2;color:#dc2626;' : 'background:#dcfce7;color:#16a34a;') +
+            '">' + msg + '</div>';
+        setTimeout(function () { el.innerHTML = ''; }, 3500);
+    }
+
     function handleDisableUser(userId, username) {
         if (!confirm('Disable account "' + username + '"? They will not be able to log in.')) return;
 
         api('POST', '/api/users/' + userId + '/disable')
             .then(function () {
-                loadDealerUsers();
+                showTeamAlert('Account "' + username + '" disabled.', 'success');
+                loadGMTeamUsers();
             })
             .catch(function (err) {
-                alert('Failed to disable: ' + (err.message || 'Unknown error'));
+                showTeamAlert('Failed to disable: ' + (err.message || 'Unknown error'), 'error');
             });
     }
 
@@ -664,10 +774,11 @@
 
         api('POST', '/api/users/' + userId + '/enable')
             .then(function () {
-                loadDealerUsers();
+                showTeamAlert('Account "' + username + '" enabled.', 'success');
+                loadGMTeamUsers();
             })
             .catch(function (err) {
-                alert('Failed to enable: ' + (err.message || 'Unknown error'));
+                showTeamAlert('Failed to enable: ' + (err.message || 'Unknown error'), 'error');
             });
     }
 
@@ -784,7 +895,7 @@
 
 
     // ----------------------------------------------------------
-    // 10. PERIODIC ROLE BADGE REFRESH
+    // 10. PERIODIC REFRESH ON APP VISIBILITY
     // ----------------------------------------------------------
     var mainApp = document.getElementById('main-app');
     if (mainApp) {
@@ -793,10 +904,7 @@
                 injectRoleBadge();
                 applyRoleVisibility();
                 patchAdminDealerForm();
-                if (!_usersWidgetCreated) {
-                    createUsersWidget();
-                }
-                loadDealerUsers();
+                createGMTeamModal();
             }
         });
         roleObserver.observe(mainApp, { attributes: true, attributeFilter: ['class'] });
@@ -817,12 +925,11 @@
         applyRoleVisibility();
         patchAdminDealerForm();
 
-        if (user.role === 'gm' || user.role === 'admin') {
-            createUsersWidget();
-            loadDealerUsers();
+        if (user.role === 'gm') {
+            createGMTeamModal();
         }
 
-        console.log('[Roles] v1.2 initialized for role: ' + user.role +
+        console.log('[Roles] v2.0 initialized for role: ' + user.role +
             ' (' + getRoleLabel(user.role) + ')' +
             ' | Approver: ' + isApprover() +
             ' | Frontdesk: ' + isFrontdesk());
@@ -830,5 +937,5 @@
 
     setTimeout(initRoles, 600);
 
-    console.log('[AmeriDex Roles] v1.2 loaded: GM/Frontdesk role system + User Management.');
+    console.log('[AmeriDex Roles] v2.0 loaded: GM Team panel + Frontdesk restricted.');
 })();
