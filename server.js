@@ -20,6 +20,10 @@ app.use(express.static(path.join(__dirname, 'public')));
 const authRoutes = require('./routes/auth');
 app.use('/api/auth', authRoutes);
 
+// Users (GM-scoped + admin)
+const userRoutes = require('./routes/users');
+app.use('/api/users', userRoutes);
+
 // Quotes
 const quoteRoutes = require('./routes/quotes');
 app.use('/api/quotes', quoteRoutes);
@@ -40,7 +44,7 @@ app.use('/api/admin/products', adminProductRoutes);
 const adminPricingRoutes = require('./routes/admin-pricing');
 app.use('/api/admin/pricing-tiers', adminPricingRoutes);
 
-// Admin - Users (NEW in v1.5)
+// Admin - Users
 const adminUserRoutes = require('./routes/admin-users');
 app.use('/api/admin/users', adminUserRoutes);
 
