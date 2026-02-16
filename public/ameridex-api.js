@@ -1,12 +1,21 @@
 // ============================================================
-// AmeriDex Dealer Portal - API Integration Patch v2.3
-// Date: 2026-02-14
+// AmeriDex Dealer Portal - API Integration Patch v2.4
+// Date: 2026-02-16
 // ============================================================
 // REQUIRES: ameridex-patches.js (v1.0+) loaded first
 //
 // Load order in dealer-portal.html (before </body>):
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
+//
+// v2.4 Changes (2026-02-16):
+//   - FIX: Dispatch 'ameridex-login' custom event after both
+//     handleServerLogin() and tryResumeSession() complete. This
+//     event is consumed by ameridex-roles.js to inject role-based
+//     nav buttons (GM "My Team", Admin Panel) at the correct time.
+//   - Previously these buttons never appeared because the event
+//     was never fired, and the DOMContentLoaded fallback ran
+//     before the user had authenticated.
 //
 // v2.3 Changes (2026-02-14):
 //   - FIX: api() helper no longer treats 401 from /api/auth/login
@@ -123,6 +132,27 @@
     window.getAuthToken = function () { return _authToken; };
     window.getCurrentDealer = function () { return _currentDealer; };
     window.getCurrentUser = function () { return _currentUser; };
+
+
+    // ----------------------------------------------------------
+    // EVENT DISPATCH HELPER
+    // ----------------------------------------------------------
+    // Fires the 'ameridex-login' custom event on window.
+    // Consumed by ameridex-roles.js to inject role-based buttons
+    // (GM "My Team", Admin "Admin Panel") into the header.
+    // Also consumed by ameridex-overrides.js for init timing.
+    // ----------------------------------------------------------
+    function dispatchLoginEvent() {
+        try {
+            window.dispatchEvent(new Event('ameridex-login'));
+            console.log('[Auth] Dispatched ameridex-login event (role: ' + (_currentUser ? _currentUser.role : 'unknown') + ')');
+        } catch (e) {
+            // IE11 fallback (unlikely but safe)
+            var evt = document.createEvent('Event');
+            evt.initEvent('ameridex-login', true, true);
+            window.dispatchEvent(evt);
+        }
+    }
 
 
     // ----------------------------------------------------------
@@ -342,6 +372,11 @@
                     loginBtn.disabled = false;
                     if (pwInput) pwInput.value = '';
                     console.log('[Auth] Logged in as ' + data.user.username + ' (' + data.user.role + ') | Dealer: ' + data.dealer.dealerCode);
+
+                    // v2.4: Dispatch login event so role-based modules
+                    // (ameridex-roles.js, ameridex-overrides.js) can
+                    // inject their UI now that auth is complete.
+                    dispatchLoginEvent();
                 });
             })
             .catch(function (err) {
@@ -638,6 +673,10 @@
 
         var tierBadge = document.getElementById('header-tier-badge');
         if (tierBadge) tierBadge.style.display = 'none';
+
+        // Remove role-injected buttons on logout so they don't
+        // persist if a different user logs in next.
+        document.querySelectorAll('.role-injected').forEach(function (el) { el.remove(); });
 
         document.getElementById('main-app').classList.add('app-hidden');
         document.getElementById('login-screen').style.display = 'flex';
@@ -972,6 +1011,7 @@
     //       stale token does NOT flash "Session expired" before
     //       the login screen appears. It just silently clears
     //       the token and shows the login form.
+    // v2.4: Dispatches ameridex-login event on successful resume.
     // ----------------------------------------------------------
     function tryResumeSession() {
         if (!_authToken) return;
@@ -998,6 +1038,10 @@
                 updateHeaderForDealer();
                 renderSavedQuotes();
                 console.log('[Session] Resumed as ' + _currentUser.username + ' (' + _currentUser.role + ')');
+
+                // v2.4: Dispatch login event so role-based modules
+                // can inject their UI after session resume completes.
+                dispatchLoginEvent();
             })
             .catch(function () {
                 // v2.3: Silently clear stale session, no error flash
@@ -1035,5 +1079,5 @@
         tryResumeSession();
     }
 
-    console.log('[AmeriDex API] v2.3 loaded: Auth + API integration active.');
+    console.log('[AmeriDex API] v2.4 loaded: Auth + API integration active.');
 })();
