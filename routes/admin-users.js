@@ -1,135 +1,41 @@
 // ============================================================
-// routes/admin-users.js - Admin User Management Endpoints
+// routes/admin-users.js - Admin User Management Endpoints v2.0
 // Date: 2026-02-16
 // ============================================================
-// Provides CRUD for all user accounts across all dealers.
+// Provides admin-only CRUD for all user accounts across all dealers.
+// Reads/writes data/users.json via lib/helpers.js (same data layer
+// as routes/users.js so both routes see the same user records).
+//
 // Mounted at /api/admin/users in server.js.
 //
 // Endpoints:
-//   GET    /api/admin/users              - List all users (filterable)
-//   POST   /api/admin/users              - Create a new user
-//   PUT    /api/admin/users/:id          - Update user details
-//   POST   /api/admin/users/:id/reset-password  - Reset user password
-//   POST   /api/admin/users/:id/disable  - Disable a user
-//   POST   /api/admin/users/:id/enable   - Enable a user
-//   DELETE /api/admin/users/:id          - Delete a user
+//   GET    /api/admin/users                      - List all users (filterable)
+//   POST   /api/admin/users                      - Create a new user
+//   PUT    /api/admin/users/:id                   - Update user details
+//   POST   /api/admin/users/:id/reset-password    - Reset user password
+//   POST   /api/admin/users/:id/disable           - Disable a user
+//   POST   /api/admin/users/:id/enable            - Enable a user
+//   DELETE /api/admin/users/:id                   - Delete a user
 // ============================================================
 
 const express = require('express');
 const router = express.Router();
-const crypto = require('crypto');
+const { readJSON, writeJSON, USERS_FILE, generateId } = require('../lib/helpers');
+const { hashPassword } = require('../lib/password');
+const { requireAuth, requireAdmin } = require('../middleware/auth');
 
-// In-memory store (replace with DB later)
-let users = [
-    {
-        id: 'u-001',
-        dealerCode: 'AMB001',
-        username: 'admin',
-        displayName: 'System Admin',
-        role: 'admin',
-        email: 'admin@ameridex.com',
-        phone: '',
-        status: 'active',
-        passwordHash: '$admin$',
-        createdAt: '2026-01-01T00:00:00Z',
-        lastLogin: '2026-02-16T08:00:00Z'
-    },
-    {
-        id: 'u-002',
-        dealerCode: 'AMB001',
-        username: 'gm.amb001',
-        displayName: 'Mike Reynolds',
-        role: 'gm',
-        email: 'mike@ameridex.com',
-        phone: '555-100-0001',
-        status: 'active',
-        passwordHash: '$gm$',
-        createdAt: '2026-01-15T00:00:00Z',
-        lastLogin: '2026-02-15T14:30:00Z'
-    },
-    {
-        id: 'u-003',
-        dealerCode: 'AMB001',
-        username: 'sarah.amb',
-        displayName: 'Sarah Chen',
-        role: 'frontdesk',
-        email: 'sarah@ameridex.com',
-        phone: '555-100-0002',
-        status: 'active',
-        passwordHash: '$fd$',
-        createdAt: '2026-02-01T00:00:00Z',
-        lastLogin: '2026-02-16T07:45:00Z'
-    },
-    {
-        id: 'u-004',
-        dealerCode: 'AMB001',
-        username: 'tom.amb',
-        displayName: 'Tom Brady',
-        role: 'frontdesk',
-        email: '',
-        phone: '555-100-0003',
-        status: 'active',
-        passwordHash: '$fd$',
-        createdAt: '2026-02-05T00:00:00Z',
-        lastLogin: '2026-02-14T16:00:00Z'
-    },
-    {
-        id: 'u-005',
-        dealerCode: 'DLR002',
-        username: 'gm.dlr002',
-        displayName: 'James Wilson',
-        role: 'gm',
-        email: 'james@coastaldecks.com',
-        phone: '555-200-0001',
-        status: 'active',
-        passwordHash: '$gm$',
-        createdAt: '2026-01-20T00:00:00Z',
-        lastLogin: '2026-02-15T09:00:00Z'
-    },
-    {
-        id: 'u-006',
-        dealerCode: 'DLR002',
-        username: 'lisa.dlr2',
-        displayName: 'Lisa Park',
-        role: 'frontdesk',
-        email: 'lisa@coastaldecks.com',
-        phone: '',
-        status: 'active',
-        passwordHash: '$fd$',
-        createdAt: '2026-02-10T00:00:00Z',
-        lastLogin: null
-    },
-    {
-        id: 'u-007',
-        dealerCode: 'DLR003',
-        username: 'gm.dlr003',
-        displayName: 'Dave Martinez',
-        role: 'gm',
-        email: 'dave@premiumoutdoor.com',
-        phone: '555-300-0001',
-        status: 'active',
-        passwordHash: '$gm$',
-        createdAt: '2026-01-25T00:00:00Z',
-        lastLogin: '2026-02-13T11:00:00Z'
-    },
-    {
-        id: 'u-008',
-        dealerCode: 'DLR003',
-        username: 'jen.dlr3',
-        displayName: 'Jennifer Lee',
-        role: 'frontdesk',
-        email: '',
-        phone: '555-300-0002',
-        status: 'disabled',
-        passwordHash: '$fd$',
-        createdAt: '2026-02-08T00:00:00Z',
-        lastLogin: '2026-02-10T10:00:00Z'
-    }
-];
+// All routes require authenticated admin
+router.use(requireAuth);
+router.use(requireAdmin);
 
-// Strip passwordHash from responses
+// Strip passwordHash (and other sensitive fields) from responses
 function sanitize(user) {
-    const { passwordHash, ...safe } = user;
+    const {
+        passwordHash,
+        failedLoginAttempts,
+        lockedUntil,
+        ...safe
+    } = user;
     return safe;
 }
 
@@ -138,17 +44,20 @@ function sanitize(user) {
 // Query params: ?dealerCode=AMB001&role=gm&status=active
 // -----------------------------------------------------------
 router.get('/', (req, res) => {
-    let result = [...users];
+    let users = readJSON(USERS_FILE);
+
     if (req.query.dealerCode) {
-        result = result.filter(u => u.dealerCode === req.query.dealerCode.toUpperCase());
+        const code = req.query.dealerCode.toUpperCase();
+        users = users.filter(u => u.dealerCode === code);
     }
     if (req.query.role) {
-        result = result.filter(u => u.role === req.query.role);
+        users = users.filter(u => u.role === req.query.role);
     }
     if (req.query.status) {
-        result = result.filter(u => u.status === req.query.status);
+        users = users.filter(u => u.status === req.query.status);
     }
-    res.json(result.map(sanitize));
+
+    res.json(users.map(sanitize));
 });
 
 // -----------------------------------------------------------
@@ -167,55 +76,83 @@ router.post('/', (req, res) => {
     if (password.length < 8) {
         return res.status(400).json({ error: 'Password must be at least 8 characters' });
     }
+
     const validRoles = ['admin', 'gm', 'frontdesk', 'dealer', 'rep'];
     if (role && !validRoles.includes(role)) {
         return res.status(400).json({ error: 'Invalid role. Must be one of: ' + validRoles.join(', ') });
     }
-    const exists = users.find(u => u.username.toLowerCase() === username.toLowerCase());
+
+    const users = readJSON(USERS_FILE);
+    const normalizedUsername = username.toLowerCase();
+    const normalizedCode = dealerCode.toUpperCase();
+
+    const exists = users.find(u =>
+        u.username.toLowerCase() === normalizedUsername &&
+        u.dealerCode === normalizedCode
+    );
     if (exists) {
-        return res.status(409).json({ error: 'Username "' + username + '" already exists' });
+        return res.status(409).json({ error: 'Username "' + username + '" already exists for dealer ' + normalizedCode });
     }
 
+    const now = new Date().toISOString();
     const newUser = {
-        id: 'u-' + crypto.randomUUID().slice(0, 8),
-        dealerCode: dealerCode.toUpperCase(),
-        username: username.toLowerCase(),
+        id: generateId(),
+        dealerCode: normalizedCode,
+        username: normalizedUsername,
         displayName: displayName || username,
         role: role || 'frontdesk',
         email: email || '',
         phone: phone || '',
         status: 'active',
-        passwordHash: '$hashed$' + password,
-        createdAt: new Date().toISOString(),
-        lastLogin: null
+        passwordHash: hashPassword(password),
+        createdBy: req.user.username,
+        approvedBy: req.user.username,
+        approvedAt: now,
+        createdAt: now,
+        updatedAt: now,
+        lastLogin: null,
+        loginCount: 0,
+        failedLoginAttempts: 0,
+        lockedUntil: null
     };
 
     users.push(newUser);
+    writeJSON(USERS_FILE, users);
+
+    console.log('[Admin Users] Created: ' + newUser.username + ' (' + newUser.role + ') for ' + newUser.dealerCode + ' by ' + req.user.username);
     res.status(201).json(sanitize(newUser));
 });
 
 // -----------------------------------------------------------
 // PUT /api/admin/users/:id - Update user details
-// Body: { displayName?, role?, email?, phone?, dealerCode? }
+// Body: { displayName?, role?, email?, phone?, dealerCode?, status? }
 // -----------------------------------------------------------
 router.put('/:id', (req, res) => {
-    const user = users.find(u => u.id === req.params.id);
-    if (!user) return res.status(404).json({ error: 'User not found' });
+    const users = readJSON(USERS_FILE);
+    const idx = users.findIndex(u => u.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: 'User not found' });
 
-    const { displayName, role, email, phone, dealerCode } = req.body;
-    if (displayName !== undefined) user.displayName = displayName;
+    const { displayName, role, email, phone, dealerCode, status } = req.body;
+
+    if (displayName !== undefined) users[idx].displayName = displayName;
+    if (email !== undefined) users[idx].email = email;
+    if (phone !== undefined) users[idx].phone = phone;
+    if (dealerCode !== undefined) users[idx].dealerCode = dealerCode.toUpperCase();
+    if (status !== undefined) users[idx].status = status;
+
     if (role !== undefined) {
         const validRoles = ['admin', 'gm', 'frontdesk', 'dealer', 'rep'];
         if (!validRoles.includes(role)) {
-            return res.status(400).json({ error: 'Invalid role' });
+            return res.status(400).json({ error: 'Invalid role. Must be one of: ' + validRoles.join(', ') });
         }
-        user.role = role;
+        users[idx].role = role;
     }
-    if (email !== undefined) user.email = email;
-    if (phone !== undefined) user.phone = phone;
-    if (dealerCode !== undefined) user.dealerCode = dealerCode.toUpperCase();
 
-    res.json(sanitize(user));
+    users[idx].updatedAt = new Date().toISOString();
+    writeJSON(USERS_FILE, users);
+
+    console.log('[Admin Users] Updated: ' + users[idx].username + ' by ' + req.user.username);
+    res.json(sanitize(users[idx]));
 });
 
 // -----------------------------------------------------------
@@ -223,45 +160,77 @@ router.put('/:id', (req, res) => {
 // Body: { newPassword }
 // -----------------------------------------------------------
 router.post('/:id/reset-password', (req, res) => {
-    const user = users.find(u => u.id === req.params.id);
-    if (!user) return res.status(404).json({ error: 'User not found' });
+    const users = readJSON(USERS_FILE);
+    const idx = users.findIndex(u => u.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: 'User not found' });
 
     const { newPassword } = req.body;
     if (!newPassword || newPassword.length < 8) {
         return res.status(400).json({ error: 'Password must be at least 8 characters' });
     }
 
-    user.passwordHash = '$hashed$' + newPassword;
-    res.json({ message: 'Password reset for ' + user.username });
+    users[idx].passwordHash = hashPassword(newPassword);
+    users[idx].failedLoginAttempts = 0;
+    users[idx].lockedUntil = null;
+    users[idx].updatedAt = new Date().toISOString();
+    writeJSON(USERS_FILE, users);
+
+    console.log('[Admin Users] Password reset for: ' + users[idx].username + ' by ' + req.user.username);
+    res.json({ message: 'Password reset for ' + users[idx].username });
 });
 
 // -----------------------------------------------------------
 // POST /api/admin/users/:id/disable
 // -----------------------------------------------------------
 router.post('/:id/disable', (req, res) => {
-    const user = users.find(u => u.id === req.params.id);
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    user.status = 'disabled';
-    res.json(sanitize(user));
+    const users = readJSON(USERS_FILE);
+    const idx = users.findIndex(u => u.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: 'User not found' });
+
+    if (users[idx].id === req.user.id) {
+        return res.status(400).json({ error: 'Cannot disable your own account' });
+    }
+
+    users[idx].status = 'disabled';
+    users[idx].updatedAt = new Date().toISOString();
+    writeJSON(USERS_FILE, users);
+
+    console.log('[Admin Users] Disabled: ' + users[idx].username + ' by ' + req.user.username);
+    res.json(sanitize(users[idx]));
 });
 
 // -----------------------------------------------------------
 // POST /api/admin/users/:id/enable
 // -----------------------------------------------------------
 router.post('/:id/enable', (req, res) => {
-    const user = users.find(u => u.id === req.params.id);
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    user.status = 'active';
-    res.json(sanitize(user));
+    const users = readJSON(USERS_FILE);
+    const idx = users.findIndex(u => u.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: 'User not found' });
+
+    users[idx].status = 'active';
+    users[idx].updatedAt = new Date().toISOString();
+    writeJSON(USERS_FILE, users);
+
+    console.log('[Admin Users] Enabled: ' + users[idx].username + ' by ' + req.user.username);
+    res.json(sanitize(users[idx]));
 });
 
 // -----------------------------------------------------------
 // DELETE /api/admin/users/:id
 // -----------------------------------------------------------
 router.delete('/:id', (req, res) => {
+    const users = readJSON(USERS_FILE);
     const idx = users.findIndex(u => u.id === req.params.id);
     if (idx === -1) return res.status(404).json({ error: 'User not found' });
+
+    if (users[idx].id === req.user.id) {
+        return res.status(400).json({ error: 'Cannot delete your own account' });
+    }
+
     const deleted = users.splice(idx, 1)[0];
+    writeJSON(USERS_FILE, users);
+
+    console.log('[Admin Users] Deleted: ' + deleted.username + ' by ' + req.user.username);
     res.json({ message: 'User ' + deleted.username + ' deleted', id: deleted.id });
 });
 
