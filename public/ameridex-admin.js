@@ -1,6 +1,6 @@
 // ============================================================
-// AmeriDex Dealer Portal - Admin Panel v1.4
-// Date: 2026-02-14
+// AmeriDex Dealer Portal - Admin Panel v1.5
+// Date: 2026-02-16
 // ============================================================
 // REQUIRES: ameridex-api.js (v2.1+) loaded first
 //
@@ -8,6 +8,12 @@
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
 //   <script src="ameridex-admin.js"></script>
+//
+// v1.5 Changes (2026-02-16):
+//   - ADD: Users tab in admin panel with full CRUD
+//   - ADD: Users grouped/filterable by dealer code
+//   - ADD: Admin can create users at any dealer with any role
+//   - ADD: Inline edit, disable/enable, reset password for all users
 //
 // v1.4 Changes (2026-02-14):
 //   - ADD: Products tab in admin panel (full CRUD)
@@ -169,6 +175,7 @@
                 '<button class="admin-tab" data-tab="quotes">Quotes</button>' +
                 '<button class="admin-tab" data-tab="products">Products</button>' +
                 '<button class="admin-tab" data-tab="pricing">Pricing Tiers</button>' +
+                '<button class="admin-tab" data-tab="users">Users</button>' +
             '</div>' +
             '<div class="admin-body">' +
 
@@ -351,6 +358,88 @@
                     '<div id="admin-pricing-list"><div class="admin-loading">Loading pricing...</div></div>' +
                 '</div>' +
 
+                // ---- USERS TAB (NEW in v1.5) ----
+                '<div class="admin-tab-content" id="admin-tab-users">' +
+                    '<div id="admin-users-stats" class="admin-stat-row"></div>' +
+                    '<div id="admin-user-alert"></div>' +
+                    '<details id="admin-add-user-details">' +
+                        '<summary style="cursor:pointer;font-weight:600;color:#2563eb;margin-bottom:1rem;font-size:0.95rem;">+ Add New User</summary>' +
+                        '<div class="admin-form" id="admin-add-user-form">' +
+                            '<div class="admin-form-row">' +
+                                '<div class="admin-form-field">' +
+                                    '<label>Dealer Code</label>' +
+                                    '<select id="admin-new-user-dealer" style="text-transform:uppercase;"></select>' +
+                                '</div>' +
+                                '<div class="admin-form-field">' +
+                                    '<label>Role</label>' +
+                                    '<select id="admin-new-user-role">' +
+                                        '<option value="frontdesk">Frontdesk (Sales Rep)</option>' +
+                                        '<option value="gm">GM (General Manager)</option>' +
+                                        '<option value="dealer">Dealer (Legacy)</option>' +
+                                        '<option value="rep">Internal Rep</option>' +
+                                        '<option value="admin">Admin</option>' +
+                                    '</select>' +
+                                '</div>' +
+                            '</div>' +
+                            '<div class="admin-form-row">' +
+                                '<div class="admin-form-field">' +
+                                    '<label>Username</label>' +
+                                    '<input type="text" id="admin-new-user-username" placeholder="e.g. jsmith" style="text-transform:lowercase;">' +
+                                '</div>' +
+                                '<div class="admin-form-field">' +
+                                    '<label>Display Name</label>' +
+                                    '<input type="text" id="admin-new-user-display" placeholder="John Smith">' +
+                                '</div>' +
+                            '</div>' +
+                            '<div class="admin-form-row">' +
+                                '<div class="admin-form-field">' +
+                                    '<label>Password (min 8 chars)</label>' +
+                                    '<input type="password" id="admin-new-user-pw" placeholder="Temporary password">' +
+                                '</div>' +
+                                '<div class="admin-form-field">' +
+                                    '<label>Email (optional)</label>' +
+                                    '<input type="email" id="admin-new-user-email" placeholder="user@example.com">' +
+                                '</div>' +
+                            '</div>' +
+                            '<div class="admin-form-row">' +
+                                '<div class="admin-form-field">' +
+                                    '<label>Phone (optional)</label>' +
+                                    '<input type="tel" id="admin-new-user-phone" placeholder="555-123-4567">' +
+                                '</div>' +
+                                '<div class="admin-form-field"></div>' +
+                            '</div>' +
+                            '<div class="admin-form-actions">' +
+                                '<button type="button" class="admin-btn admin-btn-primary" id="admin-create-user-btn">Create User</button>' +
+                            '</div>' +
+                        '</div>' +
+                    '</details>' +
+                    '<hr class="admin-divider">' +
+                    '<div class="admin-toolbar">' +
+                        '<h3>All Users</h3>' +
+                        '<div style="display:flex;gap:0.5rem;flex-wrap:wrap;">' +
+                            '<select id="admin-user-dealer-filter" class="admin-search" style="width:auto;">' +
+                                '<option value="">All Dealer Codes</option>' +
+                            '</select>' +
+                            '<select id="admin-user-role-filter" class="admin-search" style="width:auto;">' +
+                                '<option value="">All Roles</option>' +
+                                '<option value="admin">Admin</option>' +
+                                '<option value="gm">GM</option>' +
+                                '<option value="frontdesk">Frontdesk</option>' +
+                                '<option value="dealer">Dealer</option>' +
+                                '<option value="rep">Rep</option>' +
+                            '</select>' +
+                            '<select id="admin-user-status-filter" class="admin-search" style="width:auto;">' +
+                                '<option value="">All Statuses</option>' +
+                                '<option value="active">Active</option>' +
+                                '<option value="disabled">Disabled</option>' +
+                                '<option value="pending">Pending</option>' +
+                            '</select>' +
+                            '<input type="text" class="admin-search" id="admin-user-search" placeholder="Search users...">' +
+                        '</div>' +
+                    '</div>' +
+                    '<div id="admin-users-list"><div class="admin-loading">Loading users...</div></div>' +
+                '</div>' +
+
             '</div>' +
         '</div>';
     document.body.appendChild(modal);
@@ -372,6 +461,7 @@
             if (tabName === 'quotes') loadAllQuotes();
             if (tabName === 'products') loadProducts();
             if (tabName === 'pricing') loadPricingTiers();
+            if (tabName === 'users') loadAdminUsers();
         });
     });
 
@@ -1039,5 +1129,234 @@
     });
 
 
-    console.log('[AmeriDex Admin] v1.4 loaded.');
+    // ----------------------------------------------------------
+    // USERS TAB (NEW in v1.5)
+    // ----------------------------------------------------------
+    var _allUsers = [];
+
+    function loadAdminUsers() {
+        var container = document.getElementById('admin-users-list');
+        container.innerHTML = '<div class="admin-loading">Loading users...</div>';
+
+        Promise.all([
+            _api('GET', '/api/admin/users'),
+            _api('GET', '/api/admin/dealers')
+        ])
+            .then(function (results) {
+                _allUsers = results[0];
+                var dealers = results[1];
+                populateUserDealerFilters(dealers);
+                renderAdminUsersStats();
+                renderAdminUsersTable();
+            })
+            .catch(function (err) {
+                container.innerHTML = '<div class="admin-error">Failed to load users: ' + esc(err.message) + '</div>';
+            });
+    }
+
+    function populateUserDealerFilters(dealers) {
+        var codes = [];
+        dealers.forEach(function (d) {
+            if (d.dealerCode && codes.indexOf(d.dealerCode) === -1) codes.push(d.dealerCode);
+        });
+        _allUsers.forEach(function (u) {
+            if (u.dealerCode && codes.indexOf(u.dealerCode) === -1) codes.push(u.dealerCode);
+        });
+        codes.sort();
+
+        var filterSelect = document.getElementById('admin-user-dealer-filter');
+        filterSelect.innerHTML = '<option value="">All Dealer Codes</option>';
+        codes.forEach(function (c) {
+            filterSelect.innerHTML += '<option value="' + c + '">' + c + '</option>';
+        });
+
+        var createSelect = document.getElementById('admin-new-user-dealer');
+        createSelect.innerHTML = '';
+        codes.forEach(function (c) {
+            createSelect.innerHTML += '<option value="' + c + '">' + c + '</option>';
+        });
+    }
+
+    function renderAdminUsersStats() {
+        var total = _allUsers.length;
+        var active = _allUsers.filter(function (u) { return u.status === 'active'; }).length;
+        var gms = _allUsers.filter(function (u) { return u.role === 'gm'; }).length;
+        var frontdesk = _allUsers.filter(function (u) { return u.role === 'frontdesk'; }).length;
+        var dealerCodes = [];
+        _allUsers.forEach(function (u) {
+            if (u.dealerCode && dealerCodes.indexOf(u.dealerCode) === -1) dealerCodes.push(u.dealerCode);
+        });
+
+        document.getElementById('admin-users-stats').innerHTML = '' +
+            '<div class="admin-stat"><div class="admin-stat-value">' + total + '</div><div class="admin-stat-label">Total Users</div></div>' +
+            '<div class="admin-stat"><div class="admin-stat-value">' + active + '</div><div class="admin-stat-label">Active</div></div>' +
+            '<div class="admin-stat"><div class="admin-stat-value">' + gms + '</div><div class="admin-stat-label">GMs</div></div>' +
+            '<div class="admin-stat"><div class="admin-stat-value">' + frontdesk + '</div><div class="admin-stat-label">Frontdesk</div></div>' +
+            '<div class="admin-stat"><div class="admin-stat-value">' + dealerCodes.length + '</div><div class="admin-stat-label">Dealers</div></div>';
+    }
+
+    function renderAdminUsersTable() {
+        var container = document.getElementById('admin-users-list');
+        var dealerFilter = document.getElementById('admin-user-dealer-filter').value;
+        var roleFilter = document.getElementById('admin-user-role-filter').value;
+        var statusFilter = document.getElementById('admin-user-status-filter').value;
+        var search = (document.getElementById('admin-user-search').value || '').toLowerCase();
+
+        var filtered = _allUsers.filter(function (u) {
+            if (dealerFilter && u.dealerCode !== dealerFilter) return false;
+            if (roleFilter && u.role !== roleFilter) return false;
+            if (statusFilter && u.status !== statusFilter) return false;
+            if (search) {
+                var hay = ((u.username || '') + (u.displayName || '') + (u.email || '') + (u.dealerCode || '')).toLowerCase();
+                if (!hay.includes(search)) return false;
+            }
+            return true;
+        });
+
+        if (filtered.length === 0) {
+            container.innerHTML = '<div class="admin-empty">No users match your filters</div>';
+            return;
+        }
+
+        var grouped = {};
+        filtered.forEach(function (u) {
+            var code = u.dealerCode || 'UNKNOWN';
+            if (!grouped[code]) grouped[code] = [];
+            grouped[code].push(u);
+        });
+
+        var dealerKeys = Object.keys(grouped).sort();
+        var html = '';
+
+        dealerKeys.forEach(function (code) {
+            var users = grouped[code];
+
+            html += '<div style="margin-bottom:1.25rem;">';
+            html += '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;">';
+            html += '<span style="font-weight:700;font-size:0.95rem;color:#1e40af;">' + esc(code) + '</span>';
+            html += '<span class="admin-badge badge-dealer" style="font-size:0.68rem;">' + users.length + ' user' + (users.length !== 1 ? 's' : '') + '</span>';
+            html += '</div>';
+
+            html += '<table class="admin-table"><thead><tr>' +
+                '<th>Username</th><th>Display Name</th><th>Role</th><th>Status</th><th>Email</th><th>Last Login</th><th>Actions</th>' +
+                '</tr></thead><tbody>';
+
+            users.forEach(function (u) {
+                var roleBadge = 'badge-' + (u.role || 'frontdesk');
+                var statusBadge = u.status === 'active' ? 'badge-active' : (u.status === 'disabled' ? 'badge-inactive' : 'badge-draft');
+                var dateStr = '';
+                if (u.lastLogin) { try { dateStr = new Date(u.lastLogin).toLocaleDateString(); } catch(e) {} }
+                else { dateStr = 'Never'; }
+
+                html += '<tr>' +
+                    '<td><strong>' + esc(u.username) + '</strong></td>' +
+                    '<td>' + esc(u.displayName || u.username) + '</td>' +
+                    '<td><span class="admin-badge ' + roleBadge + '">' + esc(u.role) + '</span></td>' +
+                    '<td><span class="admin-badge ' + statusBadge + '">' + esc(u.status || 'unknown') + '</span></td>' +
+                    '<td style="font-size:0.82rem;color:#6b7280;">' + esc(u.email || '-') + '</td>' +
+                    '<td style="font-size:0.82rem;color:#6b7280;">' + dateStr + '</td>' +
+                    '<td class="admin-actions">' +
+                        '<button class="admin-btn admin-btn-ghost admin-btn-sm" data-action="edit-user" data-id="' + u.id + '">Edit</button>' +
+                        '<button class="admin-btn admin-btn-ghost admin-btn-sm" data-action="reset-user-pw" data-id="' + u.id + '">Reset PW</button>' +
+                        '<button class="admin-btn ' + (u.status === 'active' ? 'admin-btn-danger' : 'admin-btn-success') + ' admin-btn-sm" ' +
+                            'data-action="toggle-user" data-id="' + u.id + '">' + (u.status === 'active' ? 'Disable' : 'Enable') + '</button>' +
+                    '</td></tr>';
+            });
+
+            html += '</tbody></table></div>';
+        });
+
+        container.innerHTML = html;
+
+        container.querySelectorAll('[data-action]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var action = btn.getAttribute('data-action');
+                var id = btn.getAttribute('data-id');
+                if (action === 'edit-user') editAdminUser(id);
+                if (action === 'reset-user-pw') resetAdminUserPassword(id);
+                if (action === 'toggle-user') toggleAdminUser(id);
+            });
+        });
+    }
+
+    document.getElementById('admin-user-dealer-filter').addEventListener('change', renderAdminUsersTable);
+    document.getElementById('admin-user-role-filter').addEventListener('change', renderAdminUsersTable);
+    document.getElementById('admin-user-status-filter').addEventListener('change', renderAdminUsersTable);
+    document.getElementById('admin-user-search').addEventListener('input', renderAdminUsersTable);
+
+    document.getElementById('admin-create-user-btn').addEventListener('click', function () {
+        var dealerCode = document.getElementById('admin-new-user-dealer').value;
+        var role = document.getElementById('admin-new-user-role').value;
+        var username = document.getElementById('admin-new-user-username').value.trim().toLowerCase();
+        var displayName = document.getElementById('admin-new-user-display').value.trim();
+        var pw = document.getElementById('admin-new-user-pw').value;
+        var email = document.getElementById('admin-new-user-email').value.trim();
+        var phone = document.getElementById('admin-new-user-phone').value.trim();
+
+        if (!dealerCode) { showAlert('admin-user-alert', 'Please select a dealer code', 'error'); return; }
+        if (!username || username.length < 3) { showAlert('admin-user-alert', 'Username must be at least 3 characters', 'error'); return; }
+        if (!pw || pw.length < 8) { showAlert('admin-user-alert', 'Password must be at least 8 characters', 'error'); return; }
+
+        _api('POST', '/api/admin/users', {
+            dealerCode: dealerCode,
+            role: role,
+            username: username,
+            displayName: displayName || username,
+            password: pw,
+            email: email,
+            phone: phone
+        })
+            .then(function (newUser) {
+                showAlert('admin-user-alert', 'User "' + esc(newUser.username) + '" created for ' + esc(newUser.dealerCode) + '!', 'success');
+                document.getElementById('admin-new-user-username').value = '';
+                document.getElementById('admin-new-user-display').value = '';
+                document.getElementById('admin-new-user-pw').value = '';
+                document.getElementById('admin-new-user-email').value = '';
+                document.getElementById('admin-new-user-phone').value = '';
+                document.getElementById('admin-add-user-details').removeAttribute('open');
+                loadAdminUsers();
+            })
+            .catch(function (err) { showAlert('admin-user-alert', 'Failed: ' + esc(err.message), 'error'); });
+    });
+
+    function editAdminUser(id) {
+        var user = _allUsers.find(function (u) { return u.id === id; });
+        if (!user) return;
+        var newDisplay = prompt('Display Name:', user.displayName || '');
+        if (newDisplay === null) return;
+        var newRole = prompt('Role (admin, gm, frontdesk, dealer, rep):', user.role || 'frontdesk');
+        if (newRole === null) return;
+        var newEmail = prompt('Email:', user.email || '');
+        if (newEmail === null) return;
+
+        _api('PUT', '/api/admin/users/' + id, { displayName: newDisplay, role: newRole, email: newEmail })
+            .then(function () { showAlert('admin-user-alert', 'User updated!', 'success'); loadAdminUsers(); })
+            .catch(function (err) { showAlert('admin-user-alert', 'Update failed: ' + esc(err.message), 'error'); });
+    }
+
+    function resetAdminUserPassword(id) {
+        var user = _allUsers.find(function (u) { return u.id === id; });
+        if (!user) return;
+        var newPw = prompt('New password for ' + user.username + ' (min 8 chars):');
+        if (!newPw) return;
+        if (newPw.length < 8) { showAlert('admin-user-alert', 'Password must be at least 8 characters', 'error'); return; }
+
+        _api('POST', '/api/admin/users/' + id + '/reset-password', { newPassword: newPw })
+            .then(function () { showAlert('admin-user-alert', 'Password reset for ' + user.username + '!', 'success'); })
+            .catch(function (err) { showAlert('admin-user-alert', 'Reset failed: ' + esc(err.message), 'error'); });
+    }
+
+    function toggleAdminUser(id) {
+        var user = _allUsers.find(function (u) { return u.id === id; });
+        if (!user) return;
+        var action = user.status === 'active' ? 'disable' : 'enable';
+        if (!confirm('Are you sure you want to ' + action + ' user "' + user.username + '" (' + user.dealerCode + ')?')) return;
+
+        _api('POST', '/api/admin/users/' + id + '/' + action)
+            .then(function () { showAlert('admin-user-alert', 'User ' + user.username + ' ' + action + 'd!', 'success'); loadAdminUsers(); })
+            .catch(function (err) { showAlert('admin-user-alert', 'Failed: ' + esc(err.message), 'error'); });
+    }
+
+
+    console.log('[AmeriDex Admin] v1.5 loaded.');
 })();
