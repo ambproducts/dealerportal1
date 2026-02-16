@@ -1,41 +1,59 @@
+// ============================================================
+// AmeriDex Dealer Portal - Server Entry Point
+// Date: 2026-02-16
+// ============================================================
+
 const express = require('express');
 const path = require('path');
-const { ensureDataFiles } = require('./lib/data-init');
-const { startBackupSchedule } = require('./lib/backup');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Middleware
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-ensureDataFiles();
-startBackupSchedule();
+// ----------------------------------------------------------
+// API Routes
+// ----------------------------------------------------------
 
-app.use('/api/auth', require('./routes/auth'));
-app.use('/api/users', require('./routes/users'));
-app.use('/api/products', require('./routes/products'));
-app.use('/api/quotes', require('./routes/quotes'));
-app.use('/api/dealer', require('./routes/dealers'));
-app.use('/api/customers', require('./routes/customers'));
-app.use('/api/admin/dealers', require('./routes/admin-dealers'));
-app.use('/api/admin/quotes', require('./routes/admin-quotes'));
-app.use('/api/admin/pricing-tiers', require('./routes/admin-pricing'));
-app.use('/api/admin/customers', require('./routes/admin-customers'));
-app.use('/api/admin/products', require('./routes/admin-products'));
-app.use('/api/admin/users', require('./routes/admin-users'));
-app.use('/api/master', require('./routes/master'));
+// Auth
+const authRoutes = require('./routes/auth');
+app.use('/api/auth', authRoutes);
 
+// Quotes
+const quoteRoutes = require('./routes/quotes');
+app.use('/api/quotes', quoteRoutes);
+
+// Admin - Dealers
+const adminDealerRoutes = require('./routes/admin-dealers');
+app.use('/api/admin/dealers', adminDealerRoutes);
+
+// Admin - Quotes
+const adminQuoteRoutes = require('./routes/admin-quotes');
+app.use('/api/admin/quotes', adminQuoteRoutes);
+
+// Admin - Products
+const adminProductRoutes = require('./routes/admin-products');
+app.use('/api/admin/products', adminProductRoutes);
+
+// Admin - Pricing Tiers
+const adminPricingRoutes = require('./routes/admin-pricing');
+app.use('/api/admin/pricing-tiers', adminPricingRoutes);
+
+// Admin - Users (NEW in v1.5)
+const adminUserRoutes = require('./routes/admin-users');
+app.use('/api/admin/users', adminUserRoutes);
+
+// ----------------------------------------------------------
+// Fallback: serve index.html for SPA-like behavior
+// ----------------------------------------------------------
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'dealer-portal.html'));
 });
 
+// ----------------------------------------------------------
+// Start Server
+// ----------------------------------------------------------
 app.listen(PORT, () => {
-    console.log('');
-    console.log('==============================================');
-    console.log('  AmeriDex Dealer Portal Server v2.1');
-    console.log('  Running on http://localhost:' + PORT);
-    console.log('  Data stored in ./data/');
-    console.log('  User accounts: ./data/users.json');
-    console.log('==============================================');
-    console.log('');
+    console.log('[AmeriDex Server] Running on port ' + PORT);
 });
