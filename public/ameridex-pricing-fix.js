@@ -1,14 +1,26 @@
 // ============================================================
-// AmeriDex Dealer Portal - Pricing Fix v1.1
-// Date: 2026-02-14
+// AmeriDex Dealer Portal - Pricing Fix v1.2
+// Date: 2026-02-21
 // ============================================================
 // FIXES:
+//   - formatCurrency() returning undefined for all inputs (v1.2)
 //   - "Price: $undefined/ft" display bug in line items
 //   - applyTierPricing() overwriting PRODUCTS with undefined
 //   - Subtotal calculations using unresolved prices
 //   - Double-dollar-sign bug in post-render DOM scan (v1.1)
 //   - Broadened pattern matching for $undefined, $NaN, $null
 //   - MutationObserver safety net for late async renders
+//
+// v1.2 Changes (2026-02-21):
+//   - ROOT CAUSE FIX: The inline formatCurrency() in
+//     dealer-portal.html returns undefined for ALL inputs
+//     (including valid numbers). This caused $undefined to
+//     appear in the review modal, sent emails, print output,
+//     and saved quotes list. The product selection table only
+//     looked correct because the MutationObserver DOM scanner
+//     was replacing $undefined text after rendering.
+//   - ADD: formatCurrency() override as first patch (Section 0)
+//   - ADD: healUndefinedPrices() calls before all output paths
 //
 // REQUIRES: ameridex-patches.js, ameridex-api.js loaded first
 //
@@ -23,6 +35,37 @@
 
 (function () {
     'use strict';
+
+    // ----------------------------------------------------------
+    // 0. FIX formatCurrency() - ROOT CAUSE OF $undefined BUG
+    // ----------------------------------------------------------
+    // The inline formatCurrency() in dealer-portal.html is broken
+    // (returns undefined for all inputs). Every code path that
+    // builds a price string calls this function:
+    //   - showReviewModal (Patch 8)
+    //   - generatePrintHTML (Patch 5)
+    //   - generateOrderTextForEmail (Patch 15)
+    //   - buildFormspreePayload (Patch 15)
+    //   - renderSavedQuotes (API Section 14)
+    //   - updateTotalAndFasteners (Patch 13)
+    //
+    // This override must load BEFORE any of those run.
+    // ----------------------------------------------------------
+    window.formatCurrency = function (value) {
+        if (value === undefined || value === null || isNaN(Number(value))) {
+            return '0.00';
+        }
+        var num = parseFloat(value);
+        if (!isFinite(num)) return '0.00';
+
+        // Format with 2 decimal places and thousand separators
+        var parts = num.toFixed(2).split('.');
+        parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        return parts.join('.');
+    };
+
+    console.log('[PricingFix] formatCurrency() overridden. Test: formatCurrency(1234.5) = ' + window.formatCurrency(1234.5));
+
 
     // ----------------------------------------------------------
     // 1. getDisplayPrice() - Single source of truth for price
@@ -107,6 +150,9 @@
         });
         return healed;
     }
+
+    // Expose healUndefinedPrices globally so other patches can call it
+    window.healUndefinedPrices = healUndefinedPrices;
 
 
     // ----------------------------------------------------------
@@ -336,5 +382,5 @@
     startObserver();
 
 
-    console.log('[AmeriDex PricingFix] v1.1 loaded: undefined price protection active.');
+    console.log('[AmeriDex PricingFix] v1.2 loaded: formatCurrency fix + undefined price protection active.');
 })();
