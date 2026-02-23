@@ -499,118 +499,14 @@
     .review-total { font-size: 1.2rem; font-weight: 700; color: var(--primary-dark); margin-top: 1rem; padding-top: 1rem; border-top: 2px solid var(--primary); }
 
     .print-preview-modal { max-width: 800px; width: 95%; text-align: left; }
-    /* ── Print Preview: base container ── */
-    .print-preview-content {
-      background: #ffffff;
-      padding: 2rem;
-      border: 1px solid #e5e7eb;
-      margin: 1rem 0;
-      max-height: 60vh;
-      overflow-y: auto;
-      font-family: Arial, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
-    
-    /* ── Print Preview: branded header ── */
-    .print-preview-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 1.5rem;
-      border-bottom: 3px solid #2563eb;
-      padding-bottom: 1rem;
-      margin-bottom: 1.5rem;
-    }
-    .print-preview-header-left {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      flex: 1;
-    }
-    .print-preview-logo {
-      height: 48px;
-      width: auto;
-    }
-    .print-preview-brand {
-      display: flex;
-      flex-direction: column;
-    }
-    .print-preview-brand-title {
-      font-size: 1.5rem;
-      font-weight: 700;
-      color: #111827;
-      line-height: 1.2;
-    }
-    .print-preview-brand-subtitle {
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
-      color: #6b7280;
-      margin-top: 0.15rem;
-    }
-    .print-preview-header-right {
-      text-align: right;
-      font-size: 0.85rem;
-      color: #4b5563;
-      line-height: 1.6;
-    }
-    .print-preview-doc-title {
-      font-weight: 700;
-      font-size: 1rem;
-      color: #111827;
-      margin-bottom: 0.25rem;
-    }
-    .print-preview-meta-line {
-      color: #6b7280;
-      font-size: 0.85rem;
-    }
-    
-    /* ── Print Preview: table theming ── */
-    .print-preview-content h2 {
-      color: #374151;
-      font-size: 1.05rem;
-      border-bottom: 1px solid #e5e7eb;
-      padding-bottom: 0.35rem;
-      margin-top: 1.5rem;
-      margin-bottom: 0.75rem;
-    }
-    .print-preview-content table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 0.5rem 0 1rem;
-    }
-    .print-preview-content th {
-      background: #2563eb;
-      color: #ffffff;
-      font-weight: 600;
-      border: 1px solid #e5e7eb;
-      padding: 8px;
-      text-align: left;
-      font-size: 0.9rem;
-    }
-    .print-preview-content td {
-      border: 1px solid #e5e7eb;
-      padding: 8px;
-      text-align: left;
-      font-size: 0.9rem;
-    }
-    .print-preview-content tr:nth-child(even) td {
-      background: #f9fafb;
-    }
-    .print-preview-content .total-row td {
-      font-weight: 600;
-      font-size: 1.05rem;
-      background: #eff6ff;
-    }
-    .print-preview-footer {
-      margin-top: 2rem;
-      padding-top: 1rem;
-      border-top: 2px solid #e5e7eb;
-      font-size: 0.8rem;
-      color: #6b7280;
-      text-align: center;
-      line-height: 1.6;
-    }
-
+    .print-preview-content { background: white; padding: 2rem; border: 1px solid #ddd; margin: 1rem 0; max-height: 60vh; overflow-y: auto; font-family: "Times New Roman", serif; }
+    .print-preview-content h1 { color: #2563eb; border-bottom: 2px solid #2563eb; padding-bottom: 0.5rem; font-size: 1.5rem; }
+    .print-preview-content h2 { color: #374151; font-size: 1.1rem; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+    .print-preview-content table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+    .print-preview-content th, .print-preview-content td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    .print-preview-content th { background: #f3f4f6; }
+    .print-preview-content .total-row { font-weight: bold; font-size: 1.1rem; }
+    .print-preview-actions { display: flex; gap: 1rem; justify-content: center; margin-top: 1rem; }
 
     .email-fallback-notice { background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 1rem; margin-top: 1rem; font-size: 0.85rem; color: #92400e; }
     .email-fallback-notice p { margin: 0 0 0.5rem 0; }
@@ -653,14 +549,1919 @@
         .saved-quotes-search { max-width: none; }
     }
 </style>
-<parameter name="_tool_input_summary">
-**Committing Step 1: Branded print preview CSS**
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+<body>
 
-Updates to `public/dealer-portal.html`:
-- Replaced `.print-preview-content` styling from Times New Roman to Arial/system-ui
-- Changed borders from `#ddd` to `#e5e7eb` (theme variable)
-- Added new branded header classes: `.print-preview-header`, `.print-preview-header-left`, `.print-preview-logo`, `.print-preview-brand-title`, `.print-preview-brand-subtitle`, `.print-preview-header-right`, `.print-preview-doc-title`, `.print-preview-meta-line`
-- Updated table header background to AmeriDex blue `#2563eb` with white text
-- Added alternating row shading with `tbody tr:nth-child(even)` using `#f9fafb`
-- Styled total row with blue soft background `#eff6ff`
-- No JavaScript changes, no HTML structure changes
+<!-- Connectivity Indicator -->
+<div class="connectivity-bar" id="connectivity-bar">⚠ You are currently offline. Some features may not work properly.</div>
+
+<!-- Login Screen -->
+<div class="login-screen" id="login-screen">
+    <div class="login-card">
+        <img src="/images/ameridex-logo.png" alt="AmeriDex Logo">
+        <h1>Dealer Portal</h1>
+        <p class="subtitle">Enter your dealer code to continue</p>
+        <div class="field">
+            <label for="dealer-code-input">Dealer Code</label>
+            <input type="text" id="dealer-code-input" maxlength="6" placeholder="ABC123" autocomplete="off">
+            <div class="help-text">6-character alphanumeric code</div>
+            <div class="error-text" id="dealer-code-error">Invalid dealer code format</div>
+        </div>
+        <button type="button" class="login-btn" id="login-btn">Enter Portal</button>
+    </div>
+</div>
+
+<!-- Main Application -->
+<div class="page-shell app-hidden" id="main-app">
+    <header class="app-header">
+        <div class="header-brand">
+            <img src="/images/ameridex-logo.png" alt="AmeriDex Logo">
+            <div class="header-titles">
+                <h1>AmeriDex</h1>
+                <span class="portal-badge">Dealer Portal</span>
+            </div>
+        </div>
+        <div class="header-actions">
+            <span class="header-dealer-info" id="header-dealer-code"></span>
+            <button type="button" class="header-btn" id="settings-btn">Settings</button>
+            <button type="button" class="header-btn" id="logout-btn">Logout</button>
+        </div>
+    </header>
+
+    <main>
+        <form id="order-form">
+            <!-- Quote Mode Selection -->
+            <section class="card">
+                <div class="quote-mode-toggle">
+                    <button type="button" class="quote-mode-btn active" id="mode-quick" data-mode="quick">Quick Quote</button>
+                    <button type="button" class="quote-mode-btn" id="mode-formal" data-mode="formal">Formal Request</button>
+                </div>
+                <div class="quote-mode-description" id="mode-description">
+                    <strong>Quick Quote Mode:</strong> Create and print a customer estimate. No submission to AmeriDex.
+                </div>
+            </section>
+
+            <!-- Saved Quotes Panel -->
+            <section class="card" id="saved-quotes-section">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">Saved Quotes</h2>
+                        <p class="card-subtitle">Load a previous quote or start fresh</p>
+                    </div>
+                    <button type="button" class="btn btn-outline btn-sm" id="new-quote-btn">+ New Quote</button>
+                </div>
+                <div class="saved-quotes-panel">
+                    <div class="saved-quotes-header">
+                        <div class="saved-quotes-search">
+                            <input type="text" id="quote-search" placeholder="Search by name, company, or quote #...">
+                        </div>
+                    </div>
+                    <div class="saved-quotes-list" id="saved-quotes-list">
+                        <div class="no-saved-quotes">No saved quotes yet</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Deck Calculator -->
+            <section class="card" id="calculator">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">Deck Calculator</h2>
+                        <p class="card-subtitle">Enter deck dimensions relative to the house.</p>
+                    </div>
+                </div>
+                <div class="form-grid">
+                    <div class="deck-diagram-container">
+                        <div class="deck-diagram">
+                            <div class="house-wall">HOUSE</div>
+                            <div class="deck-area">
+                                <div class="dimension-arrow dim-along"><span class="dim-label-bg">Along House</span></div>
+                                <div class="dimension-arrow dim-out"><span class="dim-label-bg">From House</span></div>
+                                <div class="board-lines perpendicular" id="board-lines-preview"></div>
+                            </div>
+                        </div>
+                        <div class="diagram-legend">Board direction updates based on your selection below</div>
+                    </div>
+                    <div class="field-row-2">
+                        <div class="field">
+                            <label for="deck-len">Distance Along House (ft)<span class="required-indicator">*</span></label>
+                            <input type="number" id="deck-len" step="0.1" min="0" placeholder="e.g., 20">
+                            <div class="help-text">How wide is the deck running parallel to the house?</div>
+                        </div>
+                        <div class="field">
+                            <label for="deck-wid">Distance From House (ft)<span class="required-indicator">*</span></label>
+                            <input type="number" id="deck-wid" step="0.1" min="0" placeholder="e.g., 10">
+                            <div class="help-text">How far does the deck extend into the yard?</div>
+                        </div>
+                    </div>
+                    <div class="field-row-2">
+                        <div class="field">
+                            <label for="orientation">Board Direction</label>
+                            <select id="orientation">
+                                <option value="perpendicular" selected>Perpendicular to House (boards run away from house)</option>
+                                <option value="parallel">Parallel to House (boards run along house wall)</option>
+                            </select>
+                            <div class="help-text" id="orientation-help">Boards will run away from the house, toward the yard</div>
+                        </div>
+                        <div class="field">
+                            <label for="waste-pct">Waste Percentage (optional)</label>
+                            <input type="number" id="waste-pct" step="1" min="0" max="50" placeholder="0">
+                        </div>
+                    </div>
+                    <div class="calc-buttons-row">
+                        <button type="button" class="btn btn-outline" id="calc-btn">Calculate</button>
+                    </div>
+                    <div id="calc-result-container" style="display:none;">
+                        <div class="calc-result-box">
+                            <h3>Calculation Results</h3>
+                            <div class="calc-result-details" id="calc-result"></div>
+                            <div class="calc-buttons-row">
+                                <button type="button" class="btn btn-primary btn-sm" id="add-suggestion-btn">Add to Order</button>
+                                <button type="button" class="btn btn-ghost btn-sm" id="clear-calc-btn">Clear</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Color Selection -->
+            <section class="card" id="colors">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">Select Colors</h2>
+                        <p class="card-subtitle">Preview and compare available color options.</p>
+                    </div>
+                </div>
+                <div class="color-grid" id="color-grid"></div>
+                <div class="comparison-panel">
+                    <div class="color-preview">
+                        <h4>Color 1</h4>
+                        <img id="color1-preview" src="colors/Driftwood.png" alt="Color 1">
+                        <div id="color1-name" style="margin-top: 0.5rem; font-weight: 600;">Driftwood</div>
+                    </div>
+                    <div class="color-preview">
+                        <h4>Color 2 (Compare)</h4>
+                        <img id="color2-preview" src="colors/Khaki.png" alt="Color 2">
+                        <div id="color2-name" style="margin-top: 0.5rem; font-weight: 600;">Khaki</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Customer Information -->
+            <section class="card" id="customer">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">Customer Information</h2>
+                        <p class="card-subtitle">Contact details for this quote.</p>
+                    </div>
+                    <span class="progress-badge incomplete" id="cust-badge">0/3</span>
+                </div>
+                <div class="form-grid">
+                    <div class="field-row-3">
+                        <div class="field field-with-lookup">
+                            <label for="cust-name">Name<span class="required-indicator">*</span></label>
+                            <input type="text" id="cust-name" required autocomplete="off">
+                            <div class="customer-lookup-results" id="customer-lookup-results"></div>
+                            <div class="error" id="err-name"></div>
+                        </div>
+                        <div class="field">
+                            <label for="cust-email">Email<span class="required-indicator">*</span></label>
+                            <input type="email" id="cust-email" required>
+                            <div class="error" id="err-email"></div>
+                        </div>
+                        <div class="field">
+                            <label for="cust-zip">Zip Code<span class="required-indicator">*</span></label>
+                            <input type="text" id="cust-zip" required maxlength="10" placeholder="e.g., 08742">
+                            <div class="error" id="err-zip"></div>
+                        </div>
+                    </div>
+                    <div class="field-row-2">
+                        <div class="field">
+                            <label for="cust-company">Company (optional)</label>
+                            <input type="text" id="cust-company">
+                        </div>
+                        <div class="field">
+                            <label for="cust-phone">Phone (optional)</label>
+                            <input type="tel" id="cust-phone">
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Order Details -->
+            <section class="card" id="order">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">Order Details</h2>
+                        <p class="card-subtitle">Select products, colors, and quantities.</p>
+                    </div>
+                </div>
+                <div class="inline-checks">
+                    <div class="check-row">
+                        <input type="checkbox" id="pic-frame">
+                        <label for="pic-frame">Picture Framing</label>
+                    </div>
+                    <div id="pic-frame-note" class="note-inline" style="display:none;">Add Solid Edge boards to frame the deck perimeter.</div>
+                    <div class="check-row" style="margin-top:0.2rem;">
+                        <input type="checkbox" id="stairs">
+                        <label for="stairs">Stairs</label>
+                    </div>
+                    <div id="stairs-note" class="note-inline" style="display:none;">Add Solid Edge boards for stair treads and risers.</div>
+                </div>
+                <div id="fastener-hint" class="fastener-block" style="display:none;"></div>
+                <div id="desktop-table-container">
+                    <table id="line-items">
+                        <thead>
+                        <tr>
+                            <th>Product</th>
+                            <th>Color</th>
+                            <th>Length</th>
+                            <th class="numeric">Qty</th>
+                            <th class="numeric">Subtotal</th>
+                            <th class="table-actions-cell"></th>
+                        </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+                <div id="mobile-items-container"></div>
+                <button type="button" class="btn btn-outline btn-add-row" id="add-row">+ Add Line Item</button>
+                <button type="button" class="btn-undo" id="undo-btn" style="display:none;">Undo Last Deletion</button>
+                <div style="margin-top:1.4rem;" class="form-grid">
+                    <div class="field">
+                        <label for="special-instr">Special Instructions / Notes for Production</label>
+                        <textarea id="special-instr" rows="3" placeholder="Any special requirements or notes for this order..."></textarea>
+                    </div>
+                    <div class="field" id="internal-notes-field" style="display:none;">
+                        <label for="internal-notes">Internal Notes (only sent to AmeriDex, not on customer quote)</label>
+                        <textarea id="internal-notes" rows="2" placeholder="Internal notes for the formal request..."></textarea>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Shipping & Delivery -->
+            <section class="card">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">Shipping & Delivery</h2>
+                        <p class="card-subtitle">Delivery details for this order.</p>
+                    </div>
+                </div>
+                <div class="form-grid">
+                    <div class="field">
+                        <label for="ship-addr">Shipping Address (optional)</label>
+                        <textarea id="ship-addr" rows="3" placeholder="Enter if different from customer location..."></textarea>
+                    </div>
+                    <div class="field">
+                        <label for="del-date">Preferred Delivery Date</label>
+                        <input type="date" id="del-date">
+                    </div>
+                </div>
+            </section>
+
+            <!-- Total Bar -->
+            <section class="card">
+                <div class="total-bar">
+                    <span class="total-label">Estimated Total</span>
+                    <span class="total-value" id="grand-total">$0.00</span>
+                </div>
+            </section>
+
+            <!-- Action Buttons -->
+            <section class="card" style="text-align:center;">
+                <div class="actions-row">
+                    <button type="button" class="btn btn-ghost" id="save-quote-btn">Save Quote</button>
+                    <button type="button" class="btn btn-ghost" id="reset">Reset Form</button>
+                    <div class="dropdown" id="print-dropdown">
+                        <button type="button" class="btn btn-outline" id="print-btn">Print Quote</button>
+                        <div class="dropdown-content">
+                            <button type="button" id="print-customer">Customer Quote (Print)</button>
+                            <button type="button" id="export-pdf">Download PDF</button>
+                        </div>
+                    </div>
+                    <button type="button" class="btn btn-primary" id="submit-btn">Submit Request</button>
+                </div>
+            </section>
+        </form>
+    </main>
+</div>
+
+<!-- Color Preview Modal -->
+<div id="colorModal" class="modal" role="dialog" aria-modal="true">
+    <div class="modal-content">
+        <button type="button" class="modal-close" id="modal-close" aria-label="Close">&times;</button>
+        <img id="colorLarge" src="" alt="Color Preview">
+        <div id="colorName" style="margin-top:0.75rem;font-weight:600;"></div>
+    </div>
+</div>
+
+<!-- Review Modal -->
+<div id="reviewModal" class="modal" role="dialog" aria-modal="true">
+    <div class="modal-content review-modal-content">
+        <button type="button" class="modal-close" id="review-close" aria-label="Close">&times;</button>
+        <h2 style="margin-top: 0; color: var(--primary);">Review Your Request</h2>
+        <div class="review-section">
+            <h3>Customer Details</h3>
+            <div class="review-item"><span class="review-item-label">Name:</span><span id="review-name"></span></div>
+            <div class="review-item"><span class="review-item-label">Email:</span><span id="review-email"></span></div>
+            <div class="review-item"><span class="review-item-label">Zip Code:</span><span id="review-zip"></span></div>
+        </div>
+        <div class="review-section">
+            <h3>Line Items</h3>
+            <div id="review-items"></div>
+        </div>
+        <div class="review-section">
+            <div class="review-total">Estimated Total: <span id="review-total">$0.00</span></div>
+        </div>
+        <div style="display: flex; gap: 0.75rem; margin-top: 1.5rem; justify-content: center; flex-wrap: wrap;">
+            <button type="button" class="btn btn-ghost" id="review-back">Back to Edit</button>
+            <button type="button" class="btn btn-primary" id="review-submit">Send to AmeriDex</button>
+        </div>
+        <div id="email-fallback" class="email-fallback-notice" style="display: none;">
+            <p><strong>Request copied to clipboard!</strong></p>
+            <p>If your email client didn't open, please:</p>
+            <p>1. Open your email manually</p>
+            <p>2. Send to: <span class="email-link">sales@ameridex.com</span></p>
+            <p>3. Paste (Ctrl+V / Cmd+V) the request into the email body</p>
+        </div>
+    </div>
+</div>
+
+<!-- Print Preview Modal -->
+<div id="printPreviewModal" class="modal" role="dialog" aria-modal="true">
+    <div class="modal-content print-preview-modal">
+        <button type="button" class="modal-close" id="print-preview-close" aria-label="Close">&times;</button>
+        <h2 style="margin-top: 0; color: var(--primary);" id="print-preview-title">Print Preview</h2>
+        <div class="print-preview-content" id="print-preview-content"></div>
+        <div class="print-preview-actions">
+            <button type="button" class="btn btn-ghost" id="print-preview-cancel">Cancel</button>
+            <button type="button" class="btn btn-primary" id="print-preview-print">Print</button>
+        </div>
+    </div>
+</div>
+
+<!-- Settings Modal -->
+<div id="settingsModal" class="modal" role="dialog" aria-modal="true">
+    <div class="modal-content settings-modal-content">
+        <button type="button" class="modal-close" id="settings-close" aria-label="Close">&times;</button>
+        <h2>Dealer Settings</h2>
+        <div class="settings-section">
+            <h3>Dealer Code</h3>
+            <div class="settings-value" id="settings-dealer-code">ABC123</div>
+        </div>
+        <div class="settings-section">
+            <div class="field">
+                <label for="settings-dealer-name">Dealer Name</label>
+                <input type="text" id="settings-dealer-name" placeholder="Your Business Name">
+            </div>
+        </div>
+        <div class="settings-section">
+            <div class="field">
+                <label for="settings-dealer-contact">Contact Person</label>
+                <input type="text" id="settings-dealer-contact" placeholder="Your Name">
+            </div>
+        </div>
+        <div class="settings-section">
+            <div class="field">
+                <label for="settings-dealer-phone">Phone</label>
+                <input type="tel" id="settings-dealer-phone" placeholder="Your Phone Number">
+            </div>
+        </div>
+        <div class="settings-actions">
+            <button type="button" class="btn btn-ghost" id="settings-cancel">Cancel</button>
+            <button type="button" class="btn btn-primary" id="settings-save">Save Settings</button>
+        </div>
+    </div>
+</div>
+
+<!-- Success Confirmation Overlay -->
+<div class="success-confirmation" id="success-confirmation">
+    <div class="success-confirmation-content">
+        <div class="success-checkmark">✓</div>
+        <h2>Request Submitted!</h2>
+        <p>Your formal quote request has been sent to AmeriDex.</p>
+        <div class="success-order-number" id="success-order-number">ABC123-20260202-001</div>
+        <p style="font-size: 0.85rem;">Save this number for your records. AmeriDex will respond with a formal quote.</p>
+        <button type="button" class="btn btn-primary" id="success-close-btn">Start New Quote</button>
+        <button type="button" class="btn btn-ghost" id="success-continue-btn">Continue Editing</button>
+    </div>
+</div>
+
+<!-- Session Timeout Warning -->
+<div class="timeout-warning" id="timeout-warning">
+    <div class="timeout-warning-content">
+        <h2>Session Timeout Warning</h2>
+        <p>Your session will expire due to inactivity.</p>
+        <div class="timeout-countdown" id="timeout-countdown">30</div>
+        <p>The form will be cleared unless you take action.</p>
+        <button type="button" class="btn btn-primary" id="timeout-continue">Continue Working</button>
+        <button type="button" class="btn btn-ghost" id="timeout-save-close">Save & Close</button>
+    </div>
+</div>
+
+<script>
+// ============================================
+// CONFIGURATION
+// ============================================
+const PRODUCT_CONFIG = {
+    categories: {
+        decking: {
+            label: "Decking Boards",
+            products: {
+                system: { name: "AmeriDex System Boards (Grooved + Dexerdry included)", price: 8.00, isFt: true, hasColor: true, lengthType: "board", help: "Premium boards with integrated Dexerdry sealing." },
+                grooved: { name: "Grooved Deck Boards (no Dexerdry)", price: 6.00, isFt: true, hasColor: true, lengthType: "board", help: "Grooved boards without integrated sealing." },
+                solid: { name: "Solid Edge Deck Boards", price: 6.00, isFt: true, hasColor: true, lengthType: "board", help: "For picture framing or stair construction." }
+            }
+        },
+        sealing: {
+            label: "Sealing & Protection",
+            products: {
+                dexerdry: { name: "Dexerdry Seals (standalone)", price: 2.00, isFt: true, hasColor: false, lengthType: "coil", help: "Standalone sealing. 240 ft or 50 ft boxes." }
+            }
+        },
+        fasteners: {
+            label: "Fasteners & Hardware",
+            products: {
+                screws: { name: "Epoxy-Coated Screws", price: 37.00, isFt: false, hasColor: false, help: "Per box (375 screws)." },
+                plugs: { name: "Color-Matching Plugs", price: 33.79, isFt: false, hasColor: false, help: "Per box." }
+            }
+        },
+        hardware: {
+            label: "Hardware",
+            products: {
+                blueclaw: { name: "Dexerdry BlueClaw", price: 150.00, isFt: false, hasColor: false, help: "For efficiently compressing deck boards." }
+            }
+        },
+        custom: {
+            label: "Custom Items",
+            products: {
+                custom: { name: "Custom / Manual Item", price: 0, isFt: false, hasColor: false, help: "Requires A&M Building Products approval." }
+            }
+        }
+    }
+};
+
+const PRODUCTS = {};
+Object.values(PRODUCT_CONFIG.categories).forEach(cat => { Object.assign(PRODUCTS, cat.products); });
+
+const COLORS = ["Driftwood", "Khaki", "Slate", "Beachwood", "Chestnut", "Redwood", "Hazelnut"];
+const COLOR_IMAGES = { Driftwood: "Driftwood.png", Khaki: "Khaki.png", Slate: "Slate.png", Beachwood: "Beachwood.png", Chestnut: "Chestnut.png", Redwood: "Redwood.png", Hazelnut: "Hazelnut.png" };
+const BOARD_LENGTHS = [12, 16, 20, "custom"];
+const COIL_LENGTHS = [240, 50];
+const BOARD_WIDTH_INCH = 5.5;
+const GAP_INCH = 0.125;
+const EFFECTIVE_FT = (BOARD_WIDTH_INCH + GAP_INCH) / 12;
+const SCREWS_PER_BOX = 375;
+const IDLE_TIMEOUT = 3 * 60 * 1000;
+const WARNING_DURATION = 30 * 1000;
+
+// ============================================
+// STATE
+// ============================================
+let dealerSettings = { dealerCode: '', dealerName: '', dealerContact: '', dealerPhone: '', lastLogin: null };
+let currentQuote = {
+    quoteId: null,
+    status: 'draft',
+    customer: { name: '', email: '', zipCode: '', company: '', phone: '' },
+    lineItems: [],
+    options: { pictureFrame: false, stairs: false },
+    specialInstructions: '',
+    internalNotes: '',
+    shippingAddress: '',
+    deliveryDate: ''
+};
+let savedQuotes = [];
+let customerHistory = [];
+let deletedItems = [];
+let selectedColor1 = "Driftwood";
+let selectedColor2 = "Khaki";
+let currentMode = "quick";
+let lastCalculation = null;
+let deckLengthFt = 0;
+let deckWidthFt = 0;
+let idleTimer = null;
+let warningTimer = null;
+let countdownInterval = null;
+let countdownSeconds = 30;
+
+// ============================================
+// STORAGE FUNCTIONS
+// ============================================
+function loadFromStorage() {
+    try {
+        const d = localStorage.getItem('ameridex_dealer_settings');
+        if (d) dealerSettings = JSON.parse(d);
+        const q = localStorage.getItem('ameridex_saved_quotes');
+        if (q) savedQuotes = JSON.parse(q);
+        const c = localStorage.getItem('ameridex_customer_history');
+        if (c) customerHistory = JSON.parse(c);
+    } catch (e) { console.error('Storage error:', e); }
+}
+
+function saveToStorage() {
+    try {
+        localStorage.setItem('ameridex_dealer_settings', JSON.stringify(dealerSettings));
+        localStorage.setItem('ameridex_saved_quotes', JSON.stringify(savedQuotes));
+        localStorage.setItem('ameridex_customer_history', JSON.stringify(customerHistory));
+    } catch (e) { console.error('Storage error:', e); }
+}
+
+function saveDealerSettings() {
+    localStorage.setItem('ameridex_dealer_settings', JSON.stringify(dealerSettings));
+}
+
+// ============================================
+// UTILITIES
+// ============================================
+function isMobileView() { return window.innerWidth <= 768; }
+function formatCurrency(amt) { const n = Number(amt) || 0; return 
+n.toLocaleString('en-US', { style: 'currency', currency: 'USD' }); }
+function getItemLength(item) { return item.length === "custom" ? (item.customLength || 0) : (item.length || 0); }
+function getItemPrice(item) {
+    const prod = PRODUCTS[item.type] || PRODUCTS.custom;
+    if (item.type === "custom") return item.customUnitPrice || 0;
+    return prod.price;
+}
+function getItemSubtotal(item) {
+    const prod = PRODUCTS[item.type] || PRODUCTS.custom;
+    const price = getItemPrice(item);
+    if (item.type === "dexerdry") return item.length * item.qty * price;
+    if (prod.isFt) return getItemLength(item) * (item.qty || 0) * price;
+    return (item.qty || 0) * price;
+}
+function validateDealerCode(code) { return /^[A-Z0-9]{6}$/.test(code.toUpperCase()); }
+
+function generateQuoteNumber() {
+    const today = new Date();
+    const dateStr = today.getFullYear().toString() + String(today.getMonth() + 1).padStart(2, '0') + String(today.getDate()).padStart(2, '0');
+    const todayPrefix = dealerSettings.dealerCode + '-' + dateStr;
+    const todayQuotes = savedQuotes.filter(q => q.quoteId && q.quoteId.startsWith(todayPrefix));
+    return todayPrefix + '-' + String(todayQuotes.length + 1).padStart(3, '0');
+}
+
+// ============================================
+// CONNECTIVITY
+// ============================================
+function updateConnectivityStatus() {
+    const bar = document.getElementById('connectivity-bar');
+    if (navigator.onLine) {
+        bar.classList.remove('visible');
+        document.body.classList.remove('offline');
+    } else {
+        bar.classList.add('visible');
+        document.body.classList.add('offline');
+    }
+}
+window.addEventListener('online', updateConnectivityStatus);
+window.addEventListener('offline', updateConnectivityStatus);
+
+// ============================================
+// SESSION TIMEOUT
+// ============================================
+function resetIdleTimer() {
+    clearTimeout(idleTimer);
+    clearTimeout(warningTimer);
+    clearInterval(countdownInterval);
+    document.getElementById('timeout-warning').classList.remove('visible');
+    if (dealerSettings.dealerCode) {
+        idleTimer = setTimeout(showTimeoutWarning, IDLE_TIMEOUT);
+    }
+}
+
+function showTimeoutWarning() {
+    document.getElementById('timeout-warning').classList.add('visible');
+    countdownSeconds = 30;
+    document.getElementById('timeout-countdown').textContent = countdownSeconds;
+    countdownInterval = setInterval(() => {
+        countdownSeconds--;
+        document.getElementById('timeout-countdown').textContent = countdownSeconds;
+        if (countdownSeconds <= 0) {
+            clearInterval(countdownInterval);
+            handleSessionTimeout();
+        }
+    }, 1000);
+}
+
+function handleSessionTimeout() {
+    document.getElementById('timeout-warning').classList.remove('visible');
+    resetFormOnly();
+    alert('Session timed out due to inactivity. Your saved quotes are still available.');
+}
+
+function continueSession() {
+    document.getElementById('timeout-warning').classList.remove('visible');
+    clearInterval(countdownInterval);
+    resetIdleTimer();
+}
+
+function saveAndClose() {
+    document.getElementById('timeout-warning').classList.remove('visible');
+    clearInterval(countdownInterval);
+    if (currentQuote.lineItems.length > 0 || document.getElementById('cust-name').value.trim()) {
+        saveCurrentQuote();
+        alert('Quote saved successfully!');
+    }
+    resetFormOnly();
+}
+
+['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'].forEach(evt => {
+    document.addEventListener(evt, resetIdleTimer, { passive: true });
+});
+
+// ============================================
+// LOGIN / AUTH
+// ============================================
+function showLoginScreen() {
+    document.getElementById('login-screen').style.display = 'flex';
+    document.getElementById('main-app').classList.add('app-hidden');
+}
+
+function showMainApp() {
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('main-app').classList.remove('app-hidden');
+    document.getElementById('header-dealer-code').textContent = 'Dealer: ' + dealerSettings.dealerCode;
+    resetIdleTimer();
+}
+
+function handleLogin() {
+    const input = document.getElementById('dealer-code-input');
+    const error = document.getElementById('dealer-code-error');
+    const code = input.value.trim().toUpperCase();
+    if (!validateDealerCode(code)) {
+        error.style.display = 'block';
+        input.focus();
+        return;
+    }
+    error.style.display = 'none';
+    dealerSettings.dealerCode = code;
+    dealerSettings.lastLogin = new Date().toISOString();
+    saveDealerSettings();
+    showMainApp();
+    renderSavedQuotes();
+}
+
+function handleLogout() {
+    if (currentQuote.lineItems.length > 0 || document.getElementById('cust-name').value.trim()) {
+        if (!confirm('Are you sure you want to log out? Any unsaved changes will be lost.')) {
+            return;
+        }
+    }
+
+    // Clear all timers
+    clearTimeout(idleTimer);
+    clearTimeout(warningTimer);
+    clearInterval(countdownInterval);
+
+    // Clear dealer code from settings (but keep other settings)
+    dealerSettings.dealerCode = '';
+    saveDealerSettings();
+
+    // Reset the form
+    resetFormOnly();
+
+    // Clear the dealer code input field
+    document.getElementById('dealer-code-input').value = '';
+
+    // Hide the main app
+    document.getElementById('main-app').classList.add('app-hidden');
+
+    // Show the login screen
+    document.getElementById('login-screen').style.display = 'flex';
+
+    // Focus the dealer code input
+    document.getElementById('dealer-code-input').focus();
+}
+
+// Also update the success modal button handlers in DOMContentLoaded:
+// Find these lines and replace them:
+
+document.getElementById('success-close-btn').onclick = () => {
+    document.getElementById('success-confirmation').classList.remove('visible');
+    resetFormOnly();
+    setTimeout(() => {
+        document.getElementById('customer').scrollIntoView({ behavior: 'smooth' });
+    }, 100);
+};
+
+document.getElementById('success-continue-btn').onclick = () => {
+    document.getElementById('success-confirmation').classList.remove('visible');
+    // Don't reset, just close the modal
+};
+
+// ============================================
+// QUOTE MODE
+// ============================================
+function setQuoteMode(mode) {
+    currentMode = mode;
+    document.querySelectorAll('.quote-mode-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
+    const desc = document.getElementById('mode-description');
+    const submit = document.getElementById('submit-btn');
+    const internal = document.getElementById('internal-notes-field');
+    if (mode === 'quick') {
+        desc.innerHTML = '<strong>Quick Quote Mode:</strong> Create and print a customer estimate. No submission to AmeriDex.';
+        submit.textContent = 'Print Customer Quote';
+        submit.classList.remove('btn-primary');
+        submit.classList.add('btn-outline');
+        internal.style.display = 'none';
+    } else {
+        desc.innerHTML = '<strong>Formal Request Mode:</strong> Submit to AmeriDex for an official quote. A quote number will be generated.';
+        submit.textContent = 'Submit to AmeriDex';
+        submit.classList.add('btn-primary');
+        submit.classList.remove('btn-outline');
+        internal.style.display = 'block';
+    }
+}
+
+// ============================================
+// COLOR GRID
+// ============================================
+function initColorGrid() {
+    const grid = document.getElementById("color-grid");
+    grid.innerHTML = "";
+    COLORS.forEach(color => {
+        const card = document.createElement("div");
+        card.className = "color-card";
+        card.setAttribute("data-color", color);
+        const img = document.createElement("img");
+        img.src = "colors/" + COLOR_IMAGES[color];
+        img.alt = color;
+        img.onerror = () => { img.src = "https://via.placeholder.com/100x80?text=" + color; };
+        const label = document.createElement("div");
+        label.className = "color-card-label";
+        label.textContent = color;
+        card.appendChild(img);
+        card.appendChild(label);
+        card.addEventListener("click", () => {
+            selectedColor1 = color;
+            updateColorComparison();
+            updateColorSelection();
+        });
+        grid.appendChild(card);
+    });
+}
+
+function updateColorSelection() {
+    document.querySelectorAll(".color-card").forEach(card => {
+        card.classList.toggle("selected", card.getAttribute("data-color") === selectedColor1);
+    });
+}
+
+function updateColorComparison() {
+    document.getElementById("color1-preview").src = "colors/" + COLOR_IMAGES[selectedColor1];
+    document.getElementById("color1-name").textContent = selectedColor1;
+    const idx = COLORS.indexOf(selectedColor1);
+    selectedColor2 = COLORS[(idx + 1) % COLORS.length];
+    document.getElementById("color2-preview").src = "colors/" + COLOR_IMAGES[selectedColor2];
+    document.getElementById("color2-name").textContent = selectedColor2;
+}
+
+// ============================================
+// CUSTOMER PROGRESS & LOOKUP
+// ============================================
+function updateCustomerProgress() {
+    const name = document.getElementById("cust-name").value.trim() ? 1 : 0;
+    const email = document.getElementById("cust-email").value.trim() ? 1 : 0;
+    const zip = document.getElementById("cust-zip").value.trim() ? 1 : 0;
+    const completed = name + email + zip;
+    const badge = document.getElementById("cust-badge");
+    badge.textContent = completed + "/3";
+    badge.classList.toggle("incomplete", completed !== 3);
+}
+
+function searchCustomers(query) {
+    if (!query || query.length < 2) return [];
+    const lq = query.toLowerCase();
+    return customerHistory.filter(c => 
+        c.name.toLowerCase().includes(lq) || c.email.toLowerCase().includes(lq) || (c.company && c.company.toLowerCase().includes(lq))
+    ).slice(0, 5);
+}
+
+function showCustomerLookup(results) {
+    const container = document.getElementById('customer-lookup-results');
+    if (results.length === 0) { container.classList.remove('visible'); return; }
+    container.innerHTML = '';
+    results.forEach(customer => {
+        const item = document.createElement('div');
+        item.className = 'customer-lookup-item';
+        item.innerHTML = '<div class="customer-lookup-name">' + customer.name + (customer.company ? ' (' + customer.company + ')' : '') + '</div><div class="customer-lookup-email">' + customer.email + '</div>';
+        item.addEventListener('click', () => {
+            document.getElementById('cust-name').value = customer.name;
+            document.getElementById('cust-email').value = customer.email;
+            document.getElementById('cust-company').value = customer.company || '';
+            document.getElementById('cust-phone').value = customer.phone || '';
+            container.classList.remove('visible');
+            updateCustomerProgress();
+        });
+        container.appendChild(item);
+    });
+    container.classList.add('visible');
+}
+
+// ============================================
+// DIAGRAM
+// ============================================
+function updateDiagramOrientation() {
+    const orientation = document.getElementById("orientation").value;
+    const lines = document.getElementById("board-lines-preview");
+    const help = document.getElementById("orientation-help");
+    if (orientation === "perpendicular") {
+        lines.className = "board-lines perpendicular";
+        help.textContent = "Boards will run away from the house, toward the yard";
+    } else {
+        lines.className = "board-lines parallel";
+        help.textContent = "Boards will run along the house wall, left to right";
+    }
+}
+
+// ============================================
+// LINE ITEMS RENDERING
+// ============================================
+function render() {
+    renderDesktop();
+    if (isMobileView()) {
+        renderMobile();
+        document.getElementById("mobile-items-container").style.display = "block";
+    } else {
+        document.getElementById("mobile-items-container").innerHTML = "";
+        document.getElementById("mobile-items-container").style.display = "none";
+    }
+}
+
+function renderDesktop() {
+    const tbody = document.querySelector("#line-items tbody");
+    tbody.innerHTML = "";
+    currentQuote.lineItems.forEach((item, i) => {
+        const prod = PRODUCTS[item.type] || PRODUCTS.custom;
+        const row = document.createElement("tr");
+
+        // Product column
+        let td = document.createElement("td");
+        const sel = document.createElement("select");
+        Object.entries(PRODUCT_CONFIG.categories).forEach(([catKey, category]) => {
+            const optgroup = document.createElement("optgroup");
+            optgroup.label = category.label;
+            Object.entries(category.products).forEach(([prodKey, prodData]) => {
+                const opt = document.createElement("option");
+                opt.value = prodKey;
+                opt.textContent = prodData.name;
+                if (prodKey === item.type) opt.selected = true;
+                optgroup.appendChild(opt);
+            });
+            sel.appendChild(optgroup);
+        });
+        sel.onchange = () => {
+            item.type = sel.value;
+            if (item.type !== "custom") { item.customDesc = ""; item.customUnitPrice = 0; }
+            if (item.type === "dexerdry") item.length = 240;
+            else if (PRODUCTS[item.type].isFt) { item.length = 16; item.customLength = null; }
+            else item.length = null;
+            render();
+            updateTotalAndFasteners();
+        };
+        td.appendChild(sel);
+
+        if (item.type === "custom") {
+            const descInput = document.createElement("input");
+            descInput.type = "text";
+            descInput.style.cssText = "width:100%;margin-top:0.4rem";
+            descInput.placeholder = "Enter product description...";
+            descInput.value = item.customDesc || "";
+            descInput.oninput = e => { item.customDesc = e.target.value; };
+            td.appendChild(descInput);
+            const warning = document.createElement("div");
+            warning.className = "custom-item-warning";
+            warning.textContent = "Requires approval from A&M Building Products for formal quote";
+            td.appendChild(warning);
+            const priceLabel = document.createElement("label");
+            priceLabel.style.cssText = "margin-top:0.4rem;display:block;font-size:0.8rem";
+            priceLabel.textContent = "Unit Price: $";
+            const priceInput = document.createElement("input");
+            priceInput.type = "number";
+            priceInput.style.cssText = "width:100px;margin-left:0.25rem";
+            priceInput.step = "0.01";
+            priceInput.min = "0";
+            priceInput.value = item.customUnitPrice || "";
+            priceInput.oninput = e => { item.customUnitPrice = parseFloat(e.target.value) || 0; updateTotalAndFasteners(); };
+            priceLabel.appendChild(priceInput);
+            td.appendChild(priceLabel);
+        } else {
+            const helpDiv = document.createElement("div");
+            helpDiv.className = "help-text";
+            helpDiv.textContent = prod.help || "";
+            td.appendChild(helpDiv);
+            const priceDiv = document.createElement("div");
+            priceDiv.style.cssText = "margin-top:0.3rem;font-size:0.8rem;color:#1e40af;font-weight:600";
+            priceDiv.textContent = "Price: " + formatCurrency(prod.price) + (prod.isFt ? "/ft" : " each");
+            td.appendChild(priceDiv);
+        }
+        row.appendChild(td);
+
+        // Color column
+        td = document.createElement("td");
+        if (prod.hasColor) {
+            const csel = document.createElement("select");
+            COLORS.forEach(c => {
+                const o = document.createElement("option");
+                o.value = c;
+                o.textContent = c;
+                if (c === item.color) o.selected = true;
+                csel.appendChild(o);
+            });
+            const prev = document.createElement("img");
+            prev.className = "preview-img";
+            prev.alt = "preview";
+            prev.title = "Click to enlarge";
+            function applyImage() {
+                const colorName = item.color || COLORS[0];
+                prev.src = "colors/" + (COLOR_IMAGES[colorName] || COLOR_IMAGES.Driftwood);
+            }
+            csel.onchange = e => { item.color = e.target.value; applyImage(); updateTotalAndFasteners(); };
+            td.appendChild(csel);
+            item.color = item.color || COLORS[0];
+            applyImage();
+            prev.onerror = () => { prev.src = "https://via.placeholder.com/34?text=?"; };
+            prev.onclick = () => {
+                document.getElementById("colorLarge").src = prev.src;
+                document.getElementById("colorName").textContent = item.color || COLORS[0];
+                document.getElementById("colorModal").classList.add("active");
+            };
+            td.appendChild(prev);
+        }
+        row.appendChild(td);
+
+        // Length column
+        td = document.createElement("td");
+        if (item.type === "dexerdry") {
+            const wrapper = document.createElement("div");
+            const lenSel = document.createElement("select");
+            lenSel.className = "len-input";
+            COIL_LENGTHS.forEach(len => {
+                const o = document.createElement("option");
+                o.value = len;
+                o.textContent = len + " ft box";
+                if (len === item.length) o.selected = true;
+                lenSel.appendChild(o);
+            });
+            lenSel.onchange = e => { item.length = parseInt(e.target.value); updateTotalAndFasteners(); render(); };
+            wrapper.appendChild(lenSel);
+            const footageDiv = document.createElement("div");
+            footageDiv.className = "footage-display";
+            footageDiv.id = "footage-" + i;
+            wrapper.appendChild(footageDiv);
+            td.appendChild(wrapper);
+        } else if (prod.isFt) {
+            const wrapper = document.createElement("div");
+            wrapper.className = "length-wrapper";
+            const lenSel = document.createElement("select");
+            lenSel.style.flex = "1";
+            BOARD_LENGTHS.forEach(len => {
+                const o = document.createElement("option");
+                o.value = len;
+                o.textContent = len === "custom" ? "Custom" : len + " ft";
+                if (len === item.length) o.selected = true;
+                lenSel.appendChild(o);
+            });
+            lenSel.onchange = e => { item.length = e.target.value === "custom" ? "custom" : parseInt(e.target.value); render(); updateTotalAndFasteners(); };
+            wrapper.appendChild(lenSel);
+            if (item.length === "custom") {
+                const customInput = document.createElement("input");
+                customInput.type = "number";
+                customInput.placeholder = "ft";
+                customInput.value = item.customLength || "";
+                customInput.min = "1";
+                customInput.step = "0.5";
+                customInput.style.width = "65px";
+                customInput.oninput = e => { item.customLength = parseFloat(e.target.value) || 0; updateTotalAndFasteners(); };
+                wrapper.appendChild(customInput);
+            }
+            td.appendChild(wrapper);
+        }
+        row.appendChild(td);
+
+        // Qty column
+        td = document.createElement("td");
+        td.className = "numeric";
+        const qtyInput = document.createElement("input");
+        qtyInput.type = "number";
+        qtyInput.className = "qty-input";
+        qtyInput.value = item.qty;
+        qtyInput.min = "1";
+        qtyInput.step = "1";
+        qtyInput.oninput = e => { item.qty = Math.max(1, parseInt(e.target.value) || 1); updateTotalAndFasteners(); };
+        td.appendChild(qtyInput);
+        row.appendChild(td);
+
+        // Subtotal column
+        td = document.createElement("td");
+        td.className = "numeric";
+        td.id = "sub-" + i;
+        row.appendChild(td);
+
+        // Actions column
+        td = document.createElement("td");
+        td.className = "table-actions-cell";
+        const rmBtn = document.createElement("button");
+        rmBtn.type = "button";
+        rmBtn.className = "btn-remove-row";
+        rmBtn.innerHTML = "&times;";
+        rmBtn.title = "Remove item";
+        rmBtn.onclick = () => {
+            deletedItems.push(JSON.parse(JSON.stringify(item)));
+            currentQuote.lineItems.splice(i, 1);
+            render();
+            updateTotalAndFasteners();
+            updateUndoButton();
+        };
+        td.appendChild(rmBtn);
+        row.appendChild(td);
+
+        tbody.appendChild(row);
+    });
+}
+
+function renderMobile() {
+    const container = document.getElementById("mobile-items-container");
+    container.innerHTML = "";
+    currentQuote.lineItems.forEach((item, i) => {
+        const prod = PRODUCTS[item.type] || PRODUCTS.custom;
+        const card = document.createElement("div");
+        card.className = "line-item-card";
+        const title = document.createElement("h4");
+        title.textContent = "Item " + (i + 1) + ": " + (item.type === "custom" && item.customDesc ? item.customDesc : prod.name);
+        card.appendChild(title);
+
+        // Product selector
+        const productRow = document.createElement("div");
+        productRow.className = "line-item-row full";
+        const prodLabel = document.createElement("label");
+        prodLabel.textContent = "Product";
+        const prodSel = document.createElement("select");
+        Object.entries(PRODUCT_CONFIG.categories).forEach(([catKey, category]) => {
+            const optgroup = document.createElement("optgroup");
+            optgroup.label = category.label;
+            Object.entries(category.products).forEach(([prodKey, prodData]) => {
+                const opt = document.createElement("option");
+                opt.value = prodKey;
+                opt.textContent = prodData.name;
+                if (prodKey === item.type) opt.selected = true;
+                optgroup.appendChild(opt);
+            });
+            prodSel.appendChild(optgroup);
+        });
+        prodSel.onchange = () => {
+            item.type = prodSel.value;
+            if (item.type !== "custom") { item.customDesc = ""; item.customUnitPrice = 0; }
+            if (item.type === "dexerdry") item.length = 240;
+            else if (PRODUCTS[item.type].isFt) { item.length = 16; item.customLength = null; }
+            else item.length = null;
+            render();
+            updateTotalAndFasteners();
+        };
+        productRow.appendChild(prodLabel);
+        productRow.appendChild(prodSel);
+        card.appendChild(productRow);
+
+        if (item.type === "custom") {
+            const descRow = document.createElement("div");
+            descRow.className = "line-item-row full";
+            const descLabel = document.createElement("label");
+            descLabel.textContent = "Description";
+            const descInput = document.createElement("input");
+            descInput.type = "text";
+            descInput.placeholder = "Enter product description...";
+            descInput.value = item.customDesc || "";
+            descInput.oninput = e => { item.customDesc = e.target.value; };
+            descRow.appendChild(descLabel);
+            descRow.appendChild(descInput);
+            card.appendChild(descRow);
+            const warning = document.createElement("div");
+            warning.className = "custom-item-warning";
+            warning.textContent = "Requires A&M approval for formal quote";
+            card.appendChild(warning);
+            const priceRow = document.createElement("div");
+            priceRow.className = "line-item-row full";
+            const priceLabel = document.createElement("label");
+            priceLabel.textContent = "Unit Price ($)";
+            const priceInput = document.createElement("input");
+            priceInput.type = "number";
+            priceInput.step = "0.01";
+            priceInput.min = "0";
+            priceInput.value = item.customUnitPrice || "";
+            priceInput.oninput = e => { item.customUnitPrice = parseFloat(e.target.value) || 0; updateTotalAndFasteners(); };
+            priceRow.appendChild(priceLabel);
+            priceRow.appendChild(priceInput);
+            card.appendChild(priceRow);
+        }
+
+        if (prod.hasColor) {
+            const colorRow = document.createElement("div");
+            colorRow.className = "line-item-row full";
+            const colorLabel = document.createElement("label");
+            colorLabel.textContent = "Color";
+            const colorSel = document.createElement("select");
+            COLORS.forEach(c => {
+                const o = document.createElement("option");
+                o.value = c;
+                o.textContent = c;
+                if (c === item.color) o.selected = true;
+                colorSel.appendChild(o);
+            });
+            colorSel.onchange = e => { item.color = e.target.value; updateTotalAndFasteners(); };
+            colorRow.appendChild(colorLabel);
+            colorRow.appendChild(colorSel);
+            card.appendChild(colorRow);
+        }
+
+        const lengthQtyRow = document.createElement("div");
+        lengthQtyRow.className = "line-item-row";
+        if (item.type === "dexerdry") {
+            const lengthDiv = document.createElement("div");
+            const lengthLabel = document.createElement("label");
+            lengthLabel.textContent = "Box Size";
+            const lengthSel = document.createElement("select");
+            COIL_LENGTHS.forEach(len => {
+                const o = document.createElement("option");
+                o.value = len;
+                o.textContent = len + " ft box";
+                if (len === item.length) o.selected = true;
+                lengthSel.appendChild(o);
+            });
+            lengthSel.onchange = e => { item.length = parseInt(e.target.value); updateTotalAndFasteners(); render(); };
+            lengthDiv.appendChild(lengthLabel);
+            lengthDiv.appendChild(lengthSel);
+            lengthQtyRow.appendChild(lengthDiv);
+        } else if (prod.isFt) {
+            const lengthDiv = document.createElement("div");
+            const lengthLabel = document.createElement("label");
+            lengthLabel.textContent = "Length (ft)";
+            const lengthSel = document.createElement("select");
+            BOARD_LENGTHS.forEach(len => {
+                const o = document.createElement("option");
+                o.value = len;
+                o.textContent = len === "custom" ? "Custom" : len + " ft";
+                if (len === item.length) o.selected = true;
+                lengthSel.appendChild(o);
+            });
+            lengthSel.onchange = e => { item.length = e.target.value === "custom" ? "custom" : parseInt(e.target.value); render(); updateTotalAndFasteners(); };
+            lengthDiv.appendChild(lengthLabel);
+            lengthDiv.appendChild(lengthSel);
+            if (item.length === "custom") {
+                const customInput = document.createElement("input");
+                customInput.type = "number";
+                customInput.placeholder = "Enter length";
+                customInput.value = item.customLength || "";
+                customInput.min = "1";
+                customInput.style.marginTop = "0.5rem";
+                customInput.oninput = e => { item.customLength = parseFloat(e.target.value) || 0; updateTotalAndFasteners(); };
+                lengthDiv.appendChild(customInput);
+            }
+            lengthQtyRow.appendChild(lengthDiv);
+        }
+        const qtyDiv = document.createElement("div");
+        const qtyLabel = document.createElement("label");
+        qtyLabel.textContent = "Quantity";
+        const qtyInput = document.createElement("input");
+        qtyInput.type = "number";
+        qtyInput.value = item.qty;
+        qtyInput.min = "1";
+        qtyInput.oninput = e => { item.qty = Math.max(1, parseInt(e.target.value) || 1); updateTotalAndFasteners(); };
+        qtyDiv.appendChild(qtyLabel);
+        qtyDiv.appendChild(qtyInput);
+        lengthQtyRow.appendChild(qtyDiv);
+        card.appendChild(lengthQtyRow);
+
+        const subRow = document.createElement("div");
+        subRow.className = "line-item-row full";
+        subRow.id = "mobile-sub-" + i;
+        subRow.style.cssText = "font-weight:600;color:#1e40af";
+        card.appendChild(subRow);
+
+        const actionsDiv = document.createElement("div");
+        actionsDiv.className = "line-item-card-actions";
+        const rmBtn = document.createElement("button");
+        rmBtn.type = "button";
+        rmBtn.textContent = "Delete Item";
+        rmBtn.className = "btn btn-ghost btn-sm";
+        rmBtn.onclick = () => {
+            deletedItems.push(JSON.parse(JSON.stringify(item)));
+            currentQuote.lineItems.splice(i, 1);
+            render();
+            updateTotalAndFasteners();
+            updateUndoButton();
+        };
+        actionsDiv.appendChild(rmBtn);
+        card.appendChild(actionsDiv);
+        container.appendChild(card);
+    });
+}
+
+function updateUndoButton() {
+    const btn = document.getElementById("undo-btn");
+    if (deletedItems.length > 0) {
+        btn.style.display = "block";
+        btn.onclick = () => {
+            currentQuote.lineItems.push(deletedItems.pop());
+            render();
+            updateTotalAndFasteners();
+            updateUndoButton();
+        };
+    } else btn.style.display = "none";
+}
+
+function updateTotalAndFasteners() {
+    let total = 0, totalGroovedBoards = 0, hasSystem = false, hasStandaloneDex = false;
+    currentQuote.lineItems.forEach((item, i) => {
+        const sub = getItemSubtotal(item);
+        total += sub;
+        const subCell = document.getElementById("sub-" + i);
+        if (subCell) subCell.textContent = formatCurrency(sub);
+        const mobileSubCell = document.getElementById("mobile-sub-" + i);
+        if (mobileSubCell) {
+            let subText = "Subtotal: " + formatCurrency(sub);
+            if (item.type === "dexerdry") subText += " (" + (item.length * item.qty) + " ft total)";
+            mobileSubCell.textContent = subText;
+        }
+        const footageEl = document.getElementById("footage-" + i);
+        if (footageEl && item.type === "dexerdry") footageEl.textContent = "Total: " + (item.length * item.qty) + " ft";
+        if (["system", "grooved"].includes(item.type)) totalGroovedBoards += item.qty;
+        if (item.type === "system") hasSystem = true;
+        if (item.type === "dexerdry") hasStandaloneDex = true;
+    });
+    document.getElementById("grand-total").textContent = formatCurrency(total);
+    const hintEl = document.getElementById("fastener-hint");
+    let hintHtml = "";
+    if (totalGroovedBoards > 0 && deckLengthFt > 0) {
+        const joistCount = Math.floor(deckLengthFt * 12 / 16) + 1;
+        const boxesScrews = Math.ceil((totalGroovedBoards * joistCount * 2) / SCREWS_PER_BOX);
+        hintHtml += "<strong>Fastener suggestion:</strong><br>Approx " + boxesScrews + " boxes of screws<br>Approx " + boxesScrews + " boxes of plugs";
+    }
+    if (hasSystem && hasStandaloneDex) hintHtml += '<div class="fastener-warning">AmeriDex System Boards already include Dexerdry. Standalone Dexerdry is typically only needed for non-system decks.</div>';
+    hintEl.style.display = hintHtml ? "block" : "none";
+    hintEl.innerHTML = hintHtml;
+}
+// ============================================
+// CALCULATOR
+// ============================================
+function calculateOnly() {
+    const alongHouse = parseFloat(document.getElementById("deck-len").value) || 0;
+    const fromHouse = parseFloat(document.getElementById("deck-wid").value) || 0;
+    if (alongHouse <= 0 || fromHouse <= 0) { alert("Please enter both dimensions greater than 0."); return; }
+    deckLengthFt = alongHouse;
+    deckWidthFt = fromHouse;
+    const orientation = document.getElementById("orientation").value;
+    const isPerpendicular = orientation === "perpendicular";
+    const span = isPerpendicular ? fromHouse : alongHouse;
+    const wastePctInput = document.getElementById("waste-pct").value.trim();
+    const wastePct = wastePctInput === "" ? 0 : (parseFloat(wastePctInput) || 0);
+    const wasteMultiplier = 1 + (wastePct / 100);
+    const boardsNeeded = Math.ceil(((isPerpendicular ? alongHouse : fromHouse) / EFFECTIVE_FT) * wasteMultiplier);
+    let suggestedLength = span <= 12 ? 12 : (span <= 16 ? 16 : 20);
+    lastCalculation = { boardsNeeded: boardsNeeded, suggestedLength: suggestedLength, wastePct: wastePct };
+    const msg = "<strong>Deck Size:</strong> " + alongHouse + " ft x " + fromHouse + " ft<br><strong>Suggested:</strong> " + boardsNeeded + " boards at " + suggestedLength + " ft each";
+    document.getElementById("calc-result").innerHTML = msg;
+    document.getElementById("calc-result-container").style.display = "block";
+}
+
+function addSuggestionToOrder() {
+    if (!lastCalculation) { alert("Please calculate first."); return; }
+    currentQuote.lineItems.push({ type: "system", color: selectedColor1, length: lastCalculation.suggestedLength, customLength: null, qty: lastCalculation.boardsNeeded, customDesc: "", customUnitPrice: 0 });
+    deletedItems = [];
+    render();
+    updateTotalAndFasteners();
+    updateUndoButton();
+    document.getElementById("calc-result-container").style.display = "none";
+    lastCalculation = null;
+    alert("Boards added to your order!");
+}
+
+// ============================================
+// SAVED QUOTES
+// ============================================
+function renderSavedQuotes() {
+    const list = document.getElementById('saved-quotes-list');
+    const searchQuery = (document.getElementById('quote-search').value || '').toLowerCase();
+    let filtered = savedQuotes;
+    if (searchQuery) filtered = savedQuotes.filter(q => (q.customer.name && q.customer.name.toLowerCase().includes(searchQuery)) || (q.customer.company && q.customer.company.toLowerCase().includes(searchQuery)) || (q.quoteId && q.quoteId.toLowerCase().includes(searchQuery)));
+    filtered.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
+    if (filtered.length === 0) { list.innerHTML = '<div class="no-saved-quotes">' + (searchQuery ? 'No quotes match your search' : 'No saved quotes yet') + '</div>'; return; }
+    list.innerHTML = '';
+    filtered.forEach((quote, idx) => {
+        const item = document.createElement('div');
+        item.className = 'saved-quote-item';
+        const dateStr = new Date(quote.updatedAt || quote.createdAt).toLocaleDateString();
+        const total = quote.lineItems.reduce((sum, li) => sum + getItemSubtotalFromData(li), 0);
+        item.innerHTML = '<div class="saved-quote-info"><div class="saved-quote-id">' + (quote.quoteId || 'Draft') + '</div><div class="saved-quote-customer">' + (quote.customer.name || 'No name') + (quote.customer.company ? ' (' + quote.customer.company + ')' : '') + '</div><div class="saved-quote-date">' + dateStr + ' | ' + quote.lineItems.length + ' items</div></div><div class="saved-quote-total">' + formatCurrency(total) + '</div><div class="saved-quote-actions"><button type="button" class="btn-load" data-idx="' + idx + '">Load</button><button type="button" class="btn-delete-quote" data-idx="' + idx + '">Delete</button></div>';
+        list.appendChild(item);
+    });
+    list.querySelectorAll('.btn-load').forEach(btn => { btn.onclick = () => loadQuote(parseInt(btn.dataset.idx)); });
+    list.querySelectorAll('.btn-delete-quote').forEach(btn => { btn.onclick = (e) => { e.stopPropagation(); deleteQuote(parseInt(btn.dataset.idx)); }; });
+}
+
+function getItemSubtotalFromData(item) {
+    const prod = PRODUCTS[item.type] || PRODUCTS.custom;
+    const price = item.type === "custom" ? (item.customUnitPrice || 0) : prod.price;
+    if (item.type === "dexerdry") return item.length * item.qty * price;
+    if (prod.isFt) return (item.length === "custom" ? (item.customLength || 0) : (item.length || 0)) * (item.qty || 0) * price;
+    return (item.qty || 0) * price;
+}
+
+function saveCurrentQuote() {
+    if (!currentQuote.quoteId) currentQuote.quoteId = generateQuoteNumber();
+    currentQuote.customer.name = document.getElementById('cust-name').value.trim();
+    currentQuote.customer.email = document.getElementById('cust-email').value.trim();
+    currentQuote.customer.zipCode = document.getElementById('cust-zip').value.trim();
+    currentQuote.customer.company = document.getElementById('cust-company').value.trim();
+    currentQuote.customer.phone = document.getElementById('cust-phone').value.trim();
+    currentQuote.options.pictureFrame = document.getElementById('pic-frame').checked;
+    currentQuote.options.stairs = document.getElementById('stairs').checked;
+    currentQuote.specialInstructions = document.getElementById('special-instr').value;
+    currentQuote.internalNotes = document.getElementById('internal-notes').value;
+    currentQuote.shippingAddress = document.getElementById('ship-addr').value;
+    currentQuote.deliveryDate = document.getElementById('del-date').value;
+    const now = new Date().toISOString();
+    const existingIdx = savedQuotes.findIndex(q => q.quoteId === currentQuote.quoteId);
+    if (existingIdx >= 0) savedQuotes[existingIdx] = { ...currentQuote, updatedAt: now };
+    else savedQuotes.push({ ...currentQuote, createdAt: now, updatedAt: now });
+    updateCustomerHistory();
+    saveToStorage();
+    renderSavedQuotes();
+    return currentQuote.quoteId;
+}
+
+function loadQuote(idx) {
+    if (currentQuote.lineItems.length > 0 && !confirm('Loading this quote will replace your current work. Continue?')) return;
+    currentQuote = JSON.parse(JSON.stringify(savedQuotes[idx]));
+    document.getElementById('cust-name').value = currentQuote.customer.name || '';
+    document.getElementById('cust-email').value = currentQuote.customer.email || '';
+    document.getElementById('cust-zip').value = currentQuote.customer.zipCode || '';
+    document.getElementById('cust-company').value = currentQuote.customer.company || '';
+    document.getElementById('cust-phone').value = currentQuote.customer.phone || '';
+    render();
+    updateTotalAndFasteners();
+    updateCustomerProgress();
+}
+
+function deleteQuote(idx) {
+    if (confirm('Delete this quote?')) { savedQuotes.splice(idx, 1); saveToStorage(); renderSavedQuotes(); }
+}
+
+function updateCustomerHistory() {
+    const email = currentQuote.customer.email;
+    if (!email) return;
+    const existingIdx = customerHistory.findIndex(c => c.email.toLowerCase() === email.toLowerCase());
+    if (existingIdx >= 0) {
+        customerHistory[existingIdx].name = currentQuote.customer.name;
+        customerHistory[existingIdx].lastContact = new Date().toISOString();
+    } else customerHistory.push({ email: email, name: currentQuote.customer.name, company: currentQuote.customer.company, quotes: [currentQuote.quoteId], lastContact: new Date().toISOString() });
+}
+
+function resetFormOnly() {
+    // Reset the quote state
+    currentQuote = {
+        quoteId: null,
+        status: 'draft',
+        customer: { name: '', email: '', zipCode: '', company: '', phone: '' },
+        lineItems: [],
+        options: { pictureFrame: false, stairs: false },
+        specialInstructions: '',
+        internalNotes: '',
+        shippingAddress: '',
+        deliveryDate: ''
+    };
+
+    // Clear all form fields manually (don't rely on form.reset() alone)
+    document.getElementById('cust-name').value = '';
+    document.getElementById('cust-email').value = '';
+    document.getElementById('cust-zip').value = '';
+    document.getElementById('cust-company').value = '';
+    document.getElementById('cust-phone').value = '';
+    document.getElementById('pic-frame').checked = false;
+    document.getElementById('stairs').checked = false;
+    document.getElementById('special-instr').value = '';
+    document.getElementById('internal-notes').value = '';
+    document.getElementById('ship-addr').value = '';
+    document.getElementById('del-date').value = '';
+
+    // Hide the option notes
+    document.getElementById('pic-frame-note').style.display = 'none';
+    document.getElementById('stairs-note').style.display = 'none';
+
+    // Clear calculator results
+    document.getElementById('calc-result-container').style.display = 'none';
+    document.getElementById('deck-len').value = '';
+    document.getElementById('deck-wid').value = '';
+    document.getElementById('waste-pct').value = '';
+    lastCalculation = null;
+    deckLengthFt = 0;
+    deckWidthFt = 0;
+
+    // Clear deleted items stack
+    deletedItems = [];
+
+    // Re-render the empty line items
+    render();
+    updateTotalAndFasteners();
+    updateCustomerProgress();
+    updateUndoButton();
+
+    // Reset quote mode to quick
+    setQuoteMode('quick');
+
+    // Scroll to top
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// Find and REPLACE your existing handleLogout function with this improved version:
+
+
+    
+    
+// ============================================
+// VALIDATION, PRINTING & PDF FUNCTIONS
+// ============================================
+
+function validateRequired() {
+    let valid = true;
+    const name = document.getElementById('cust-name');
+    const email = document.getElementById('cust-email');
+    const zip = document.getElementById('cust-zip');
+
+    document.getElementById('err-name').textContent = '';
+    document.getElementById('err-email').textContent = '';
+    document.getElementById('err-zip').textContent = '';
+
+    if (!name.value.trim()) {
+        document.getElementById('err-name').textContent = 'Name is required';
+        valid = false;
+    }
+
+    if (!email.value.trim()) {
+        document.getElementById('err-email').textContent = 'Email is required';
+        valid = false;
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value.trim())) {
+        document.getElementById('err-email').textContent = 'Please enter a valid email';
+        valid = false;
+    }
+
+    if (!zip.value.trim()) {
+        document.getElementById('err-zip').textContent = 'Zip code is required';
+        valid = false;
+    }
+
+    if (currentQuote.lineItems.length === 0) {
+        alert('Please add at least one item to your order.');
+        valid = false;
+    }
+
+    if (!valid) {
+        document.getElementById('customer').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    return valid;
+}
+
+function generatePrintHTML(type) {
+    const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    const isCustomer = type === 'customer';
+    const title = isCustomer ? 'Customer Quote' : 'Dealer Order Form';
+
+    let html = '<div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto;">';
+    html += '<div style="border-bottom: 3px solid #2563eb; padding-bottom: 15px; margin-bottom: 20px;">';
+    html += '<h1 style="color: #2563eb; margin: 0;">AmeriDex ' + title + '</h1>';
+    html += '<p style="color: #666; margin: 5px 0 0;">Generated: ' + today + '</p>';
+    if (currentQuote.quoteId) html += '<p style="color: #1e40af; font-weight: bold; margin: 5px 0 0;">Quote #: ' + currentQuote.quoteId + '</p>';
+    if (!isCustomer && dealerSettings.dealerCode) html += '<p style="color: #666; margin: 5px 0 0;">Dealer: ' + dealerSettings.dealerCode + '</p>';
+    html += '</div>';
+
+    html += '<div style="margin-bottom: 20px;">';
+    html += '<h2 style="color: #374151; font-size: 1.1rem; border-bottom: 1px solid #ddd; padding-bottom: 5px;">Customer Information</h2>';
+    html += '<table style="width: 100%;"><tr><td style="padding: 3px 10px 3px 0; color: #666; width: 120px;"><strong>Name:</strong></td><td>' + (document.getElementById('cust-name').value || 'N/A') + '</td></tr>';
+    html += '<tr><td style="padding: 3px 10px 3px 0; color: #666;"><strong>Email:</strong></td><td>' + (document.getElementById('cust-email').value || 'N/A') + '</td></tr>';
+    html += '<tr><td style="padding: 3px 10px 3px 0; color: #666;"><strong>Zip Code:</strong></td><td>' + (document.getElementById('cust-zip').value || 'N/A') + '</td></tr>';
+    const company = document.getElementById('cust-company').value;
+    if (company) html += '<tr><td style="padding: 3px 10px 3px 0; color: #666;"><strong>Company:</strong></td><td>' + company + '</td></tr>';
+    const phone = document.getElementById('cust-phone').value;
+    if (phone) html += '<tr><td style="padding: 3px 10px 3px 0; color: #666;"><strong>Phone:</strong></td><td>' + phone + '</td></tr>';
+    html += '</table></div>';
+
+    const hasPicFrame = document.getElementById('pic-frame').checked;
+    const hasStairs = document.getElementById('stairs').checked;
+    if (hasPicFrame || hasStairs) {
+        html += '<div style="margin-bottom: 20px;"><h2 style="color: #374151; font-size: 1.1rem; border-bottom: 1px solid #ddd; padding-bottom: 5px;">Options</h2>';
+        if (hasPicFrame) html += '<p style="margin: 5px 0;">✓ Picture Framing</p>';
+        if (hasStairs) html += '<p style="margin: 5px 0;">✓ Stairs</p>';
+        html += '</div>';
+    }
+
+    html += '<div style="margin-bottom: 20px;"><h2 style="color: #374151; font-size: 1.1rem; border-bottom: 1px solid #ddd; padding-bottom: 5px;">Order Items</h2>';
+    html += '<table style="width: 100%; border-collapse: collapse; margin-top: 10px;"><thead><tr style="background: #f3f4f6;">';
+    html += '<th style="border: 1px solid #ddd; padding: 10px; text-align: left;">Product</th>';
+    html += '<th style="border: 1px solid #ddd; padding: 10px; text-align: left;">Color</th>';
+    html += '<th style="border: 1px solid #ddd; padding: 10px; text-align: left;">Length</th>';
+    html += '<th style="border: 1px solid #ddd; padding: 10px; text-align: center;">Qty</th>';
+    html += '<th style="border: 1px solid #ddd; padding: 10px; text-align: right;">Subtotal</th></tr></thead><tbody>';
+
+    let grandTotal = 0;
+    currentQuote.lineItems.forEach(item => {
+        const prod = PRODUCTS[item.type] || PRODUCTS.custom;
+        const sub = getItemSubtotal(item);
+        grandTotal += sub;
+        let lengthDisplay = '';
+        if (item.type === 'dexerdry') lengthDisplay = item.length + ' ft box';
+        else if (prod.isFt) {
+            const len = item.length === 'custom' ? (item.customLength || 0) : (item.length || 0);
+            lengthDisplay = len + ' ft';
+        }
+        const productName = item.type === 'custom' && item.customDesc ? item.customDesc : prod.name;
+        html += '<tr><td style="border: 1px solid #ddd; padding: 10px;">' + productName + '</td>';
+        html += '<td style="border: 1px solid #ddd; padding: 10px;">' + (prod.hasColor ? (item.color || '') : '') + '</td>';
+        html += '<td style="border: 1px solid #ddd; padding: 10px;">' + lengthDisplay + '</td>';
+        html += '<td style="border: 1px solid #ddd; padding: 10px; text-align: center;">' + item.qty + '</td>';
+        html += '<td style="border: 1px solid #ddd; padding: 10px; text-align: right;">' + formatCurrency(sub) + '</td></tr>';
+    });
+
+    html += '<tr style="background: #f3f4f6; font-weight: bold;"><td colspan="4" style="border: 1px solid #ddd; padding: 12px; text-align: right;">ESTIMATED TOTAL:</td>';
+    html += '<td style="border: 1px solid #ddd; padding: 12px; text-align: right; color: #1e40af; font-size: 1.1rem;">' + formatCurrency(grandTotal) + '</td></tr></tbody></table></div>';
+
+    const special = document.getElementById('special-instr').value;
+    if (special) {
+        html += '<div style="margin-bottom: 20px;"><h2 style="color: #374151; font-size: 1.1rem; border-bottom: 1px solid #ddd; padding-bottom: 5px;">Special Instructions</h2>';
+        html += '<p style="white-space: pre-wrap; background: #f9fafb; padding: 10px; border-radius: 5px;">' + special + '</p></div>';
+    }
+
+    const shipAddr = document.getElementById('ship-addr').value;
+    const delDate = document.getElementById('del-date').value;
+    if (shipAddr || delDate) {
+        html += '<div style="margin-bottom: 20px;"><h2 style="color: #374151; font-size: 1.1rem; border-bottom: 1px solid #ddd; padding-bottom: 5px;">Shipping & Delivery</h2>';
+        if (shipAddr) html += '<p><strong>Address:</strong><br>' + shipAddr.replace(/\n/g, '<br>') + '</p>';
+        if (delDate) html += '<p><strong>Preferred Date:</strong> ' + delDate + '</p>';
+        html += '</div>';
+    }
+
+    if (isCustomer) {
+        html += '<div style="margin-top: 30px; padding-top: 15px; border-top: 1px solid #ddd; font-size: 0.85rem; color: #666;">';
+        html += '<p><strong>Disclaimer:</strong> This is an estimate only. Final pricing subject to confirmation by A&M Building Products / AmeriDex. Prices do not include shipping, taxes, or installation unless otherwise noted.</p></div>';
+    }
+
+    html += '</div>';
+    return html;
+}
+
+function showPrintPreview(type) {
+    document.getElementById('print-preview-title').textContent = type === 'customer' ? 'Customer Quote Preview' : 'Order Form Preview';
+    document.getElementById('print-preview-content').innerHTML = generatePrintHTML(type);
+    document.getElementById('printPreviewModal').classList.add('active');
+}
+
+function printFromPreview() {
+    const content = document.getElementById('print-preview-content').innerHTML;
+    const printWindow = window.open('', '_blank', 'width=800,height=600');
+    printWindow.document.write('<!DOCTYPE html><html><head><title>AmeriDex Quote</title>');
+    printWindow.document.write('<style>body { font-family: Arial, sans-serif; padding: 20px; margin: 0; } @media print { body { padding: 0; } }</style>');
+    printWindow.document.write('</head><body>' + content + '</body></html>');
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => { printWindow.print(); printWindow.close(); }, 250);
+}
+
+function generatePDF() {
+    if (typeof window.jspdf === 'undefined') { alert('PDF library not loaded. Please use Print instead.'); return; }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    let y = 20;
+    const leftMargin = 20;
+    const pageWidth = doc.internal.pageSize.getWidth();
+
+    doc.setFontSize(20);
+    doc.setTextColor(37, 99, 235);
+    doc.text('AmeriDex Customer Quote', leftMargin, y);
+    y += 10;
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.text('Generated: ' + today, leftMargin, y);
+    if (currentQuote.quoteId) doc.text('Quote #: ' + currentQuote.quoteId, pageWidth - 60, y);
+    y += 15;
+
+    doc.setFontSize(12);
+    doc.setTextColor(55, 65, 81);
+    doc.text('Customer Information', leftMargin, y);
+    y += 7;
+    doc.setFontSize(10);
+    doc.setTextColor(0);
+    doc.text('Name: ' + (document.getElementById('cust-name').value || 'N/A'), leftMargin, y); y += 5;
+    doc.text('Email: ' + (document.getElementById('cust-email').value || 'N/A'), leftMargin, y); y += 5;
+    doc.text('Zip: ' + (document.getElementById('cust-zip').value || 'N/A'), leftMargin, y); y += 10;
+
+    doc.setFontSize(12);
+    doc.setTextColor(55, 65, 81);
+    doc.text('Order Items', leftMargin, y);
+    y += 7;
+    doc.setFontSize(9);
+    doc.setTextColor(0);
+
+    let grandTotal = 0;
+    currentQuote.lineItems.forEach((item, idx) => {
+        const prod = PRODUCTS[item.type] || PRODUCTS.custom;
+        const sub = getItemSubtotal(item);
+        grandTotal += sub;
+        const productName = item.type === 'custom' && item.customDesc ? item.customDesc : prod.name;
+        let desc = productName;
+        if (prod.hasColor && item.color) desc += ' (' + item.color + ')';
+        if (prod.isFt) {
+            const len = item.length === 'custom' ? (item.customLength || 0) : (item.length || 0);
+            desc += ' - ' + len + 'ft x ' + item.qty;
+        } else if (item.type === 'dexerdry') {
+            desc += ' - ' + item.length + 'ft box x ' + item.qty;
+        } else {
+            desc += ' - Qty: ' + item.qty;
+        }
+        doc.text((idx + 1) + '. ' + desc, leftMargin, y);
+        doc.text(formatCurrency(sub), pageWidth - 40, y);
+        y += 5;
+        if (y > 270) { doc.addPage(); y = 20; }
+    });
+
+    y += 5;
+    doc.setFontSize(11);
+    doc.setTextColor(30, 64, 175);
+    doc.text('TOTAL: ' + formatCurrency(grandTotal), pageWidth - 50, y);
+    doc.save('AmeriDex-Quote-' + (currentQuote.quoteId || 'draft') + '.pdf');
+}
+
+// ============================================
+// FORMSPREE INTEGRATION
+// ============================================
+
+// IMPORTANT: Replace with your actual Formspree endpoint
+const FORMSPREE_URL = 'https://formspree.io/f/xreljrrd'; // <-- CHANGE THIS TO YOUR FORMSPREE URL
+
+function generateOrderTextForEmail() {
+    const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    let txt = '===============================================\n';
+    txt += '     AMERIDEX DEALER FORMAL QUOTE REQUEST\n';
+    txt += '===============================================\n\n';
+    txt += 'Date: ' + today + '\n';
+    txt += 'Dealer Code: ' + (dealerSettings.dealerCode || 'N/A') + '\n';
+    if (currentQuote.quoteId) txt += 'Quote ID: ' + currentQuote.quoteId + '\n';
+    txt += '\n--- CUSTOMER INFORMATION ---\n';
+    txt += 'Name: ' + (document.getElementById('cust-name').value || '') + '\n';
+    txt += 'Email: ' + (document.getElementById('cust-email').value || '') + '\n';
+    txt += 'Zip Code: ' + (document.getElementById('cust-zip').value || '') + '\n';
+    const company = document.getElementById('cust-company').value;
+    if (company) txt += 'Company: ' + company + '\n';
+    const phone = document.getElementById('cust-phone').value;
+    if (phone) txt += 'Phone: ' + phone + '\n';
+    txt += '\n--- LINE ITEMS ---\n\n';
+    let grandTotal = 0;
+    currentQuote.lineItems.forEach((item, i) => {
+        const prod = PRODUCTS[item.type] || PRODUCTS.custom;
+        const price = getItemPrice(item);
+        const sub = getItemSubtotal(item);
+        grandTotal += sub;
+        const productName = item.type === 'custom' && item.customDesc ? item.customDesc : prod.name;
+        txt += 'Item ' + (i + 1) + ': ' + productName + '\n';
+        if (prod.hasColor && item.color) txt += '   Color: ' + item.color + '\n';
+        if (item.type === 'dexerdry') {
+            txt += '   Size: ' + item.length + ' ft box, Qty: ' + item.qty + ' (' + (item.length * item.qty) + ' ft total)\n';
+        } else if (prod.isFt) {
+            const len = item.length === 'custom' ? (item.customLength || 0) : (item.length || 0);
+            txt += '   Length: ' + len + ' ft, Qty: ' + item.qty + '\n';
+        } else {
+            txt += '   Qty: ' + item.qty + '\n';
+        }
+        txt += '   Subtotal: ' + formatCurrency(sub) + '\n\n';
+    });
+    txt += '--- ESTIMATED TOTAL: ' + formatCurrency(grandTotal) + ' ---\n\n';
+    const special = document.getElementById('special-instr').value;
+    if (special) txt += 'SPECIAL INSTRUCTIONS:\n' + special + '\n\n';
+    const internal = document.getElementById('internal-notes').value;
+    if (internal) txt += 'INTERNAL DEALER NOTES:\n' + internal + '\n\n';
+    const shipAddr = document.getElementById('ship-addr').value;
+    if (shipAddr) txt += 'SHIPPING ADDRESS:\n' + shipAddr + '\n\n';
+    const delDate = document.getElementById('del-date').value;
+    if (delDate) txt += 'PREFERRED DELIVERY DATE: ' + delDate + '\n\n';
+    txt += '===============================================\n';
+    txt += 'Please reply with a formal quote.\n';
+    txt += 'Contact: sales@ameridex.com\n';
+    return txt;
+}
+
+function buildFormspreePayload() {
+    let grandTotal = 0;
+    currentQuote.lineItems.forEach(item => { grandTotal += getItemSubtotal(item); });
+    return {
+        _subject: 'AmeriDex Dealer Quote Request - ' + (currentQuote.quoteId || 'New'),
+        dealerCode: dealerSettings.dealerCode || '',
+        quoteId: currentQuote.quoteId || '',
+        customerName: document.getElementById('cust-name').value.trim(),
+        customerEmail: document.getElementById('cust-email').value.trim(),
+        customerZip: document.getElementById('cust-zip').value.trim(),
+        estimatedTotal: formatCurrency(grandTotal),
+        itemCount: currentQuote.lineItems.length,
+        orderDetails: generateOrderTextForEmail()
+    };
+}
+
+function showReviewModal() {
+    document.getElementById('review-name').textContent = document.getElementById('cust-name').value || 'N/A';
+    document.getElementById('review-email').textContent = document.getElementById('cust-email').value || 'N/A';
+    document.getElementById('review-zip').textContent = document.getElementById('cust-zip').value || 'N/A';
+    const itemsContainer = document.getElementById('review-items');
+    itemsContainer.innerHTML = '';
+    let grandTotal = 0;
+    currentQuote.lineItems.forEach(item => {
+        const prod = PRODUCTS[item.type] || PRODUCTS.custom;
+        const sub = getItemSubtotal(item);
+        grandTotal += sub;
+        const productName = item.type === 'custom' && item.customDesc ? item.customDesc : prod.name;
+        const div = document.createElement('div');
+        div.className = 'review-item';
+        div.innerHTML = '<span>' + productName + (prod.hasColor && item.color ? ' (' + item.color + ')' : '') + ' x ' + item.qty + '</span><span>' + formatCurrency(sub) + '</span>';
+        itemsContainer.appendChild(div);
+    });
+    document.getElementById('review-total').textContent = formatCurrency(grandTotal);
+    document.getElementById('email-fallback').style.display = 'none';
+    document.getElementById('reviewModal').classList.add('active');
+}
+
+function sendFormalRequest() {
+    const quoteId = saveCurrentQuote();
+    const payload = buildFormspreePayload();
+
+    if (!FORMSPREE_URL || FORMSPREE_URL.includes('YOUR_FORM_ID')) {
+        const orderText = generateOrderTextForEmail();
+        navigator.clipboard.writeText(orderText).then(() => {
+            document.getElementById('email-fallback').style.display = 'block';
+            alert('Formspree not configured. Order copied to clipboard!\n\nPlease email it to: sales@ameridex.com');
+        }).catch(() => {
+            window.location.href = 'mailto:sales@ameridex.com?subject=' + encodeURIComponent('AmeriDex Quote Request - ' + quoteId) + '&body=' + encodeURIComponent(orderText);
+        });
+        return;
+    }
+
+    const submitBtn = document.getElementById('review-submit');
+    submitBtn.textContent = 'Sending...';
+    submitBtn.disabled = true;
+
+    fetch(FORMSPREE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(response => { if (!response.ok) throw new Error('Network error'); return response.json(); })
+    .then(() => {
+        document.getElementById('reviewModal').classList.remove('active');
+        document.getElementById('success-order-number').textContent = quoteId;
+        document.getElementById('success-confirmation').classList.add('visible');
+        currentQuote.status = 'submitted';
+        saveCurrentQuote();
+    })
+    .catch(() => {
+        const orderText = generateOrderTextForEmail();
+        navigator.clipboard.writeText(orderText).then(() => {
+            document.getElementById('email-fallback').style.display = 'block';
+        }).catch(() => {
+            window.location.href = 'mailto:sales@ameridex.com?subject=' + encodeURIComponent('AmeriDex Quote Request - ' + quoteId) + '&body=' + encodeURIComponent(orderText);
+        });
+    })
+    .finally(() => { submitBtn.textContent = 'Send to AmeriDex'; submitBtn.disabled = false; });
+}
+
+// ============================================
+// INITIALIZATION - ALL EVENT HANDLERS
+// ============================================
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadFromStorage();
+    if (dealerSettings.dealerCode && validateDealerCode(dealerSettings.dealerCode)) showMainApp();
+    else showLoginScreen();
+    initColorGrid();
+    updateColorSelection();
+    updateColorComparison();
+    updateConnectivityStatus();
+    renderSavedQuotes();
+    setQuoteMode('quick');
+
+    // Login
+    document.getElementById('login-btn').onclick = handleLogin;
+    document.getElementById('dealer-code-input').addEventListener('keypress', e => { if (e.key === 'Enter') handleLogin(); });
+    document.getElementById('logout-btn').onclick = handleLogout;
+
+    // Quote mode
+    document.getElementById('mode-quick').onclick = () => setQuoteMode('quick');
+    document.getElementById('mode-formal').onclick = () => setQuoteMode('formal');
+
+    // New Quote
+    document.getElementById('new-quote-btn').onclick = () => {
+        if (currentQuote.lineItems.length > 0 || document.getElementById('cust-name').value.trim() || document.getElementById('cust-email').value.trim()) {
+            if (!confirm('Start a new quote? This will clear the current form.')) return;
+        }
+        resetFormOnly();
+        document.getElementById('customer').scrollIntoView({ behavior: 'smooth' });
+    };
+
+    // Search
+    document.getElementById('quote-search').oninput = renderSavedQuotes;
+
+    // Calculator
+    document.getElementById('calc-btn').onclick = calculateOnly;
+    document.getElementById('add-suggestion-btn').onclick = addSuggestionToOrder;
+    document.getElementById('clear-calc-btn').onclick = () => { document.getElementById('calc-result-container').style.display = 'none'; lastCalculation = null; };
+    document.getElementById('orientation').onchange = updateDiagramOrientation;
+
+    // Customer
+    document.getElementById('cust-name').oninput = () => { updateCustomerProgress(); showCustomerLookup(searchCustomers(document.getElementById('cust-name').value)); };
+    document.getElementById('cust-email').oninput = updateCustomerProgress;
+    document.getElementById('cust-zip').oninput = updateCustomerProgress;
+    document.addEventListener('click', e => { if (!e.target.closest('.field-with-lookup')) document.getElementById('customer-lookup-results').classList.remove('visible'); });
+
+    // Options
+    document.getElementById('pic-frame').onchange = e => { document.getElementById('pic-frame-note').style.display = e.target.checked ? 'block' : 'none'; };
+    document.getElementById('stairs').onchange = e => { document.getElementById('stairs-note').style.display = e.target.checked ? 'block' : 'none'; };
+
+    // Add item
+    document.getElementById('add-row').onclick = () => { currentQuote.lineItems.push({ type: 'system', color: selectedColor1, length: 16, customLength: null, qty: 1, customDesc: '', customUnitPrice: 0 }); deletedItems = []; render(); updateTotalAndFasteners(); };
+
+    // Save/Reset
+    document.getElementById('save-quote-btn').onclick = () => { const id = saveCurrentQuote(); alert('Quote saved!\nQuote ID: ' + id); };
+    document.getElementById('reset').onclick = () => { if (currentQuote.lineItems.length > 0 && !confirm('Reset form?')) return; resetFormOnly(); };
+
+    // Print dropdown
+    document.getElementById('print-btn').onclick = e => { e.stopPropagation(); document.getElementById('print-dropdown').classList.toggle('active'); };
+    document.addEventListener('click', e => { if (!e.target.closest('#print-dropdown')) document.getElementById('print-dropdown').classList.remove('active'); });
+    document.getElementById('print-customer').onclick = () => { document.getElementById('print-dropdown').classList.remove('active'); if (!validateRequired()) return; showPrintPreview('customer'); };
+    document.getElementById('export-pdf').onclick = () => { document.getElementById('print-dropdown').classList.remove('active'); if (!validateRequired()) return; generatePDF(); };
+
+    // Print preview modal
+    document.getElementById('print-preview-print').onclick = printFromPreview;
+    document.getElementById('print-preview-cancel').onclick = () => { document.getElementById('printPreviewModal').classList.remove('active'); };
+    document.getElementById('print-preview-close').onclick = () => { document.getElementById('printPreviewModal').classList.remove('active'); };
+
+    // Main submit
+    document.getElementById('submit-btn').onclick = () => { if (!validateRequired()) return; if (currentMode === 'quick') showPrintPreview('customer'); else showReviewModal(); };
+
+    // Review modal
+    document.getElementById('review-close').onclick = () => { document.getElementById('reviewModal').classList.remove('active'); };
+    document.getElementById('review-back').onclick = () => { document.getElementById('reviewModal').classList.remove('active'); };
+    document.getElementById('review-submit').onclick = sendFormalRequest;
+
+    // Success modal
+    document.getElementById('success-close-btn').onclick = () => { document.getElementById('success-confirmation').classList.remove('visible'); resetFormOnly(); };
+    document.getElementById('success-continue-btn').onclick = () => { document.getElementById('success-confirmation').classList.remove('visible'); };
+
+    // Color modal
+    document.getElementById('modal-close').onclick = () => { document.getElementById('colorModal').classList.remove('active'); };
+
+    // Settings modal
+    document.getElementById('settings-btn').onclick = () => {
+        document.getElementById('settings-dealer-code').textContent = dealerSettings.dealerCode || 'N/A';
+        document.getElementById('settings-dealer-name').value = dealerSettings.dealerName || '';
+        document.getElementById('settings-dealer-contact').value = dealerSettings.dealerContact || '';
+        document.getElementById('settings-dealer-phone').value = dealerSettings.dealerPhone || '';
+        document.getElementById('settingsModal').classList.add('active');
+    };
+    document.getElementById('settings-close').onclick = () => { document.getElementById('settingsModal').classList.remove('active'); };
+    document.getElementById('settings-cancel').onclick = () => { document.getElementById('settingsModal').classList.remove('active'); };
+    document.getElementById('settings-save').onclick = () => {
+        dealerSettings.dealerName = document.getElementById('settings-dealer-name').value.trim();
+        dealerSettings.dealerContact = document.getElementById('settings-dealer-contact').value.trim();
+        dealerSettings.dealerPhone = document.getElementById('settings-dealer-phone').value.trim();
+        saveDealerSettings();
+        document.getElementById('settingsModal').classList.remove('active');
+        alert('Settings saved!');
+    };
+
+    // Timeout
+    document.getElementById('timeout-continue').onclick = continueSession;
+    document.getElementById('timeout-save-close').onclick = saveAndClose;
+
+    // Escape key closes modals
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') {
+            document.getElementById('colorModal').classList.remove('active');
+            document.getElementById('reviewModal').classList.remove('active');
+            document.getElementById('printPreviewModal').classList.remove('active');
+            document.getElementById('settingsModal').classList.remove('active');
+            document.getElementById('print-dropdown').classList.remove('active');
+        }
+    });
+
+    // Backdrop click closes modals
+    ['colorModal', 'reviewModal', 'printPreviewModal', 'settingsModal'].forEach(id => {
+        document.getElementById(id).addEventListener('click', e => { if (e.target.classList.contains('modal')) document.getElementById(id).classList.remove('active'); });
+    });
+});
+</script>
+<script src="ameridex-patches.js"></script>
+<script src="ameridex-api.js"></script>
+<script src="ameridex-pricing-fix.js"></script>
+<script src="ameridex-overrides.js"></script>
+<script src="ameridex-roles.js"></script>
+<script src="ameridex-admin.js"></script>
+<script src="ameridex-admin-customers.js"></script>
+</body>
+</html>
