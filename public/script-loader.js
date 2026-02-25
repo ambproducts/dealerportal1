@@ -15,11 +15,13 @@
 //   6. ameridex-roles.js             (GM/Frontdesk role system + override buttons)
 //   7. ameridex-admin.js             (Admin panel)
 //   8. ameridex-admin-customers.js   (Admin customer management)
+//   9. ameridex-admin-csv-fix.js     (CSV export formula injection prevention)
+//
+// v1.2 Changes (2026-02-25):
+//   - FIX: Added ameridex-admin-csv-fix.js (CSV formula injection patch)
 //
 // v1.1 Changes (2026-02-25):
 //   - FIX: Added ameridex-print-branding.js to load chain
-//          (was missing, causing branded print to only work if
-//          dealer-portal.html had a separate <script> tag)
 // ============================================================
 
 (function () {
@@ -33,7 +35,8 @@
         'ameridex-print-branding.js',
         'ameridex-roles.js',
         'ameridex-admin.js',
-        'ameridex-admin-customers.js'
+        'ameridex-admin-customers.js',
+        'ameridex-admin-csv-fix.js'
     ];
 
     let loaded = 0;
