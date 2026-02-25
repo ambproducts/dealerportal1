@@ -1,11 +1,30 @@
 /**
- * ameridex-print-branding.js
+ * ameridex-print-branding.js v1.1
  * Branded customer quote and dealer order form print/preview output.
  * Loaded after dealer-portal.html inline script.
+ *
+ * v1.1 Changes (2026-02-25):
+ *   - SECURITY: Added esc() HTML entity escaper
+ *   - SECURITY: All user-controlled strings now escaped before
+ *     injection into innerHTML (customer info, line items,
+ *     special instructions, shipping address, dealer info)
+ *   - Prevents XSS via crafted customer names, emails, addresses,
+ *     product descriptions, and special instructions
  */
 
 (function () {
   'use strict';
+
+  /* ── HTML entity escaper (XSS prevention) ── */
+  function esc(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
 
   /* ── Shared CSS injected into the print window ── */
   const PRINT_WINDOW_STYLES = `
@@ -80,10 +99,10 @@
   /* ── Build branded header HTML ── */
   function buildHeader(title, today, quoteId) {
     const ds = (typeof dealerSettings !== 'undefined') ? dealerSettings : {};
-    const dealerCode = ds.dealerCode || '';
-    const dealerName = ds.dealerName || '';
-    const dealerContact = ds.dealerContact || '';
-    const dealerPhone = ds.dealerPhone || '';
+    const dealerCode = esc(ds.dealerCode || '');
+    const dealerName = esc(ds.dealerName || '');
+    const dealerContact = esc(ds.dealerContact || '');
+    const dealerPhone = esc(ds.dealerPhone || '');
 
     let h = '';
     h += '<div class="print-preview-header">';
@@ -95,10 +114,10 @@
     h += '    </div>';
     h += '  </div>';
     h += '  <div class="print-preview-header-right">';
-    h += '    <div class="print-preview-doc-title">' + title + '</div>';
-    h += '    <div class="print-preview-meta-line">Date: ' + today + '</div>';
+    h += '    <div class="print-preview-doc-title">' + esc(title) + '</div>';
+    h += '    <div class="print-preview-meta-line">Date: ' + esc(today) + '</div>';
     if (quoteId) {
-      h += '  <div class="print-preview-meta-line">Quote #: ' + quoteId + '</div>';
+      h += '  <div class="print-preview-meta-line">Quote #: ' + esc(quoteId) + '</div>';
     }
     if (dealerCode) {
       h += '  <div class="print-preview-meta-line">Dealer Code: ' + dealerCode + '</div>';
@@ -124,11 +143,11 @@
       return el ? el.value : '';
     };
 
-    const custName = val('cust-name') || 'N/A';
-    const custEmail = val('cust-email') || 'N/A';
-    const custZip = val('cust-zip') || 'N/A';
-    const custCompany = val('cust-company');
-    const custPhone = val('cust-phone');
+    const custName = esc(val('cust-name') || 'N/A');
+    const custEmail = esc(val('cust-email') || 'N/A');
+    const custZip = esc(val('cust-zip') || 'N/A');
+    const custCompany = esc(val('cust-company'));
+    const custPhone = esc(val('cust-phone'));
 
     let h = '<h2>Customer Information</h2>';
     h += '<table>';
@@ -179,30 +198,30 @@
       const sub = (typeof getItemSubtotal === 'function') ? getItemSubtotal(item) : 0;
       grandTotal += sub;
 
-      const productName = (item.type === 'custom' && item.customDesc) ? item.customDesc : prod.name;
+      const productName = esc((item.type === 'custom' && item.customDesc) ? item.customDesc : prod.name);
 
       let lengthDisplay = '';
       if (item.type === 'dexerdry') {
-        lengthDisplay = (item.length || 0) + ' ft box';
+        lengthDisplay = esc((item.length || 0) + ' ft box');
       } else if (prod.isFt) {
         const len = item.length === 'custom' ? (item.customLength || 0) : (item.length || 0);
-        lengthDisplay = len ? (len + ' ft') : '';
+        lengthDisplay = len ? esc(len + ' ft') : '';
       }
 
-      const colorDisplay = prod.hasColor ? (item.color || '') : '';
+      const colorDisplay = prod.hasColor ? esc(item.color || '') : '';
 
       h += '<tr>';
       h += '<td>' + productName + '</td>';
       h += '<td>' + colorDisplay + '</td>';
       h += '<td>' + lengthDisplay + '</td>';
-      h += '<td style="text-align:center;">' + (item.qty || 0) + '</td>';
-      h += '<td style="text-align:right;">' + ((typeof formatCurrency === 'function') ? formatCurrency(sub) : ('$' + sub.toFixed(2))) + '</td>';
+      h += '<td style="text-align:center;">' + (parseInt(item.qty, 10) || 0) + '</td>';
+      h += '<td style="text-align:right;">$' + ((typeof formatCurrency === 'function') ? formatCurrency(sub) : sub.toFixed(2)) + '</td>';
       h += '</tr>';
     });
 
     h += '<tr class="total-row">';
     h += '<td colspan="4" style="text-align:right;">Estimated Total:</td>';
-    h += '<td style="text-align:right;color:#1e40af;">' + ((typeof formatCurrency === 'function') ? formatCurrency(grandTotal) : ('$' + grandTotal.toFixed(2))) + '</td>';
+    h += '<td style="text-align:right;color:#1e40af;">$' + ((typeof formatCurrency === 'function') ? formatCurrency(grandTotal) : grandTotal.toFixed(2)) + '</td>';
     h += '</tr>';
 
     h += '</tbody></table>';
@@ -215,9 +234,12 @@
     const special = el ? el.value : '';
     if (!special) return '';
 
+    // Escape first, THEN convert newlines to <br> for safe display
+    const safeSpecial = esc(special).replace(/\n/g, '<br>');
+
     let h = '<h2>Special Instructions</h2>';
-    h += '<div style="background:#f9fafb;border-radius:6px;padding:10px;border:1px solid #e5e7eb;white-space:pre-wrap;">';
-    h += special;
+    h += '<div style="background:#f9fafb;border-radius:6px;padding:10px;border:1px solid #e5e7eb;">';
+    h += safeSpecial;
     h += '</div>';
     return h;
   }
@@ -233,10 +255,12 @@
 
     let h = '<h2>Shipping &amp; Delivery</h2>';
     if (shipAddr) {
-      h += '<p style="margin:6px 0;"><strong>Address:</strong><br>' + shipAddr.replace(/\n/g, '<br>') + '</p>';
+      // Escape first, THEN convert newlines to <br> for safe display
+      const safeAddr = esc(shipAddr).replace(/\n/g, '<br>');
+      h += '<p style="margin:6px 0;"><strong>Address:</strong><br>' + safeAddr + '</p>';
     }
     if (delDate) {
-      h += '<p style="margin:6px 0;"><strong>Preferred Delivery Date:</strong> ' + delDate + '</p>';
+      h += '<p style="margin:6px 0;"><strong>Preferred Delivery Date:</strong> ' + esc(delDate) + '</p>';
     }
     return h;
   }
@@ -311,5 +335,5 @@
     }
   };
 
-  console.log('[ameridex-print-branding] Branded print overrides loaded.');
+  console.log('[ameridex-print-branding] v1.1 loaded (XSS-safe).');
 })();
