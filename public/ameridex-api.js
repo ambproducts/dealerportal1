@@ -1,12 +1,18 @@
 // ============================================================
-// AmeriDex Dealer Portal - API Integration Patch v2.4
-// Date: 2026-02-16
+// AmeriDex Dealer Portal - API Integration Patch v2.5
+// Date: 2026-02-26
 // ============================================================
 // REQUIRES: ameridex-patches.js (v1.0+) loaded first
 //
 // Load order in dealer-portal.html (before </body>):
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
+//
+// v2.5 Changes (2026-02-26):
+//   - FIX: Expose applyTierPricing to window object so admin panel
+//     can call it to refresh pricing after product edits. This
+//     allows ameridex-admin.js refreshPricingNow() to trigger
+//     pricing updates in active dealer quotes.
 //
 // v2.4 Changes (2026-02-16):
 //   - FIX: Dispatch 'ameridex-login' custom event after both
@@ -443,6 +449,7 @@
     //       is a valid finite number. This prevents the $undefined
     //       display bug caused by missing price fields in the
     //       server response.
+    // v2.5: Exposed to window for admin panel pricing refresh.
     // ----------------------------------------------------------
     function isValidPrice(val) {
         if (val === undefined || val === null) return false;
@@ -483,6 +490,9 @@
                 console.warn('[Pricing] Could not load tier pricing, using defaults:', err.message);
             });
     }
+
+    // v2.5: Expose applyTierPricing to window for admin panel
+    window.applyTierPricing = applyTierPricing;
 
 
     // ----------------------------------------------------------
@@ -1079,5 +1089,5 @@
         tryResumeSession();
     }
 
-    console.log('[AmeriDex API] v2.4 loaded: Auth + API integration active.');
+    console.log('[AmeriDex API] v2.5 loaded: Auth + API integration active.');
 })();
