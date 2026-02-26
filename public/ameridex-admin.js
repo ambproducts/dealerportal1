@@ -1,6 +1,6 @@
 // ============================================================
-// AmeriDex Dealer Portal - Admin Panel v1.7
-// Date: 2026-02-25
+// AmeriDex Dealer Portal - Admin Panel v1.8
+// Date: 2026-02-26
 // ============================================================
 // REQUIRES: ameridex-api.js (v2.1+) loaded first
 //
@@ -8,6 +8,13 @@
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
 //   <script src="ameridex-admin.js"></script>
+//
+// v1.8 Changes (2026-02-26):
+//   - ADD: refreshPricingNow() helper to trigger applyTierPricing()
+//     after product and pricing tier changes. This ensures dealer
+//     quotes page immediately reflects updated prices without reload.
+//   - FIX: Product saves, toggles, creates, and tier updates now
+//     refresh pricing on the quotes page in real-time.
 //
 // v1.7 Changes (2026-02-25):
 //   - REPLACE: editProduct() prompt() chain with full inline edit form.
@@ -529,6 +536,16 @@
     var _allProducts = [];
     var _pricingTiers = [];
 
+    // Helper to refresh pricing on the dealer quotes page after product/tier changes
+    function refreshPricingNow() {
+        if (typeof window.applyTierPricing === 'function') {
+            try {
+                var p = window.applyTierPricing();
+                if (p && typeof p.catch === 'function') p.catch(function () {});
+            } catch (e) {}
+        }
+    }
+
     function showAlert(containerId, msg, type) {
         var el = document.getElementById(containerId);
         if (!el) return;
@@ -979,11 +996,12 @@
                 document.getElementById('admin-new-prod-flat').value = 'no';
                 document.getElementById('admin-add-product-details').removeAttribute('open');
                 loadProducts();
+                refreshPricingNow();
             })
             .catch(function (err) { showAlert('admin-product-alert', 'Failed: ' + esc(err.message), 'error'); });
     });
 
-    // ---- Inline Edit Product (v1.7) ----
+    // Inline Edit Product (v1.7)
     function editProduct(id) {
         var prod = _allProducts.find(function (p) { return p.id === id; });
         if (!prod) return;
@@ -1057,11 +1075,8 @@
             '</div>';
 
         editRow.style.display = 'table-row';
-
-        // Scroll the edit form into view
         editRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
-        // Wire up Cancel and Save buttons
         document.getElementById('cancel-edit-' + id).addEventListener('click', function () { cancelEditProduct(id); });
         document.getElementById('cancel-edit2-' + id).addEventListener('click', function () { cancelEditProduct(id); });
         document.getElementById('save-edit-' + id).addEventListener('click', function () { saveEditProduct(id); });
@@ -1112,6 +1127,7 @@
             .then(function () {
                 showAlert('admin-product-alert', 'Product "' + esc(newName) + '" updated successfully!', 'success');
                 loadProducts();
+                refreshPricingNow();
             })
             .catch(function (err) {
                 if (saveBtn) { saveBtn.textContent = 'Save Changes'; saveBtn.disabled = false; }
@@ -1122,13 +1138,16 @@
     function toggleProduct(id) {
         var prod = _allProducts.find(function (p) { return p.id === id; });
         if (!prod) return;
-        // Normalize: products default to active when isActive is undefined/null
         var currentlyActive = prod.isActive !== false;
         var action = currentlyActive ? 'disable' : 'enable';
         if (!confirm('Are you sure you want to ' + action + ' "' + prod.name + '"?')) return;
 
         _api('PUT', '/api/admin/products/' + encodeURIComponent(id), { isActive: !currentlyActive })
-            .then(function () { showAlert('admin-product-alert', 'Product ' + action + 'd!', 'success'); loadProducts(); })
+            .then(function () { 
+                showAlert('admin-product-alert', 'Product ' + action + 'd!', 'success'); 
+                loadProducts();
+                refreshPricingNow();
+            })
             .catch(function (err) { showAlert('admin-product-alert', 'Failed: ' + esc(err.message), 'error'); });
     }
 
@@ -1150,7 +1169,6 @@
         var container = document.getElementById('admin-pricing-list');
         container.innerHTML = '<div class="admin-loading">Loading pricing tiers...</div>';
 
-        // Load both tiers and products in parallel
         Promise.all([
             _api('GET', '/api/admin/pricing-tiers'),
             _api('GET', '/api/admin/products')
@@ -1169,7 +1187,6 @@
         var container = document.getElementById('admin-pricing-list');
         if (!_pricingTiers || _pricingTiers.length === 0) { container.innerHTML = '<div class="admin-empty">No pricing tiers configured</div>'; return; }
 
-        // Filter to only active, non-custom products for the preview
         var previewProducts = _allProducts.filter(function (p) {
             return p.isActive !== false && p.id !== 'custom';
         });
@@ -1193,7 +1210,6 @@
             html += '<div class="admin-tier-products">';
 
             previewProducts.forEach(function (prod) {
-                // Check for per-product tier override
                 var prodMult = mult;
                 var isLocked = false;
                 if (prod.tierOverrides && prod.tierOverrides[slug] && prod.tierOverrides[slug].multiplier !== undefined) {
@@ -1219,7 +1235,6 @@
 
         container.innerHTML = html;
 
-        // Live preview
         container.querySelectorAll('.tier-multiplier-input').forEach(function (input) {
             input.addEventListener('input', function () {
                 var tIdx = input.getAttribute('data-tier');
@@ -1259,11 +1274,25 @@
             }
         });
 
-        if (promises.length === 0) { saveBtn.textContent = 'Save All Changes'; saveBtn.disabled = false; showAlert('admin-pricing-alert', 'No changes to save', 'success'); return; }
+        if (promises.length === 0) { 
+            saveBtn.textContent = 'Save All Changes'; 
+            saveBtn.disabled = false; 
+            showAlert('admin-pricing-alert', 'No changes to save', 'success'); 
+            return; 
+        }
 
         Promise.all(promises)
-            .then(function (saved) { saveBtn.textContent = 'Save All Changes'; saveBtn.disabled = false; showAlert('admin-pricing-alert', 'Saved ' + saved.length + ' tier(s): ' + saved.join(', '), 'success'); })
-            .catch(function (err) { saveBtn.textContent = 'Save All Changes'; saveBtn.disabled = false; showAlert('admin-pricing-alert', 'Save failed: ' + esc(err.message), 'error'); });
+            .then(function (saved) { 
+                saveBtn.textContent = 'Save All Changes'; 
+                saveBtn.disabled = false; 
+                showAlert('admin-pricing-alert', 'Saved ' + saved.length + ' tier(s): ' + saved.join(', '), 'success'); 
+                refreshPricingNow();
+            })
+            .catch(function (err) { 
+                saveBtn.textContent = 'Save All Changes'; 
+                saveBtn.disabled = false; 
+                showAlert('admin-pricing-alert', 'Save failed: ' + esc(err.message), 'error'); 
+            });
     });
 
 
@@ -1496,5 +1525,5 @@
     }
 
 
-    console.log('[AmeriDex Admin] v1.7 loaded.');
+    console.log('[AmeriDex Admin] v1.8 loaded.');
 })();
