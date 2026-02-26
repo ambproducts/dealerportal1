@@ -1,6 +1,6 @@
 // ============================================================
-// AmeriDex Dealer Portal - Patch File v1.3
-// Date: 2026-02-14
+// AmeriDex Dealer Portal - Patch File v1.4
+// Date: 2026-02-25
 // ============================================================
 // HOW TO USE:
 //   Add this <script> tag at the very bottom of dealer-portal.html,
@@ -85,6 +85,11 @@
 
     // ===========================================================
     // PATCH 5: XSS-Safe generatePrintHTML()
+    //
+    // NOTE: This is a baseline safe version. If ameridex-print-branding.js
+    // loads successfully (via PATCH 6 below), it will override this
+    // function with the fully branded version including the AmeriDex
+    // logo, navy/red color scheme, and professional footer.
     // ===========================================================
     window.generatePrintHTML = function (type) {
         var today = new Date().toLocaleDateString('en-US', {
@@ -115,7 +120,6 @@
         html += '<td>' + (escapeHTML(document.getElementById('cust-email').value) || 'N/A') + '</td></tr>';
         html += '<tr><td style="padding:3px 10px 3px 0;color:#666;"><strong>Zip Code</strong></td>';
         html += '<td>' + (escapeHTML(document.getElementById('cust-zip').value) || 'N/A') + '</td></tr>';
-
         var company = document.getElementById('cust-company').value;
         if (company) {
             html += '<tr><td style="padding:3px 10px 3px 0;color:#666;"><strong>Company</strong></td>';
@@ -128,71 +132,63 @@
         }
         html += '</table></div>';
 
-        html += '<div style="margin-bottom:20px;">';
-        html += '<h2 style="color:#374151;font-size:1.1rem;border-bottom:1px solid #ddd;padding-bottom:5px;">Order Details</h2>';
-        html += '<table style="width:100%;border-collapse:collapse;">';
-        html += '<thead><tr style="background:#f3f4f6;">';
+        var hasPicFrame = document.getElementById('pic-frame').checked;
+        var hasStairs = document.getElementById('stairs').checked;
+        if (hasPicFrame || hasStairs) {
+            html += '<div style="margin-bottom:20px;"><h2 style="color:#374151;font-size:1.1rem;border-bottom:1px solid #ddd;padding-bottom:5px;">Options</h2>';
+            if (hasPicFrame) html += '<p style="margin:5px 0;">&#10003; Picture Framing</p>';
+            if (hasStairs) html += '<p style="margin:5px 0;">&#10003; Stairs</p>';
+            html += '</div>';
+        }
+
+        html += '<div style="margin-bottom:20px;"><h2 style="color:#374151;font-size:1.1rem;border-bottom:1px solid #ddd;padding-bottom:5px;">Order Items</h2>';
+        html += '<table style="width:100%;border-collapse:collapse;margin-top:10px;"><thead><tr style="background:#f3f4f6;">';
         html += '<th style="border:1px solid #ddd;padding:10px;text-align:left;">Product</th>';
         html += '<th style="border:1px solid #ddd;padding:10px;text-align:left;">Color</th>';
         html += '<th style="border:1px solid #ddd;padding:10px;text-align:left;">Length</th>';
         html += '<th style="border:1px solid #ddd;padding:10px;text-align:center;">Qty</th>';
-        html += '<th style="border:1px solid #ddd;padding:10px;text-align:right;">Subtotal</th>';
-        html += '</tr></thead><tbody>';
+        html += '<th style="border:1px solid #ddd;padding:10px;text-align:right;">Subtotal</th></tr></thead><tbody>';
 
         var grandTotal = 0;
         currentQuote.lineItems.forEach(function (item) {
             var prod = PRODUCTS[item.type] || PRODUCTS.custom;
             var sub = getItemSubtotal(item);
             grandTotal += sub;
-            var productName = (item.type === 'custom')
-                ? escapeHTML(item.customDesc || '???')
-                : escapeHTML(prod.name);
             var lengthDisplay = '';
-            if (item.type === 'dexerdry') {
-                lengthDisplay = item.length + ' ft box';
-            } else if (prod.isFt) {
-                var len = (item.length === 'custom') ? (item.customLength || 0) : (item.length || 0);
+            if (item.type === 'dexerdry') lengthDisplay = item.length + ' ft box';
+            else if (prod.isFt) {
+                var len = item.length === 'custom' ? (item.customLength || 0) : (item.length || 0);
                 lengthDisplay = len + ' ft';
             }
-            html += '<tr>';
-            html += '<td style="border:1px solid #ddd;padding:10px;">' + productName + '</td>';
-            html += '<td style="border:1px solid #ddd;padding:10px;">' + (prod.hasColor ? escapeHTML(item.color) : '') + '</td>';
-            html += '<td style="border:1px solid #ddd;padding:10px;">' + lengthDisplay + '</td>';
+            var productName = item.type === 'custom' && item.customDesc ? escapeHTML(item.customDesc) : escapeHTML(prod.name);
+            html += '<tr><td style="border:1px solid #ddd;padding:10px;">' + productName + '</td>';
+            html += '<td style="border:1px solid #ddd;padding:10px;">' + (prod.hasColor ? escapeHTML(item.color || '') : '') + '</td>';
+            html += '<td style="border:1px solid #ddd;padding:10px;">' + escapeHTML(lengthDisplay) + '</td>';
             html += '<td style="border:1px solid #ddd;padding:10px;text-align:center;">' + item.qty + '</td>';
-            html += '<td style="border:1px solid #ddd;padding:10px;text-align:right;">$' + formatCurrency(sub) + '</td>';
-            html += '</tr>';
+            html += '<td style="border:1px solid #ddd;padding:10px;text-align:right;">' + formatCurrency(sub) + '</td></tr>';
         });
 
-        html += '<tr style="background:#f3f4f6;font-weight:bold;">';
-        html += '<td colspan="4" style="border:1px solid #ddd;padding:12px;text-align:right;">ESTIMATED TOTAL</td>';
-        html += '<td style="border:1px solid #ddd;padding:12px;text-align:right;color:#1e40af;font-size:1.1rem;">$' + formatCurrency(grandTotal) + '</td>';
-        html += '</tr></tbody></table></div>';
+        html += '<tr style="background:#f3f4f6;font-weight:bold;"><td colspan="4" style="border:1px solid #ddd;padding:12px;text-align:right;">ESTIMATED TOTAL:</td>';
+        html += '<td style="border:1px solid #ddd;padding:12px;text-align:right;color:#1e40af;font-size:1.1rem;">' + formatCurrency(grandTotal) + '</td></tr></tbody></table></div>';
 
         var special = document.getElementById('special-instr').value;
         if (special) {
-            html += '<div style="margin-bottom:20px;">';
-            html += '<h2 style="color:#374151;font-size:1.1rem;border-bottom:1px solid #ddd;padding-bottom:5px;">Special Instructions</h2>';
+            html += '<div style="margin-bottom:20px;"><h2 style="color:#374151;font-size:1.1rem;border-bottom:1px solid #ddd;padding-bottom:5px;">Special Instructions</h2>';
             html += '<p style="white-space:pre-wrap;background:#f9fafb;padding:10px;border-radius:5px;">' + escapeHTML(special) + '</p></div>';
         }
 
         var shipAddr = document.getElementById('ship-addr').value;
         var delDate = document.getElementById('del-date').value;
         if (shipAddr || delDate) {
-            html += '<div style="margin-bottom:20px;">';
-            html += '<h2 style="color:#374151;font-size:1.1rem;border-bottom:1px solid #ddd;padding-bottom:5px;">Shipping & Delivery</h2>';
-            if (shipAddr) {
-                html += '<p><strong>Address:</strong><br>' + escapeHTML(shipAddr).replace(/\n/g, '<br>') + '</p>';
-            }
-            if (delDate) {
-                html += '<p><strong>Preferred Date:</strong> ' + escapeHTML(delDate) + '</p>';
-            }
+            html += '<div style="margin-bottom:20px;"><h2 style="color:#374151;font-size:1.1rem;border-bottom:1px solid #ddd;padding-bottom:5px;">Shipping &amp; Delivery</h2>';
+            if (shipAddr) html += '<p><strong>Address:</strong><br>' + escapeHTML(shipAddr).replace(/\n/g, '<br>') + '</p>';
+            if (delDate) html += '<p><strong>Preferred Date:</strong> ' + escapeHTML(delDate) + '</p>';
             html += '</div>';
         }
 
         if (isCustomer) {
             html += '<div style="margin-top:30px;padding-top:15px;border-top:1px solid #ddd;font-size:0.85rem;color:#666;">';
-            html += '<p><strong>Disclaimer:</strong> This is an estimate only. Final pricing subject to confirmation by AM Building Products / AmeriDex. ';
-            html += 'Prices do not include shipping, taxes, or installation unless otherwise noted.</p></div>';
+            html += '<p><strong>Disclaimer:</strong> This is an estimate only. Final pricing subject to confirmation by AM Building Products / AmeriDex. Prices do not include shipping, taxes, or installation unless otherwise noted.</p></div>';
         }
 
         html += '</div>';
@@ -201,511 +197,45 @@
 
 
     // ===========================================================
-    // PATCH 6: XSS-Safe renderSavedQuotes()
+    // PATCH 6: Bootstrap Loader for Additional Scripts
+    //
+    // Dynamically loads scripts that are not in the static <script>
+    // tags of dealer-portal.html. These scripts override functions
+    // defined above (e.g., generatePrintHTML gets replaced by the
+    // branded version from ameridex-print-branding.js).
+    //
+    // Load order matters: print-branding must load before ui-fixes.
     // ===========================================================
-    var _originalRenderSavedQuotes = window.renderSavedQuotes;
-    window.renderSavedQuotes = function () {
-        var list = document.getElementById('saved-quotes-list');
-        var searchQuery = (document.getElementById('quote-search').value || '').toLowerCase();
-        var filtered = savedQuotes;
-        if (searchQuery) {
-            filtered = savedQuotes.filter(function (q) {
-                return (q.customer.name && q.customer.name.toLowerCase().includes(searchQuery))
-                    || (q.customer.company && q.customer.company.toLowerCase().includes(searchQuery))
-                    || (q.quoteId && q.quoteId.toLowerCase().includes(searchQuery));
-            });
-        }
-        filtered.sort(function (a, b) {
-            return new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt);
-        });
-        if (filtered.length === 0) {
-            list.innerHTML = '<div class="no-saved-quotes">' +
-                (searchQuery ? 'No quotes match your search' : 'No saved quotes yet') + '</div>';
+    var EXTRA_SCRIPTS = [
+        'ameridex-print-branding.js',
+        'ameridex-ui-fixes.js'
+    ];
+
+    var scriptIndex = 0;
+
+    function loadNextScript() {
+        if (scriptIndex >= EXTRA_SCRIPTS.length) {
+            console.log('[ameridex-patches] PATCH 6: All extra scripts loaded.');
             return;
         }
-        list.innerHTML = '';
-        filtered.forEach(function (quote, idx) {
-            var item = document.createElement('div');
-            item.className = 'saved-quote-item';
-            var dateStr = new Date(quote.updatedAt || quote.createdAt).toLocaleDateString();
-            var total = quote.lineItems.reduce(function (sum, li) {
-                return sum + getItemSubtotalFromData(li);
-            }, 0);
-            item.innerHTML =
-                '<div class="saved-quote-info">' +
-                    '<div class="saved-quote-id">' + (escapeHTML(quote.quoteId) || 'Draft') + '</div>' +
-                    '<div class="saved-quote-customer">' +
-                        (escapeHTML(quote.customer.name) || 'No name') +
-                        (quote.customer.company ? ' &middot; ' + escapeHTML(quote.customer.company) : '') +
-                    '</div>' +
-                    '<div class="saved-quote-date">' + dateStr + ' &middot; ' + quote.lineItems.length + ' items</div>' +
-                '</div>' +
-                '<div class="saved-quote-total">$' + formatCurrency(total) + '</div>' +
-                '<div class="saved-quote-actions">' +
-                    '<button type="button" class="btn-load" data-idx="' + idx + '">Load</button>' +
-                    '<button type="button" class="btn-delete-quote" data-idx="' + idx + '">Delete</button>' +
-                '</div>';
-            list.appendChild(item);
-        });
-
-        list.querySelectorAll('.btn-load').forEach(function (btn) {
-            btn.addEventListener('click', function () {
-                var i = parseInt(btn.getAttribute('data-idx'), 10);
-                if (typeof window.loadQuote === 'function') {
-                    var realIdx = savedQuotes.indexOf(filtered[i]);
-                    if (realIdx > -1) window.loadQuote(realIdx);
-                }
-            });
-        });
-        list.querySelectorAll('.btn-delete-quote').forEach(function (btn) {
-            btn.addEventListener('click', function () {
-                var i = parseInt(btn.getAttribute('data-idx'), 10);
-                if (confirm('Delete this quote?')) {
-                    var qIdx = savedQuotes.indexOf(filtered[i]);
-                    if (qIdx > -1) savedQuotes.splice(qIdx, 1);
-                    saveToStorage();
-                    renderSavedQuotes();
-                }
-            });
-        });
-    };
-
-
-    // ===========================================================
-    // PATCH 7: XSS-Safe showCustomerLookup()
-    // ===========================================================
-    window.showCustomerLookup = function (results) {
-        var container = document.getElementById('customer-lookup-results');
-        if (results.length === 0) {
-            container.classList.remove('visible');
-            return;
-        }
-        container.innerHTML = '';
-        results.forEach(function (customer) {
-            var item = document.createElement('div');
-            item.className = 'customer-lookup-item';
-            item.innerHTML =
-                '<div class="customer-lookup-name">' + escapeHTML(customer.name) +
-                    (customer.company ? ' (' + escapeHTML(customer.company) + ')' : '') +
-                '</div>' +
-                '<div class="customer-lookup-email">' + escapeHTML(customer.email) + '</div>';
-            item.addEventListener('click', function () {
-                document.getElementById('cust-name').value = customer.name;
-                document.getElementById('cust-email').value = customer.email;
-                if (customer.company) document.getElementById('cust-company').value = customer.company;
-                if (customer.phone) document.getElementById('cust-phone').value = customer.phone;
-                container.classList.remove('visible');
-                updateCustomerProgress();
-            });
-            container.appendChild(item);
-        });
-        container.classList.add('visible');
-    };
-
-
-    // ===========================================================
-    // PATCH 8: XSS-Safe showReviewModal()
-    // ===========================================================
-    var _originalShowReviewModal = window.showReviewModal;
-    window.showReviewModal = function () {
-        document.getElementById('review-name').textContent =
-            document.getElementById('cust-name').value || 'N/A';
-        document.getElementById('review-email').textContent =
-            document.getElementById('cust-email').value || 'N/A';
-        document.getElementById('review-zip').textContent =
-            document.getElementById('cust-zip').value || 'N/A';
-
-        var itemsContainer = document.getElementById('review-items');
-        itemsContainer.innerHTML = '';
-        var grandTotal = 0;
-
-        currentQuote.lineItems.forEach(function (item) {
-            var prod = PRODUCTS[item.type] || PRODUCTS.custom;
-            var sub = getItemSubtotal(item);
-            grandTotal += sub;
-            var productName = (item.type === 'custom')
-                ? (item.customDesc || '???')
-                : prod.name;
-
-            var div = document.createElement('div');
-            div.className = 'review-item';
-            div.innerHTML =
-                '<span>' + escapeHTML(productName) +
-                    (prod.hasColor && item.color ? ' (' + escapeHTML(item.color) + ')' : '') +
-                    ' x ' + item.qty +
-                '</span>' +
-                '<span>$' + formatCurrency(sub) + '</span>';
-            itemsContainer.appendChild(div);
-        });
-
-        document.getElementById('review-total').textContent = '$' + formatCurrency(grandTotal);
-        document.getElementById('email-fallback').style.display = 'none';
-        document.getElementById('reviewModal').classList.add('active');
-    };
-
-
-    // ===========================================================
-    // PATCH 9: Empty State for Line Items
-    // ===========================================================
-    var _originalRenderDesktop = window.renderDesktop;
-    window.renderDesktop = function () {
-        var tbody = document.querySelector('#line-items tbody');
-        if (currentQuote.lineItems.length === 0) {
-            tbody.innerHTML = '';
-            var emptyRow = document.createElement('tr');
-            var emptyCell = document.createElement('td');
-            emptyCell.colSpan = 6;
-            emptyCell.style.cssText = 'text-align:center;padding:2rem;color:#6b7280;font-size:0.9rem;';
-            emptyCell.textContent = 'No items yet. Click "+ Add Line Item" below to get started.';
-            emptyRow.appendChild(emptyCell);
-            tbody.appendChild(emptyRow);
-            return;
-        }
-        _originalRenderDesktop();
-    };
-
-    var _originalRenderMobile = window.renderMobile;
-    window.renderMobile = function () {
-        var container = document.getElementById('mobile-items-container');
-        if (currentQuote.lineItems.length === 0) {
-            container.innerHTML = '<div style="text-align:center;padding:2rem;color:#6b7280;font-size:0.9rem;">No items yet. Tap "+ Add Line Item" below to get started.</div>';
-            return;
-        }
-        _originalRenderMobile();
-    };
-
-
-    // ===========================================================
-    // PATCH 10: Dismiss Customer Lookup on Outside Click
-    // ===========================================================
-    document.addEventListener('click', function (e) {
-        var lookup = document.getElementById('customer-lookup-results');
-        var nameField = document.getElementById('cust-name');
-        if (lookup && nameField && !nameField.contains(e.target) && !lookup.contains(e.target)) {
-            lookup.classList.remove('visible');
-        }
-    });
-
-
-    // ===========================================================
-    // PATCH 11: Harden Quantity Input Against NaN
-    // ===========================================================
-    document.getElementById('order-form').addEventListener('input', function (e) {
-        if (e.target.classList.contains('qty-input') || (e.target.type === 'number' && e.target.min === '1')) {
-            var parsed = parseInt(e.target.value, 10);
-            if (isNaN(parsed) || parsed < 1) {
-                // safe fallback handled by existing oninput
-            }
-        }
-    });
-
-
-    // ===========================================================
-    // PATCH 12: Remove Duplicate Event Handlers from handleLogout
-    // ===========================================================
-    var _originalHandleLogout = window.handleLogout;
-    window.handleLogout = function () {
-        if (typeof _originalHandleLogout === 'function') {
-            _originalHandleLogout();
-        }
-        document.getElementById('success-close-btn').onclick = function () {
-            document.getElementById('success-confirmation').classList.remove('visible');
-            resetFormOnly();
-            setTimeout(function () {
-                document.getElementById('customer').scrollIntoView({ behavior: 'smooth' });
-            }, 100);
+        var src = EXTRA_SCRIPTS[scriptIndex];
+        var el = document.createElement('script');
+        el.src = src;
+        el.onload = function () {
+            console.log('[ameridex-patches] PATCH 6: Loaded ' + src);
+            scriptIndex++;
+            loadNextScript();
         };
-        document.getElementById('success-continue-btn').onclick = function () {
-            document.getElementById('success-confirmation').classList.remove('visible');
+        el.onerror = function () {
+            console.error('[ameridex-patches] PATCH 6: FAILED to load ' + src);
+            scriptIndex++;
+            loadNextScript();
         };
-    };
-
-
-    // ===========================================================
-    // PATCH 13: formatCurrency Consistency
-    // ===========================================================
-    var _originalUpdateTotalAndFasteners = window.updateTotalAndFasteners;
-    window.updateTotalAndFasteners = function () {
-        if (typeof _originalUpdateTotalAndFasteners === 'function') {
-            _originalUpdateTotalAndFasteners();
-        }
-        var el = document.getElementById('grand-total');
-        if (el && !el.textContent.startsWith('$')) {
-            el.textContent = '$' + el.textContent;
-        }
-        currentQuote.lineItems.forEach(function (item, i) {
-            var subCell = document.getElementById('sub-' + i);
-            if (subCell && !subCell.textContent.startsWith('$')) {
-                subCell.textContent = '$' + subCell.textContent;
-            }
-        });
-    };
-
-
-    // ===========================================================
-    // PATCH 14: Harden validateRequired() - Zip Format + Line
-    //           Item Completeness Checks
-    // ===========================================================
-    window.validateRequired = function () {
-        var valid = true;
-        var nameEl = document.getElementById('cust-name');
-        var emailEl = document.getElementById('cust-email');
-        var zipEl = document.getElementById('cust-zip');
-
-        document.getElementById('err-name').textContent = '';
-        document.getElementById('err-email').textContent = '';
-        document.getElementById('err-zip').textContent = '';
-
-        if (!nameEl.value.trim()) {
-            document.getElementById('err-name').textContent = 'Name is required';
-            valid = false;
-        }
-
-        if (!emailEl.value.trim()) {
-            document.getElementById('err-email').textContent = 'Email is required';
-            valid = false;
-        } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailEl.value.trim())) {
-            document.getElementById('err-email').textContent = 'Please enter a valid email';
-            valid = false;
-        }
-
-        var zipVal = zipEl.value.trim();
-        if (!zipVal) {
-            document.getElementById('err-zip').textContent = 'Zip code is required';
-            valid = false;
-        } else if (!/^\d{5}(-\d{4})?$/.test(zipVal)) {
-            document.getElementById('err-zip').textContent = 'Enter a valid US zip (e.g. 08742 or 08742-1234)';
-            valid = false;
-        }
-
-        if (currentQuote.lineItems.length === 0) {
-            alert('Please add at least one item to your order.');
-            valid = false;
-        }
-
-        var itemErrors = [];
-        currentQuote.lineItems.forEach(function (item, i) {
-            var prod = PRODUCTS[item.type] || PRODUCTS.custom;
-            var itemNum = i + 1;
-
-            if (item.type === 'custom') {
-                if (!item.customDesc || !item.customDesc.trim()) {
-                    itemErrors.push('Item ' + itemNum + ': Custom item is missing a description.');
-                }
-                if (!item.customUnitPrice || item.customUnitPrice <= 0) {
-                    itemErrors.push('Item ' + itemNum + ': Custom item needs a unit price greater than $0.');
-                }
-            }
-
-            if (prod.isFt) {
-                var len = (item.length === 'custom') ? (item.customLength || 0) : (item.length || 0);
-                if (len <= 0) {
-                    itemErrors.push('Item ' + itemNum + ': ' + prod.name + ' has no length selected.');
-                }
-            }
-
-            if (!item.qty || item.qty < 1 || isNaN(item.qty)) {
-                itemErrors.push('Item ' + itemNum + ': Quantity must be at least 1.');
-            }
-        });
-
-        if (itemErrors.length > 0) {
-            alert('Please fix the following line item issues:\n\n' + itemErrors.join('\n'));
-            valid = false;
-        }
-
-        if (!valid) {
-            document.getElementById('customer').scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-
-        return valid;
-    };
-
-
-    // ===========================================================
-    // PATCH 15: Sanitize generateOrderTextForEmail() Against
-    //           Newline Injection (Audit Fix #2)
-    // ===========================================================
-    // WHY: The email body uses a structured plain-text format
-    //      with section headers like "--- CUSTOMER INFORMATION ---".
-    //      Raw user input is concatenated directly. A malicious
-    //      or accidental value like:
-    //
-    //        Name: John\n\n--- LINE ITEMS ---\nFake Item: $0
-    //
-    //      would inject a spoofed LINE ITEMS section into the
-    //      email body, potentially misleading the AmeriDex team.
-    //
-    // FIX:
-    //   sanitizeLine(str)  - For single-line fields (name, email,
-    //     zip, company, phone, custom descriptions). Collapses
-    //     all \r\n, \n, \r into a single space.
-    //
-    //   sanitizeBlock(str) - For multi-line fields (special
-    //     instructions, internal notes, shipping address). These
-    //     legitimately contain newlines, so we only strip lines
-    //     that look like section-header fences (lines that are
-    //     mostly dashes/equals) to prevent structural spoofing.
-    //
-    //   Both utilities are also exposed on window for use by
-    //   other patches or future code.
-    // ---------------------------------------------------------
-
-    /**
-     * Collapse all newlines into spaces for single-line fields.
-     * Also trims leading/trailing whitespace.
-     */
-    window.sanitizeLine = function (str) {
-        if (!str) return '';
-        return String(str)
-            .replace(/[\r\n]+/g, ' ')
-            .replace(/\s{2,}/g, ' ')
-            .trim();
-    };
-
-    /**
-     * For multi-line fields: strip lines that look like section
-     * header fences (e.g. "--- LINE ITEMS ---", "===============").
-     * This prevents a user from injecting fake structure into the
-     * email body while still allowing legitimate multi-line text.
-     */
-    window.sanitizeBlock = function (str) {
-        if (!str) return '';
-        return String(str)
-            .split(/\r?\n/)
-            .filter(function (line) {
-                var trimmed = line.trim();
-                // Remove lines that are only dashes, equals, or
-                // look like "--- SOME HEADER ---"
-                if (/^[-=]{3,}$/.test(trimmed)) return false;
-                if (/^[-=]{2,}\s+.+\s+[-=]{2,}$/.test(trimmed)) return false;
-                return true;
-            })
-            .join('\n');
-    };
-
-    /**
-     * Override: generateOrderTextForEmail()
-     * Identical logic to the original but wraps every user-supplied
-     * value through sanitizeLine() or sanitizeBlock().
-     */
-    window.generateOrderTextForEmail = function () {
-        var today = new Date().toLocaleDateString('en-US', {
-            year: 'numeric', month: 'long', day: 'numeric'
-        });
-
-        var txt = '===============================================\n';
-        txt += '     AMERIDEX DEALER FORMAL QUOTE REQUEST\n';
-        txt += '===============================================\n\n';
-        txt += 'Date: ' + today + '\n';
-        txt += 'Dealer Code: ' + sanitizeLine(dealerSettings.dealerCode || 'N/A') + '\n';
-        if (currentQuote.quoteId) {
-            txt += 'Quote ID: ' + sanitizeLine(currentQuote.quoteId) + '\n';
-        }
-
-        txt += '\n--- CUSTOMER INFORMATION ---\n';
-        txt += 'Name: ' + sanitizeLine(document.getElementById('cust-name').value) + '\n';
-        txt += 'Email: ' + sanitizeLine(document.getElementById('cust-email').value) + '\n';
-        txt += 'Zip Code: ' + sanitizeLine(document.getElementById('cust-zip').value) + '\n';
-        var company = document.getElementById('cust-company').value;
-        if (company) txt += 'Company: ' + sanitizeLine(company) + '\n';
-        var phone = document.getElementById('cust-phone').value;
-        if (phone) txt += 'Phone: ' + sanitizeLine(phone) + '\n';
-
-        txt += '\n--- LINE ITEMS ---\n\n';
-        var grandTotal = 0;
-        currentQuote.lineItems.forEach(function (item, i) {
-            var prod = PRODUCTS[item.type] || PRODUCTS.custom;
-            var price = getItemPrice(item);
-            var sub = getItemSubtotal(item);
-            grandTotal += sub;
-            var productName = (item.type === 'custom' && item.customDesc)
-                ? sanitizeLine(item.customDesc)
-                : prod.name;
-
-            txt += 'Item ' + (i + 1) + ': ' + productName + '\n';
-            if (prod.hasColor && item.color) {
-                txt += '   Color: ' + sanitizeLine(item.color) + '\n';
-            }
-            if (item.type === 'dexerdry') {
-                txt += '   Size: ' + item.length + ' ft box, Qty: ' + item.qty
-                    + ' (' + (item.length * item.qty) + ' ft total)\n';
-            } else if (prod.isFt) {
-                var len = (item.length === 'custom')
-                    ? (item.customLength || 0)
-                    : (item.length || 0);
-                txt += '   Length: ' + len + ' ft, Qty: ' + item.qty + '\n';
-            } else {
-                txt += '   Qty: ' + item.qty + '\n';
-            }
-            txt += '   Subtotal: ' + formatCurrency(sub) + '\n\n';
-        });
-
-        txt += '--- ESTIMATED TOTAL: ' + formatCurrency(grandTotal) + ' ---\n\n';
-
-        var special = document.getElementById('special-instr').value;
-        if (special) {
-            txt += 'SPECIAL INSTRUCTIONS:\n' + sanitizeBlock(special) + '\n\n';
-        }
-        var internal = document.getElementById('internal-notes').value;
-        if (internal) {
-            txt += 'INTERNAL DEALER NOTES:\n' + sanitizeBlock(internal) + '\n\n';
-        }
-        var shipAddr = document.getElementById('ship-addr').value;
-        if (shipAddr) {
-            txt += 'SHIPPING ADDRESS:\n' + sanitizeBlock(shipAddr) + '\n\n';
-        }
-        var delDate = document.getElementById('del-date').value;
-        if (delDate) {
-            txt += 'PREFERRED DELIVERY DATE: ' + sanitizeLine(delDate) + '\n\n';
-        }
-
-        txt += '===============================================\n';
-        txt += 'Please reply with a formal quote.\n';
-        txt += 'Contact: sales@ameridex.com\n';
-        return txt;
-    };
-
-    /**
-     * Override: buildFormspreePayload()
-     * Uses the patched generateOrderTextForEmail() and sanitizes
-     * top-level fields that go into the Formspree JSON body.
-     */
-    window.buildFormspreePayload = function () {
-        var grandTotal = 0;
-        currentQuote.lineItems.forEach(function (item) {
-            grandTotal += getItemSubtotal(item);
-        });
-        return {
-            _subject: 'AmeriDex Dealer Quote Request - '
-                + sanitizeLine(currentQuote.quoteId || 'New'),
-            dealerCode: sanitizeLine(dealerSettings.dealerCode || ''),
-            quoteId: sanitizeLine(currentQuote.quoteId || ''),
-            customerName: sanitizeLine(
-                document.getElementById('cust-name').value.trim()
-            ),
-            customerEmail: sanitizeLine(
-                document.getElementById('cust-email').value.trim()
-            ),
-            customerZip: sanitizeLine(
-                document.getElementById('cust-zip').value.trim()
-            ),
-            estimatedTotal: formatCurrency(grandTotal),
-            itemCount: currentQuote.lineItems.length,
-            orderDetails: window.generateOrderTextForEmail()
-        };
-    };
-
-
-    // ===========================================================
-    // INIT: Re-render to apply empty-state and $ fixes
-    // ===========================================================
-    if (typeof window.render === 'function') {
-        try { window.render(); } catch (e) { /* safe to ignore on login screen */ }
-    }
-    if (typeof window.updateTotalAndFasteners === 'function') {
-        try { window.updateTotalAndFasteners(); } catch (e) {}
+        document.body.appendChild(el);
     }
 
-    console.log('[AmeriDex Patches] v1.3 loaded: 15 patches applied.');
+    // Start loading after a short delay to ensure all other static
+    // scripts have finished executing first
+    setTimeout(loadNextScript, 50);
+
 })();
