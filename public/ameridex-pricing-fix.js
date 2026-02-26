@@ -1,6 +1,6 @@
 // ============================================================
-// AmeriDex Dealer Portal - Pricing Fix v1.2
-// Date: 2026-02-21
+// AmeriDex Dealer Portal - Pricing Fix v1.3
+// Date: 2026-02-25
 // ============================================================
 // FIXES:
 //   - formatCurrency() returning undefined for all inputs (v1.2)
@@ -10,6 +10,14 @@
 //   - Double-dollar-sign bug in post-render DOM scan (v1.1)
 //   - Broadened pattern matching for $undefined, $NaN, $null
 //   - MutationObserver safety net for late async renders
+//
+// v1.3 Changes (2026-02-25):
+//   - ADD: formatPrice() convenience wrapper that returns
+//     '$1,234.50' (with $ prefix and thousand separators).
+//     formatCurrency() remains a pure number formatter returning
+//     '1,234.50' to avoid the double-dollar-sign regression.
+//   - FIX: Document the formatCurrency vs formatPrice contract
+//     so callers can choose the right function.
 //
 // v1.2 Changes (2026-02-21):
 //   - ROOT CAUSE FIX: The inline formatCurrency() in
@@ -49,7 +57,14 @@
     //   - renderSavedQuotes (API Section 14)
     //   - updateTotalAndFasteners (Patch 13)
     //
-    // This override must load BEFORE any of those run.
+    // CONTRACT:
+    //   formatCurrency(value) -> string WITHOUT $ prefix
+    //     e.g. formatCurrency(1234.5) = '1,234.50'
+    //   formatPrice(value) -> string WITH $ prefix
+    //     e.g. formatPrice(1234.5) = '$1,234.50'
+    //
+    // Use formatCurrency() when you prepend '$' yourself.
+    // Use formatPrice() for complete display strings.
     // ----------------------------------------------------------
     window.formatCurrency = function (value) {
         if (value === undefined || value === null || isNaN(Number(value))) {
@@ -64,7 +79,20 @@
         return parts.join('.');
     };
 
-    console.log('[PricingFix] formatCurrency() overridden. Test: formatCurrency(1234.5) = ' + window.formatCurrency(1234.5));
+    // ----------------------------------------------------------
+    // 0b. formatPrice() - Convenience wrapper WITH $ prefix
+    // ----------------------------------------------------------
+    // Returns '$1,234.50' for display in UI strings where the
+    // caller does NOT prepend '$' themselves. This avoids the
+    // double-dollar-sign bug that occurred when formatCurrency()
+    // included the '$' prefix and callers also added one.
+    // ----------------------------------------------------------
+    window.formatPrice = function (value) {
+        return '$' + window.formatCurrency(value);
+    };
+
+    console.log('[PricingFix] formatCurrency(1234.5) = ' + window.formatCurrency(1234.5) + ' (no $ prefix)');
+    console.log('[PricingFix] formatPrice(1234.5) = ' + window.formatPrice(1234.5) + ' (with $ prefix)');
 
 
     // ----------------------------------------------------------
@@ -382,5 +410,5 @@
     startObserver();
 
 
-    console.log('[AmeriDex PricingFix] v1.2 loaded: formatCurrency fix + undefined price protection active.');
+    console.log('[AmeriDex PricingFix] v1.3 loaded: formatCurrency/formatPrice + undefined price protection active.');
 })();
