@@ -55,6 +55,10 @@ app.use('/api/admin/users', adminUserRoutes);
 // ----------------------------------------------------------
 // Fallback: serve index.html for SPA-like behavior
 // ----------------------------------------------------------
+app.get('/api/health', (req, res) => {
+    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'dealer-portal.html'));
 });
