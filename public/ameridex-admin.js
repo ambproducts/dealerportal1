@@ -1,6 +1,6 @@
 // ============================================================
-// AmeriDex Dealer Portal - Admin Panel v1.5
-// Date: 2026-02-16
+// AmeriDex Dealer Portal - Admin Panel v1.6
+// Date: 2026-02-25
 // ============================================================
 // REQUIRES: ameridex-api.js (v2.1+) loaded first
 //
@@ -8,6 +8,14 @@
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
 //   <script src="ameridex-admin.js"></script>
+//
+// v1.6 Changes (2026-02-25):
+//   - FIX: toggleProduct() boolean logic made explicit.
+//     Normalizes prod.isActive to a boolean (currentlyActive)
+//     before using it, instead of relying on fragile double-
+//     negation with strict equality (prod.isActive === false).
+//     Undefined/null isActive is now explicitly treated as active
+//     via prod.isActive !== false. Matches toggleDealerActive style.
 //
 // v1.5 Changes (2026-02-16):
 //   - ADD: Users tab in admin panel with full CRUD
@@ -986,10 +994,12 @@
     function toggleProduct(id) {
         var prod = _allProducts.find(function (p) { return p.id === id; });
         if (!prod) return;
-        var action = prod.isActive !== false ? 'disable' : 'enable';
+        // Normalize: products default to active when isActive is undefined/null
+        var currentlyActive = prod.isActive !== false;
+        var action = currentlyActive ? 'disable' : 'enable';
         if (!confirm('Are you sure you want to ' + action + ' "' + prod.name + '"?')) return;
 
-        _api('PUT', '/api/admin/products/' + encodeURIComponent(id), { isActive: prod.isActive === false })
+        _api('PUT', '/api/admin/products/' + encodeURIComponent(id), { isActive: !currentlyActive })
             .then(function () { showAlert('admin-product-alert', 'Product ' + action + 'd!', 'success'); loadProducts(); })
             .catch(function (err) { showAlert('admin-product-alert', 'Failed: ' + esc(err.message), 'error'); });
     }
@@ -1358,5 +1368,5 @@
     }
 
 
-    console.log('[AmeriDex Admin] v1.5 loaded.');
+    console.log('[AmeriDex Admin] v1.6 loaded.');
 })();
