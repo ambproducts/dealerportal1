@@ -24,6 +24,10 @@ app.use('/api/auth', authRoutes);
 const userRoutes = require('./routes/users');
 app.use('/api/users', userRoutes);
 
+// Products (tier-adjusted pricing for dealers)
+const productRoutes = require('./routes/products');
+app.use('/api/products', productRoutes);
+
 // Quotes
 const quoteRoutes = require('./routes/quotes');
 app.use('/api/quotes', quoteRoutes);
