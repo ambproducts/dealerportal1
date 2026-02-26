@@ -1,7 +1,16 @@
 /**
- * ameridex-print-branding.js v2.0
+ * ameridex-print-branding.js v2.1
  * Branded customer quote and dealer order form print/preview output.
  * Loaded after dealer-portal.html inline script.
+ *
+ * v2.1 Changes (2026-02-25):
+ *   - FIX: Logo now reliably loads in print windows via absolute URL fallback
+ *   - FIX: Added LOGO_READY tracking flag for base64 cache completion
+ *   - FIX: getLogoSrc() builds absolute URL from window.location.origin
+ *     when base64 cache has not yet completed (race condition fix)
+ *   - FIX: printFromPreview() injects <base href> into print window
+ *     so any relative asset paths resolve against the real server
+ *   - FIX: printFromPreview() rewrites logo src to absolute URLs as safety net
  *
  * v2.0 Changes (2026-02-25):
  *   - BRANDING: Full AmeriDex brand identity on printable quotes
@@ -46,9 +55,15 @@
      We pre-convert the logo PNG to a base64 data URI at page load.
      This guarantees the logo renders in about:blank print windows
      where relative /images/ paths fail.
+
+     v2.1: Added LOGO_READY flag. If base64 conversion hasn't finished
+     by the time the user prints, getLogoSrc() now returns an absolute
+     URL (window.location.origin + path) instead of a bare relative path
+     that would break in the about:blank print window context.
   */
   var LOGO_BASE64 = '';
-  var LOGO_SRC = '/images/ameridex-logo.png';
+  var LOGO_READY  = false;
+  var LOGO_SRC    = '/images/ameridex-logo.png';
 
   function preloadLogoAsBase64() {
     try {
@@ -62,13 +77,14 @@
         ctx.drawImage(img, 0, 0);
         try {
           LOGO_BASE64 = canvas.toDataURL('image/png');
+          LOGO_READY = true;
           console.log('[ameridex-print-branding] Logo cached as base64 (' + LOGO_BASE64.length + ' chars).');
         } catch (e) {
-          console.warn('[ameridex-print-branding] Canvas toDataURL failed (CORS?). Will use path fallback.', e);
+          console.warn('[ameridex-print-branding] Canvas toDataURL failed (CORS?). Will use absolute URL fallback.', e);
         }
       };
       img.onerror = function () {
-        console.warn('[ameridex-print-branding] Logo image failed to load from ' + LOGO_SRC);
+        console.warn('[ameridex-print-branding] Logo image failed to load from ' + LOGO_SRC + '. Will use absolute URL fallback.');
       };
       img.src = LOGO_SRC;
     } catch (e) {
@@ -79,8 +95,28 @@
   /* Kick off preload immediately */
   preloadLogoAsBase64();
 
+  /* v2.1: Three-tier logo resolution:
+     1. Manual override via window.AMERIDEX_LOGO_BASE64 (highest priority)
+     2. Successfully cached base64 data URI (preferred)
+     3. Absolute URL built from window.location.origin (fallback)
+     The old code returned bare '/images/ameridex-logo.png' as fallback,
+     which resolves to about:blank/images/... in print windows. Now we
+     always return a fully qualified URL when base64 is unavailable.
+  */
   function getLogoSrc() {
-    return LOGO_BASE64 || LOGO_SRC;
+    if (window.AMERIDEX_LOGO_BASE64) return window.AMERIDEX_LOGO_BASE64;
+    if (LOGO_READY && LOGO_BASE64) return LOGO_BASE64;
+    /* Absolute URL fallback: works in print windows where about:blank
+       would break a bare /images/ path */
+    return window.location.origin + LOGO_SRC;
+  }
+
+  /* ── Helper: build absolute URL for any path ── */
+  function absUrl(path) {
+    if (!path) return '';
+    if (path.indexOf('data:') === 0) return path;
+    if (path.indexOf('http') === 0) return path;
+    return window.location.origin + (path.charAt(0) === '/' ? '' : '/') + path;
   }
 
   /* ── Shared CSS injected into the print window ── */
@@ -507,6 +543,13 @@
 
   /* ══════════════════════════════════════════════
      MAIN OVERRIDE: printFromPreview()
+
+     v2.1 FIX: Two changes to guarantee logo loads in print window:
+       1. Inject <base href="..."> so the print window's document
+          resolves relative paths against the real server, not about:blank.
+       2. Rewrite all logo <img> src attributes to absolute URLs
+          before writing to the print window, as a belt-and-suspenders
+          safety measure in case the <base> tag is ignored.
      ══════════════════════════════════════════════ */
   window.printFromPreview = function () {
     var previewEl = document.querySelector('.print-preview-content');
@@ -518,12 +561,31 @@
       return;
     }
 
+    /* Clone the preview HTML and rewrite any relative image src to absolute */
+    var contentHTML = previewEl.innerHTML;
+    var logoAbsolute = getLogoSrc();
+
+    /* Replace any bare /images/ paths in src attributes with absolute URLs */
+    contentHTML = contentHTML.replace(
+      /src="\/images\//g,
+      'src="' + window.location.origin + '/images/'
+    );
+
+    /* Also ensure the logo specifically is absolute (covers base64 and origin paths) */
+    contentHTML = contentHTML.replace(
+      /src="\/images\/ameridex-logo\.png"/g,
+      'src="' + logoAbsolute + '"'
+    );
+
+    var baseHref = window.location.origin + '/';
+
     printWin.document.write('<!DOCTYPE html><html><head>');
     printWin.document.write('<meta charset="utf-8">');
+    printWin.document.write('<base href="' + baseHref + '">');
     printWin.document.write('<title>AmeriDex Quote</title>');
     printWin.document.write('<style>' + PRINT_WINDOW_STYLES + '</style>');
     printWin.document.write('</head><body>');
-    printWin.document.write(previewEl.innerHTML);
+    printWin.document.write(contentHTML);
     printWin.document.write('</body></html>');
     printWin.document.close();
 
@@ -549,21 +611,10 @@
     if (pending === 0) {
       setTimeout(function () { printWin.focus(); printWin.print(); }, 300);
     } else {
-      /* Safety timeout */
-      setTimeout(function () { printWin.focus(); printWin.print(); }, 2000);
+      /* Safety timeout: print even if images fail after 3 seconds */
+      setTimeout(function () { printWin.focus(); printWin.print(); }, 3000);
     }
   };
 
-  /* ══════════════════════════════════════════════
-     Allow manual base64 override if needed:
-       window.AMERIDEX_LOGO_BASE64 = 'data:image/png;base64,...';
-     Set this before generating a print and it will be used.
-     ══════════════════════════════════════════════ */
-  var origGetLogoSrc = getLogoSrc;
-  getLogoSrc = function () {
-    if (window.AMERIDEX_LOGO_BASE64) return window.AMERIDEX_LOGO_BASE64;
-    return origGetLogoSrc();
-  };
-
-  console.log('[ameridex-print-branding] v2.0 loaded (branded + XSS-safe).');
+  console.log('[ameridex-print-branding] v2.1 loaded (branded + XSS-safe + logo-fix).');
 })();
