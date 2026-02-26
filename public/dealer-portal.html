@@ -2235,7 +2235,16 @@ function resetFormOnly() {
 
 // Find and REPLACE your existing handleLogout function with this improved version:
 
+function showCustomersView() {
+    document.getElementById('saved-quotes-section').style.display = 'none';
+    document.getElementById('customers-section').style.display = 'block';
+    renderCustomersList();
+}
 
+function showQuotesView() {
+    document.getElementById('customers-section').style.display = 'none';
+    document.getElementById('saved-quotes-section').style.display = 'block';
+}
     
     
 // ============================================
@@ -2625,6 +2634,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Search
     document.getElementById('quote-search').oninput = renderSavedQuotes;
+    // Customers view navigation
+    document.getElementById('view-customers-btn').onclick = showCustomersView;
+    document.getElementById('back-to-quotes-btn').onclick = showQuotesView;
+    document.getElementById('customer-search').oninput = renderCustomersList;
 
     // Calculator
     document.getElementById('calc-btn').onclick = calculateOnly;
