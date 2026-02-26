@@ -1,7 +1,16 @@
 // ============================================================
-// AmeriDex Dealer Portal - Role-Based UI v3.0
-// Date: 2026-02-16
+// AmeriDex Dealer Portal - Role-Based UI v3.1
+// Date: 2026-02-26
 // ============================================================
+// v3.1 Changes (2026-02-26):
+//   - FIX: Prevent duplicate Admin Panel button in header.
+//     Root cause: injectRoleButtons() was called twice (once on
+//     DOMContentLoaded and again on 'ameridex-login' event).
+//     The two setTimeout calls could race, causing both to
+//     append buttons before the cleanup selector ran.
+//     Fix: Added debounce via _roleButtonsPending timer ID so
+//     only the latest call wins, plus a DOM guard check.
+//
 // v3.0 Changes (2026-02-16):
 //   - RESTORE full GM team management in My Team modal
 //   - GM can add frontdesk users, disable/enable, reset passwords
@@ -24,6 +33,10 @@
     // ----------------------------------------------------------
     // ROLE BUTTON INJECTION
     // ----------------------------------------------------------
+
+    // Debounce timer ID to prevent duplicate calls
+    var _roleButtonsPending = null;
+
     function injectRoleButtons() {
         var dealer = window.getCurrentDealer ? window.getCurrentDealer() : null;
         if (!dealer) return;
@@ -57,6 +70,21 @@
             });
             nav.appendChild(teamBtn);
         }
+    }
+
+    /**
+     * Schedule role button injection with debounce.
+     * If called multiple times (e.g. DOMContentLoaded + ameridex-login),
+     * only the last scheduled call executes, preventing duplicates.
+     */
+    function scheduleInjectRoleButtons(delayMs) {
+        if (_roleButtonsPending) {
+            clearTimeout(_roleButtonsPending);
+        }
+        _roleButtonsPending = setTimeout(function () {
+            _roleButtonsPending = null;
+            injectRoleButtons();
+        }, delayMs);
     }
 
 
@@ -428,19 +456,26 @@
 
 
     // ----------------------------------------------------------
-    // INIT
+    // INIT (v3.1: debounced to prevent duplicate buttons)
     // ----------------------------------------------------------
+    // The 'ameridex-login' event is the authoritative trigger
+    // (fires after successful login when dealer data is ready).
+    // The DOMContentLoaded/immediate call is a fallback for
+    // page refreshes where the user is already authenticated.
+    // scheduleInjectRoleButtons debounces both so only the
+    // last-scheduled call actually executes.
+
     window.addEventListener('ameridex-login', function () {
-        setTimeout(injectRoleButtons, 100);
+        scheduleInjectRoleButtons(100);
     });
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', function () {
-            setTimeout(injectRoleButtons, 500);
+            scheduleInjectRoleButtons(500);
         });
     } else {
-        setTimeout(injectRoleButtons, 500);
+        scheduleInjectRoleButtons(500);
     }
 
-    console.log('[AmeriDex Roles] v3.0 loaded (GM team management restored).');
+    console.log('[AmeriDex Roles] v3.1 loaded (duplicate button fix).');
 })();
