@@ -548,6 +548,230 @@
         .saved-quotes-header { flex-direction: column; align-items: stretch; }
         .saved-quotes-search { max-width: none; }
     }
+
+            /* CUSTOMERS SECTION STYLES - ADD THIS TO THE <style> TAG IN THE <head> */
+        /* Location: Before the closing </style> tag, after existing styles */
+        
+        /* Customers Panel Styles */
+        .customers-panel {
+            margin-top: 1rem;
+        }
+        
+        .customers-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+        
+        .customers-search {
+            display: flex;
+            gap: 0.5rem;
+            flex: 1;
+            max-width: 500px;
+        }
+        
+        .customers-search input {
+            flex: 1;
+            padding: 0.65rem 0.85rem;
+            font-size: 0.95rem;
+        }
+        
+        .customers-stats {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            font-weight: 600;
+        }
+        
+        .customers-list {
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-field);
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        
+        .customer-item {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 1rem;
+            padding: 1.25rem 1.5rem;
+            border-bottom: 1px solid var(--border-subtle);
+            transition: background 0.15s;
+            align-items: start;
+        }
+        
+        .customer-item:last-child {
+            border-bottom: none;
+        }
+        
+        .customer-item:hover {
+            background: #f9fafb;
+        }
+        
+        .customer-info {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+        }
+        
+        .customer-name {
+            font-weight: 700;
+            font-size: 1rem;
+            color: var(--text-main);
+            margin: 0;
+        }
+        
+        .customer-email {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+        
+        .customer-email::before {
+            content: "✉";
+            opacity: 0.6;
+        }
+        
+        .customer-company {
+            font-size: 0.85rem;
+            color: var(--primary);
+            font-weight: 600;
+        }
+        
+        .customer-meta {
+            display: flex;
+            gap: 1rem;
+            margin-top: 0.5rem;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+        
+        .customer-meta-item {
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+        }
+        
+        .customer-quote-count {
+            background: var(--primary-soft);
+            color: var(--primary);
+            padding: 0.15rem 0.5rem;
+            border-radius: 999px;
+            font-weight: 600;
+        }
+        
+        .customer-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            align-items: flex-end;
+        }
+        
+        .customer-actions .btn {
+            white-space: nowrap;
+            padding: 0.5rem 1.25rem;
+        }
+        
+        .customer-quote-history {
+            margin-top: 0.75rem;
+            padding-top: 0.75rem;
+            border-top: 1px solid var(--border-subtle);
+            display: none;
+        }
+        
+        .customer-quote-history.visible {
+            display: block;
+        }
+        
+        .customer-quote-history-title {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+        
+        .customer-quote-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+        
+        .customer-quote-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.5rem 0.75rem;
+            background: var(--primary-soft);
+            border-radius: 6px;
+            font-size: 0.8rem;
+        }
+        
+        .customer-quote-id {
+            color: var(--primary);
+            font-weight: 600;
+        }
+        
+        .customer-quote-date {
+            color: var(--text-muted);
+        }
+        
+        .customer-quote-amount {
+            font-weight: 700;
+            color: var(--text-main);
+        }
+        
+        .no-customers {
+            padding: 3rem 2rem;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+        
+        .view-quotes-toggle {
+            background: none;
+            border: none;
+            color: var(--primary);
+            font-size: 0.8rem;
+            cursor: pointer;
+            padding: 0.25rem 0.5rem;
+            text-decoration: underline;
+            margin-top: 0.25rem;
+        }
+        
+        .view-quotes-toggle:hover {
+            color: var(--primary-dark);
+        }
+        
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            .customer-item {
+                grid-template-columns: 1fr;
+                gap: 0.75rem;
+            }
+            
+            .customer-actions {
+                flex-direction: row;
+                align-items: center;
+                width: 100%;
+            }
+            
+            .customer-actions .btn {
+                flex: 1;
+            }
+            
+            .customers-header {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .customers-search {
+                max-width: none;
+            }
+        }
+
 </style>
 <script>
     window.AMERIDEX_API_BASE = 'https://ameridex-dealer-portal.onrender.com';
@@ -612,6 +836,8 @@
                         <h2 class="card-title">Saved Quotes</h2>
                         <p class="card-subtitle">Load a previous quote or start fresh</p>
                     </div>
+                    <div style="display: flex; gap: 0.5rem;">
+                    <button type="button" class="btn btn-outline btn-sm" id="view-customers-btn">📋 Customers</button>
                     <button type="button" class="btn btn-outline btn-sm" id="new-quote-btn">+ New Quote</button>
                 </div>
                 <div class="saved-quotes-panel">
@@ -625,6 +851,36 @@
                     </div>
                 </div>
             </section>
+
+                        <!-- CUSTOMERS SECTION - INSERT THIS AFTER THE SAVED QUOTES SECTION -->
+            <!-- Location: After closing </section> tag of id="saved-quotes-section" -->
+            
+            <!-- Customers Panel -->
+            <section class="card" id="customers-section" style="display:none;">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">Customer Management</h2>
+                        <p class="card-subtitle">Browse customers and create quotes</p>
+                    </div>
+                    <button type="button" class="btn btn-outline btn-sm" id="back-to-quotes-btn">← Back to Quotes</button>
+                </div>
+                
+                <div class="customers-panel">
+                    <div class="customers-header">
+                        <div class="customers-search">
+                            <input type="text" id="customer-search" placeholder="Search by name, email, or company...">
+                        </div>
+                        <div class="customers-stats">
+                            <span id="customer-count">0 customers</span>
+                        </div>
+                    </div>
+                    
+                    <div class="customers-list" id="customers-list">
+                        <div class="no-customers">No customers yet. Create your first quote to add customers.</div>
+                    </div>
+                </div>
+            </section>    
+            
 
             <!-- Deck Calculator -->
             <section class="card" id="calculator">
