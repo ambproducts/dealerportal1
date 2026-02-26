@@ -1,620 +1,519 @@
 /**
- * ameridex-print-branding.js v2.1
- * Branded customer quote and dealer order form print/preview output.
- * Loaded after dealer-portal.html inline script.
- *
- * v2.1 Changes (2026-02-25):
- *   - FIX: Logo now reliably loads in print windows via absolute URL fallback
- *   - FIX: Added LOGO_READY tracking flag for base64 cache completion
- *   - FIX: getLogoSrc() builds absolute URL from window.location.origin
- *     when base64 cache has not yet completed (race condition fix)
- *   - FIX: printFromPreview() injects <base href> into print window
- *     so any relative asset paths resolve against the real server
- *   - FIX: printFromPreview() rewrites logo src to absolute URLs as safety net
- *
- * v2.0 Changes (2026-02-25):
- *   - BRANDING: Full AmeriDex brand identity on printable quotes
- *   - BRANDING: Logo pre-cached as base64 at page load for reliable print rendering
- *   - BRANDING: Navy #1B3A5C + Red #C8102E color palette from official logo
- *   - BRANDING: Split navy/red header bar mirroring logo design language
- *   - BRANDING: Professional footer with company contact info
- *   - BRANDING: Removed "Dealer Portal" from customer-facing output
- *   - SECURITY: All v1.1 XSS protections preserved (esc() on all user strings)
+ * ameridex-print-branding.js
+ * 
+ * Branded PDF generation for AmeriDex Dealer Portal.
+ * Overrides the default generatePDF() with a professional layout featuring:
+ *   - AmeriDex logo header on every page
+ *   - Dealer business information
+ *   - Clean table layout with alternating row shading
+ *   - Customer-facing disclaimer
+ *   - Multi-page support with consistent header/footer
+ * 
+ * Must be loaded AFTER the main dealer-portal.html inline script.
  */
 
 (function () {
-  'use strict';
+    'use strict';
 
-  /* ── Brand Constants ── */
-  var BRAND_NAVY  = '#1B3A5C';
-  var BRAND_RED   = '#C8102E';
-  var BRAND_NAVY_LIGHT = '#2A4F7A';
-  var BRAND_RED_LIGHT  = '#FDEDEF';
-  var BRAND_GRAY  = '#6B7280';
-  var BRAND_LIGHT = '#F7F8FA';
-  var BRAND_BORDER = '#E5E7EB';
+    // =========================================================================
+    // CONFIGURATION
+    // =========================================================================
 
-  /* ── Company Info ── */
-  var COMPANY_NAME    = 'A&M Building Products / AmeriDex';
-  var COMPANY_PHONE   = '1-800-217-9206';
-  var COMPANY_ADDRESS = '1129A Industrial Parkway, Brick, NJ 08724';
-  var COMPANY_WEBSITE = 'ameridex.com';
-
-  /* ── HTML entity escaper (XSS prevention) ── */
-  function esc(str) {
-    if (!str) return '';
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
-
-  /* ── Logo base64 cache ──
-     We pre-convert the logo PNG to a base64 data URI at page load.
-     This guarantees the logo renders in about:blank print windows
-     where relative /images/ paths fail.
-
-     v2.1: Added LOGO_READY flag. If base64 conversion hasn't finished
-     by the time the user prints, getLogoSrc() now returns an absolute
-     URL (window.location.origin + path) instead of a bare relative path
-     that would break in the about:blank print window context.
-  */
-  var LOGO_BASE64 = '';
-  var LOGO_READY  = false;
-  var LOGO_SRC    = '/images/ameridex-logo.png';
-
-  function preloadLogoAsBase64() {
-    try {
-      var canvas = document.createElement('canvas');
-      var ctx = canvas.getContext('2d');
-      var img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = function () {
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
-        ctx.drawImage(img, 0, 0);
-        try {
-          LOGO_BASE64 = canvas.toDataURL('image/png');
-          LOGO_READY = true;
-          console.log('[ameridex-print-branding] Logo cached as base64 (' + LOGO_BASE64.length + ' chars).');
-        } catch (e) {
-          console.warn('[ameridex-print-branding] Canvas toDataURL failed (CORS?). Will use absolute URL fallback.', e);
+    const PDF_CONFIG = {
+        margin: { top: 45, left: 20, right: 20, bottom: 25 },
+        colors: {
+            primary: [37, 99, 235],       // #2563eb
+            primaryDark: [30, 64, 175],    // #1e40af
+            headerBg: [37, 99, 235],
+            headerText: [255, 255, 255],
+            tableHeaderBg: [243, 244, 246],// #f3f4f6
+            tableHeaderText: [55, 65, 81], // #374151
+            tableAltRow: [249, 250, 251],  // #f9fafb
+            textMain: [17, 24, 39],        // #111827
+            textMuted: [107, 114, 128],    // #6b7280
+            border: [229, 231, 235],       // #e5e7eb
+            success: [22, 163, 74],        // #16a34a
+            white: [255, 255, 255]
+        },
+        fonts: {
+            titleSize: 18,
+            sectionSize: 13,
+            bodySize: 10,
+            smallSize: 8.5,
+            tinySize: 7.5
+        },
+        logo: {
+            // Base64-encoded PNG of the AmeriDex logo will be set at runtime
+            // if the image can be loaded from the DOM or fetched.
+            dataUrl: null,
+            width: 45,
+            height: 12
         }
-      };
-      img.onerror = function () {
-        console.warn('[ameridex-print-branding] Logo image failed to load from ' + LOGO_SRC + '. Will use absolute URL fallback.');
-      };
-      img.src = LOGO_SRC;
-    } catch (e) {
-      console.warn('[ameridex-print-branding] Logo preload error:', e);
-    }
-  }
-
-  /* Kick off preload immediately */
-  preloadLogoAsBase64();
-
-  /* v2.1: Three-tier logo resolution:
-     1. Manual override via window.AMERIDEX_LOGO_BASE64 (highest priority)
-     2. Successfully cached base64 data URI (preferred)
-     3. Absolute URL built from window.location.origin (fallback)
-     The old code returned bare '/images/ameridex-logo.png' as fallback,
-     which resolves to about:blank/images/... in print windows. Now we
-     always return a fully qualified URL when base64 is unavailable.
-  */
-  function getLogoSrc() {
-    if (window.AMERIDEX_LOGO_BASE64) return window.AMERIDEX_LOGO_BASE64;
-    if (LOGO_READY && LOGO_BASE64) return LOGO_BASE64;
-    /* Absolute URL fallback: works in print windows where about:blank
-       would break a bare /images/ path */
-    return window.location.origin + LOGO_SRC;
-  }
-
-  /* ── Helper: build absolute URL for any path ── */
-  function absUrl(path) {
-    if (!path) return '';
-    if (path.indexOf('data:') === 0) return path;
-    if (path.indexOf('http') === 0) return path;
-    return window.location.origin + (path.charAt(0) === '/' ? '' : '/') + path;
-  }
-
-  /* ── Shared CSS injected into the print window ── */
-  var PRINT_WINDOW_STYLES = '\
-    * { box-sizing: border-box; margin: 0; padding: 0; }\
-    body {\
-      font-family: Arial, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;\
-      padding: 0;\
-      color: #111827;\
-      font-size: 13px;\
-      line-height: 1.5;\
-    }\
-    .quote-page {\
-      max-width: 850px;\
-      margin: 0 auto;\
-      padding: 24px 32px;\
-    }\
-    \
-    /* ---- HEADER ---- */\
-    .brand-header {\
-      text-align: center;\
-      padding-bottom: 0;\
-      margin-bottom: 0;\
-    }\
-    .brand-logo {\
-      width: 260px;\
-      height: auto;\
-      display: block;\
-      margin: 0 auto 8px;\
-    }\
-    .brand-bar {\
-      height: 5px;\
-      margin: 12px 0 0 0;\
-      background: linear-gradient(to right, ' + BRAND_NAVY + ' 55%, ' + BRAND_RED + ' 55%);\
-      border-radius: 2px;\
-    }\
-    \
-    /* ---- DOC TITLE + META ---- */\
-    .doc-meta {\
-      display: flex;\
-      justify-content: space-between;\
-      align-items: flex-start;\
-      margin: 16px 0 12px;\
-      padding-bottom: 8px;\
-    }\
-    .doc-meta-left {}\
-    .doc-title {\
-      font-size: 1.35rem;\
-      font-weight: 700;\
-      color: ' + BRAND_NAVY + ';\
-      margin: 0 0 2px;\
-    }\
-    .doc-subtitle {\
-      font-size: 0.8rem;\
-      color: ' + BRAND_GRAY + ';\
-    }\
-    .doc-meta-right {\
-      text-align: right;\
-      font-size: 0.82rem;\
-      color: #4B5563;\
-      line-height: 1.7;\
-    }\
-    .doc-meta-label {\
-      color: ' + BRAND_GRAY + ';\
-      font-size: 0.75rem;\
-      text-transform: uppercase;\
-      letter-spacing: 0.05em;\
-    }\
-    .doc-meta-value {\
-      font-weight: 600;\
-      color: ' + BRAND_NAVY + ';\
-    }\
-    \
-    /* ---- SECTION HEADERS ---- */\
-    h2 {\
-      color: ' + BRAND_NAVY + ';\
-      font-size: 0.95rem;\
-      font-weight: 700;\
-      text-transform: uppercase;\
-      letter-spacing: 0.06em;\
-      border-bottom: 2px solid ' + BRAND_NAVY + ';\
-      padding-bottom: 4px;\
-      margin: 20px 0 10px;\
-    }\
-    \
-    /* ---- CUSTOMER INFO TABLE ---- */\
-    .info-table { width: auto; border-collapse: collapse; margin: 6px 0 10px; }\
-    .info-table td {\
-      padding: 3px 12px 3px 0;\
-      border: none;\
-      font-size: 0.88rem;\
-      vertical-align: top;\
-    }\
-    .info-label {\
-      color: ' + BRAND_GRAY + ';\
-      font-weight: 600;\
-      width: 110px;\
-      white-space: nowrap;\
-    }\
-    \
-    /* ---- ITEMS TABLE ---- */\
-    table.items-table { width: 100%; border-collapse: collapse; margin: 8px 0 12px; }\
-    table.items-table th {\
-      background: ' + BRAND_NAVY + ';\
-      color: #fff;\
-      font-weight: 600;\
-      border: 1px solid ' + BRAND_NAVY + ';\
-      padding: 9px 10px;\
-      text-align: left;\
-      font-size: 0.85rem;\
-      text-transform: uppercase;\
-      letter-spacing: 0.03em;\
-    }\
-    table.items-table td {\
-      border: 1px solid ' + BRAND_BORDER + ';\
-      padding: 8px 10px;\
-      text-align: left;\
-      font-size: 0.88rem;\
-    }\
-    table.items-table tr:nth-child(even) td { background: ' + BRAND_LIGHT + '; }\
-    table.items-table tr:hover td { background: #EEF2F7; }\
-    \
-    /* Total row */\
-    .total-row td {\
-      font-weight: 700;\
-      font-size: 1rem;\
-      background: ' + BRAND_RED_LIGHT + ' !important;\
-      border-top: 2px solid ' + BRAND_RED + ';\
-    }\
-    .total-amount {\
-      color: ' + BRAND_RED + ';\
-      font-size: 1.1rem;\
-    }\
-    \
-    /* ---- SPECIAL INSTRUCTIONS / SHIPPING ---- */\
-    .info-box {\
-      background: ' + BRAND_LIGHT + ';\
-      border-radius: 6px;\
-      padding: 10px 14px;\
-      border: 1px solid ' + BRAND_BORDER + ';\
-      font-size: 0.88rem;\
-      margin: 6px 0;\
-    }\
-    .options-list {\
-      margin: 4px 0;\
-      font-size: 0.88rem;\
-    }\
-    .options-list span {\
-      color: ' + BRAND_NAVY + ';\
-      font-weight: 600;\
-    }\
-    \
-    /* ---- FOOTER ---- */\
-    .brand-footer {\
-      margin-top: 28px;\
-      padding-top: 0;\
-      text-align: center;\
-      font-size: 0.78rem;\
-      color: ' + BRAND_GRAY + ';\
-      line-height: 1.7;\
-    }\
-    .footer-bar {\
-      height: 3px;\
-      background: linear-gradient(to right, ' + BRAND_NAVY + ' 55%, ' + BRAND_RED + ' 55%);\
-      border-radius: 2px;\
-      margin-bottom: 12px;\
-    }\
-    .footer-logo {\
-      width: 120px;\
-      height: auto;\
-      margin: 0 auto 6px;\
-      display: block;\
-      opacity: 0.7;\
-    }\
-    .footer-company {\
-      font-weight: 600;\
-      color: ' + BRAND_NAVY + ';\
-      font-size: 0.82rem;\
-    }\
-    .footer-disclaimer {\
-      margin: 10px auto 8px;\
-      max-width: 700px;\
-      font-size: 0.75rem;\
-      color: #9CA3AF;\
-      line-height: 1.5;\
-    }\
-    .footer-tagline {\
-      font-size: 0.82rem;\
-      color: ' + BRAND_NAVY + ';\
-      font-weight: 600;\
-      margin-top: 4px;\
-    }\
-    \
-    /* ---- PRINT OVERRIDES ---- */\
-    @media print {\
-      body { padding: 0; }\
-      .quote-page { padding: 12px 20px; }\
-      .brand-header { break-inside: avoid; }\
-      table.items-table { break-inside: auto; }\
-      table.items-table tr { break-inside: avoid; }\
-      .brand-footer { break-inside: avoid; }\
-    }\
-  ';
-
-  /* ── Build branded header HTML ── */
-  function buildHeader(title, today, quoteId) {
-    var ds = (typeof dealerSettings !== 'undefined') ? dealerSettings : {};
-    var dealerCode = esc(ds.dealerCode || '');
-    var dealerName = esc(ds.dealerName || '');
-    var dealerContact = esc(ds.dealerContact || '');
-    var dealerPhone = esc(ds.dealerPhone || '');
-    var logoSrc = getLogoSrc();
-
-    var h = '';
-
-    /* Logo + brand bar */
-    h += '<div class="brand-header">';
-    h += '  <img class="brand-logo" src="' + logoSrc + '" alt="AmeriDex">';
-    h += '  <div class="brand-bar"></div>';
-    h += '</div>';
-
-    /* Doc title + meta info */
-    h += '<div class="doc-meta">';
-    h += '  <div class="doc-meta-left">';
-    h += '    <div class="doc-title">' + esc(title) + '</div>';
-    h += '    <div class="doc-subtitle">Generated ' + esc(today) + '</div>';
-    h += '  </div>';
-    h += '  <div class="doc-meta-right">';
-    if (quoteId) {
-      h += '  <div><span class="doc-meta-label">Quote # </span><span class="doc-meta-value">' + esc(quoteId) + '</span></div>';
-    }
-    if (dealerCode) {
-      h += '  <div><span class="doc-meta-label">Dealer Code: </span><span class="doc-meta-value">' + dealerCode + '</span></div>';
-    }
-    if (dealerName) {
-      h += '  <div>' + dealerName + '</div>';
-    }
-    if (dealerContact) {
-      h += '  <div>' + dealerContact + '</div>';
-    }
-    if (dealerPhone) {
-      h += '  <div>' + dealerPhone + '</div>';
-    }
-    h += '  </div>';
-    h += '</div>';
-
-    return h;
-  }
-
-  /* ── Build customer info section ── */
-  function buildCustomerInfo() {
-    var val = function (id) {
-      var el = document.getElementById(id);
-      return el ? el.value : '';
     };
 
-    var custName = esc(val('cust-name') || 'N/A');
-    var custEmail = esc(val('cust-email') || 'N/A');
-    var custZip = esc(val('cust-zip') || 'N/A');
-    var custCompany = esc(val('cust-company'));
-    var custPhone = esc(val('cust-phone'));
+    // =========================================================================
+    // LOGO LOADER
+    // =========================================================================
 
-    var h = '<h2>Customer Information</h2>';
-    h += '<table class="info-table">';
-    h += '<tr><td class="info-label">Name</td><td>' + custName + '</td></tr>';
-    h += '<tr><td class="info-label">Email</td><td>' + custEmail + '</td></tr>';
-    h += '<tr><td class="info-label">Zip Code</td><td>' + custZip + '</td></tr>';
-    if (custCompany) {
-      h += '<tr><td class="info-label">Company</td><td>' + custCompany + '</td></tr>';
-    }
-    if (custPhone) {
-      h += '<tr><td class="info-label">Phone</td><td>' + custPhone + '</td></tr>';
-    }
-    h += '</table>';
-    return h;
-  }
+    /**
+     * Attempt to load the AmeriDex logo as a base64 data URL.
+     * Tries the header <img> first, then falls back to a canvas draw from /images/ameridex-logo.png.
+     */
+    function loadLogoAsDataUrl() {
+        return new Promise((resolve) => {
+            // Try to grab the logo from the existing header image
+            const headerImg = document.querySelector('header.app-header img');
+            if (headerImg && headerImg.complete && headerImg.naturalWidth > 0) {
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = headerImg.naturalWidth;
+                    canvas.height = headerImg.naturalHeight;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(headerImg, 0, 0);
+                    const dataUrl = canvas.toDataURL('image/png');
+                    if (dataUrl && dataUrl.length > 100) {
+                        resolve(dataUrl);
+                        return;
+                    }
+                } catch (e) {
+                    // Cross-origin or tainted canvas; fall through
+                }
+            }
 
-  /* ── Build options section ── */
-  function buildOptions() {
-    var picFrame = document.getElementById('pic-frame');
-    var stairs = document.getElementById('stairs');
-    var hasPicFrame = picFrame && picFrame.checked;
-    var hasStairs = stairs && stairs.checked;
-
-    if (!hasPicFrame && !hasStairs) return '';
-
-    var h = '<h2>Options</h2>';
-    h += '<div class="options-list">';
-    if (hasPicFrame) h += '<p style="margin:4px 0;"><span>&#10003;</span> Picture framing</p>';
-    if (hasStairs) h += '<p style="margin:4px 0;"><span>&#10003;</span> Stairs</p>';
-    h += '</div>';
-    return h;
-  }
-
-  /* ── Build line items table ── */
-  function buildLineItems() {
-    var quote = (typeof currentQuote !== 'undefined') ? currentQuote : { lineItems: [] };
-    var products = (typeof PRODUCTS !== 'undefined') ? PRODUCTS : {};
-    var grandTotal = 0;
-
-    var h = '<h2>Order Details</h2>';
-    h += '<table class="items-table">';
-    h += '<thead><tr>';
-    h += '<th>Product</th><th>Color</th><th>Length</th>';
-    h += '<th style="text-align:center;">Qty</th>';
-    h += '<th style="text-align:right;">Subtotal</th>';
-    h += '</tr></thead><tbody>';
-
-    quote.lineItems.forEach(function (item) {
-      var prod = products[item.type] || products.custom || { name: item.type, isFt: false, hasColor: false };
-      var sub = (typeof getItemSubtotal === 'function') ? getItemSubtotal(item) : 0;
-      grandTotal += sub;
-
-      var productName = esc((item.type === 'custom' && item.customDesc) ? item.customDesc : prod.name);
-
-      var lengthDisplay = '';
-      if (item.type === 'dexerdry') {
-        lengthDisplay = esc((item.length || 0) + ' ft box');
-      } else if (prod.isFt) {
-        var len = item.length === 'custom' ? (item.customLength || 0) : (item.length || 0);
-        lengthDisplay = len ? esc(len + ' ft') : '';
-      }
-
-      var colorDisplay = prod.hasColor ? esc(item.color || '') : '';
-
-      h += '<tr>';
-      h += '<td>' + productName + '</td>';
-      h += '<td>' + colorDisplay + '</td>';
-      h += '<td>' + lengthDisplay + '</td>';
-      h += '<td style="text-align:center;">' + (parseInt(item.qty, 10) || 0) + '</td>';
-      h += '<td style="text-align:right;">$' + ((typeof formatCurrency === 'function') ? formatCurrency(sub) : sub.toFixed(2)) + '</td>';
-      h += '</tr>';
-    });
-
-    h += '<tr class="total-row">';
-    h += '<td colspan="4" style="text-align:right;">Estimated Total</td>';
-    h += '<td style="text-align:right;"><span class="total-amount">$' + ((typeof formatCurrency === 'function') ? formatCurrency(grandTotal) : grandTotal.toFixed(2)) + '</span></td>';
-    h += '</tr>';
-
-    h += '</tbody></table>';
-    return h;
-  }
-
-  /* ── Build special instructions ── */
-  function buildSpecialInstructions() {
-    var el = document.getElementById('special-instr');
-    var special = el ? el.value : '';
-    if (!special) return '';
-
-    var safeSpecial = esc(special).replace(/\n/g, '<br>');
-
-    var h = '<h2>Special Instructions</h2>';
-    h += '<div class="info-box">';
-    h += safeSpecial;
-    h += '</div>';
-    return h;
-  }
-
-  /* ── Build shipping & delivery ── */
-  function buildShipping() {
-    var addrEl = document.getElementById('ship-addr');
-    var dateEl = document.getElementById('del-date');
-    var shipAddr = addrEl ? addrEl.value : '';
-    var delDate = dateEl ? dateEl.value : '';
-
-    if (!shipAddr && !delDate) return '';
-
-    var h = '<h2>Shipping &amp; Delivery</h2>';
-    if (shipAddr) {
-      var safeAddr = esc(shipAddr).replace(/\n/g, '<br>');
-      h += '<div class="info-box"><strong>Address:</strong><br>' + safeAddr + '</div>';
-    }
-    if (delDate) {
-      h += '<p style="margin:6px 0;font-size:0.88rem;"><strong>Preferred Delivery Date:</strong> ' + esc(delDate) + '</p>';
-    }
-    return h;
-  }
-
-  /* ── Build footer ── */
-  function buildFooter(isCustomer) {
-    var logoSrc = getLogoSrc();
-
-    var h = '<div class="brand-footer">';
-    h += '  <div class="footer-bar"></div>';
-    h += '  <img class="footer-logo" src="' + logoSrc + '" alt="AmeriDex">';
-
-    if (isCustomer) {
-      h += '<div class="footer-disclaimer">';
-      h += '<strong>Disclaimer:</strong> This is an estimate only. Final pricing is subject to confirmation by A&amp;M Building Products / AmeriDex. Prices do not include shipping, taxes, or installation unless otherwise noted.';
-      h += '</div>';
+            // Fallback: load from path
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = function () {
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.naturalWidth;
+                    canvas.height = img.naturalHeight;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
+                    resolve(canvas.toDataURL('image/png'));
+                } catch (e) {
+                    resolve(null);
+                }
+            };
+            img.onerror = function () { resolve(null); };
+            img.src = '/images/ameridex-logo.png';
+        });
     }
 
-    h += '  <div class="footer-company">' + esc(COMPANY_NAME) + '</div>';
-    h += '  <div>' + esc(COMPANY_ADDRESS) + '</div>';
-    h += '  <div>' + esc(COMPANY_PHONE) + ' &nbsp;|&nbsp; ' + esc(COMPANY_WEBSITE) + '</div>';
-    h += '  <div class="footer-tagline">Thank you for choosing AmeriDex!</div>';
-    h += '</div>';
-    return h;
-  }
+    // =========================================================================
+    // PDF HELPER UTILITIES
+    // =========================================================================
 
-  /* ══════════════════════════════════════════════
-     MAIN OVERRIDE: generatePrintHTML(type)
-     ══════════════════════════════════════════════ */
-  window.generatePrintHTML = function (type) {
-    var today = new Date().toLocaleDateString('en-US', {
-      year: 'numeric', month: 'long', day: 'numeric'
-    });
-    var isCustomer = (type === 'customer');
-    var title = isCustomer ? 'Customer Quote' : 'Dealer Order Form';
-    var quoteId = (typeof currentQuote !== 'undefined' && currentQuote.quoteId) ? currentQuote.quoteId : '';
-
-    var html = '<div class="quote-page">';
-    html += buildHeader(title, today, quoteId);
-    html += buildCustomerInfo();
-    html += buildOptions();
-    html += buildLineItems();
-    html += buildSpecialInstructions();
-    html += buildShipping();
-    html += buildFooter(isCustomer);
-    html += '</div>';
-
-    return html;
-  };
-
-  /* ══════════════════════════════════════════════
-     MAIN OVERRIDE: printFromPreview()
-
-     v2.1 FIX: Two changes to guarantee logo loads in print window:
-       1. Inject <base href="..."> so the print window's document
-          resolves relative paths against the real server, not about:blank.
-       2. Rewrite all logo <img> src attributes to absolute URLs
-          before writing to the print window, as a belt-and-suspenders
-          safety measure in case the <base> tag is ignored.
-     ══════════════════════════════════════════════ */
-  window.printFromPreview = function () {
-    var previewEl = document.querySelector('.print-preview-content');
-    if (!previewEl) return;
-
-    var printWin = window.open('', '_blank', 'width=900,height=700');
-    if (!printWin) {
-      alert('Pop-up blocked. Please allow pop-ups for this site.');
-      return;
+    function setColor(doc, rgb) {
+        doc.setTextColor(rgb[0], rgb[1], rgb[2]);
     }
 
-    /* Clone the preview HTML and rewrite any relative image src to absolute */
-    var contentHTML = previewEl.innerHTML;
-    var logoAbsolute = getLogoSrc();
-
-    /* Replace any bare /images/ paths in src attributes with absolute URLs */
-    contentHTML = contentHTML.replace(
-      /src="\/images\//g,
-      'src="' + window.location.origin + '/images/'
-    );
-
-    /* Also ensure the logo specifically is absolute (covers base64 and origin paths) */
-    contentHTML = contentHTML.replace(
-      /src="\/images\/ameridex-logo\.png"/g,
-      'src="' + logoAbsolute + '"'
-    );
-
-    var baseHref = window.location.origin + '/';
-
-    printWin.document.write('<!DOCTYPE html><html><head>');
-    printWin.document.write('<meta charset="utf-8">');
-    printWin.document.write('<base href="' + baseHref + '">');
-    printWin.document.write('<title>AmeriDex Quote</title>');
-    printWin.document.write('<style>' + PRINT_WINDOW_STYLES + '</style>');
-    printWin.document.write('</head><body>');
-    printWin.document.write(contentHTML);
-    printWin.document.write('</body></html>');
-    printWin.document.close();
-
-    /* Wait for images (logo) to load before triggering print */
-    var logos = printWin.document.querySelectorAll('.brand-logo, .footer-logo');
-    var pending = 0;
-
-    function checkReady() {
-      pending--;
-      if (pending <= 0) {
-        setTimeout(function () { printWin.focus(); printWin.print(); }, 200);
-      }
+    function setFillColor(doc, rgb) {
+        doc.setFillColor(rgb[0], rgb[1], rgb[2]);
     }
 
-    for (var i = 0; i < logos.length; i++) {
-      if (!logos[i].complete) {
-        pending++;
-        logos[i].onload = checkReady;
-        logos[i].onerror = checkReady;
-      }
+    function setDrawColor(doc, rgb) {
+        doc.setDrawColor(rgb[0], rgb[1], rgb[2]);
     }
 
-    if (pending === 0) {
-      setTimeout(function () { printWin.focus(); printWin.print(); }, 300);
-    } else {
-      /* Safety timeout: print even if images fail after 3 seconds */
-      setTimeout(function () { printWin.focus(); printWin.print(); }, 3000);
+    function pageWidth(doc) {
+        return doc.internal.pageSize.getWidth();
     }
-  };
 
-  console.log('[ameridex-print-branding] v2.1 loaded (branded + XSS-safe + logo-fix).');
+    function pageHeight(doc) {
+        return doc.internal.pageSize.getHeight();
+    }
+
+    function checkPageBreak(doc, y, needed) {
+        if (y + needed > pageHeight(doc) - PDF_CONFIG.margin.bottom) {
+            doc.addPage();
+            return drawPageHeader(doc);
+        }
+        return y;
+    }
+
+    // =========================================================================
+    // PAGE HEADER (rendered on every page)
+    // =========================================================================
+
+    function drawPageHeader(doc) {
+        const pw = pageWidth(doc);
+        const cfg = PDF_CONFIG;
+
+        // Blue header bar
+        setFillColor(doc, cfg.colors.headerBg);
+        doc.rect(0, 0, pw, 35, 'F');
+
+        // Logo (if available)
+        let textStartX = cfg.margin.left;
+        if (cfg.logo.dataUrl) {
+            try {
+                doc.addImage(cfg.logo.dataUrl, 'PNG', cfg.margin.left, 6, cfg.logo.width, cfg.logo.height);
+                textStartX = cfg.margin.left + cfg.logo.width + 6;
+            } catch (e) {
+                // Logo failed to render; continue without it
+            }
+        }
+
+        // Title text
+        doc.setFontSize(cfg.fonts.titleSize);
+        doc.setFont('helvetica', 'bold');
+        setColor(doc, cfg.colors.headerText);
+        doc.text('AmeriDex', textStartX, 15);
+
+        doc.setFontSize(cfg.fonts.smallSize);
+        doc.setFont('helvetica', 'normal');
+        doc.text('Dealer Portal', textStartX, 22);
+
+        // Right side: dealer info
+        const dealerCode = (typeof dealerSettings !== 'undefined' && dealerSettings.dealerCode) ? dealerSettings.dealerCode : '';
+        const dealerName = (typeof dealerSettings !== 'undefined' && dealerSettings.dealerName) ? dealerSettings.dealerName : '';
+        if (dealerCode || dealerName) {
+            doc.setFontSize(cfg.fonts.smallSize);
+            setColor(doc, cfg.colors.headerText);
+            const rightX = pw - cfg.margin.right;
+            if (dealerName) {
+                doc.text(dealerName, rightX, 13, { align: 'right' });
+                doc.text('Dealer: ' + dealerCode, rightX, 20, { align: 'right' });
+            } else {
+                doc.text('Dealer: ' + dealerCode, rightX, 16, { align: 'right' });
+            }
+        }
+
+        // Thin accent line below header
+        setDrawColor(doc, cfg.colors.primaryDark);
+        doc.setLineWidth(0.5);
+        doc.line(0, 35, pw, 35);
+
+        return cfg.margin.top; // return Y position after header
+    }
+
+    // =========================================================================
+    // SECTION DRAWING HELPERS
+    // =========================================================================
+
+    function drawSectionTitle(doc, y, title) {
+        y = checkPageBreak(doc, y, 14);
+        doc.setFontSize(PDF_CONFIG.fonts.sectionSize);
+        doc.setFont('helvetica', 'bold');
+        setColor(doc, PDF_CONFIG.colors.primaryDark);
+        doc.text(title, PDF_CONFIG.margin.left, y);
+        y += 2;
+        setDrawColor(doc, PDF_CONFIG.colors.primary);
+        doc.setLineWidth(0.3);
+        doc.line(PDF_CONFIG.margin.left, y, pageWidth(doc) - PDF_CONFIG.margin.right, y);
+        return y + 6;
+    }
+
+    function drawKeyValue(doc, y, label, value) {
+        y = checkPageBreak(doc, y, 7);
+        const cfg = PDF_CONFIG;
+        doc.setFontSize(cfg.fonts.bodySize);
+        doc.setFont('helvetica', 'bold');
+        setColor(doc, cfg.colors.textMuted);
+        doc.text(label + ':', cfg.margin.left, y);
+
+        doc.setFont('helvetica', 'normal');
+        setColor(doc, cfg.colors.textMain);
+        doc.text(String(value || 'N/A'), cfg.margin.left + 45, y);
+        return y + 6;
+    }
+
+    // =========================================================================
+    // LINE ITEMS TABLE
+    // =========================================================================
+
+    function drawLineItemsTable(doc, y) {
+        const cfg = PDF_CONFIG;
+        const left = cfg.margin.left;
+        const right = pageWidth(doc) - cfg.margin.right;
+        const tableWidth = right - left;
+
+        // Column definitions: [label, x-offset from left, width, align]
+        const cols = [
+            { label: 'Product',  x: left,                  w: tableWidth * 0.36, align: 'left' },
+            { label: 'Color',    x: left + tableWidth * 0.36, w: tableWidth * 0.14, align: 'left' },
+            { label: 'Length',   x: left + tableWidth * 0.50, w: tableWidth * 0.14, align: 'left' },
+            { label: 'Qty',      x: left + tableWidth * 0.64, w: tableWidth * 0.10, align: 'center' },
+            { label: 'Subtotal', x: left + tableWidth * 0.74, w: tableWidth * 0.26, align: 'right' }
+        ];
+
+        const rowHeight = 8;
+        const headerHeight = 9;
+
+        // Draw header
+        y = checkPageBreak(doc, y, headerHeight + rowHeight * 2);
+        setFillColor(doc, cfg.colors.tableHeaderBg);
+        doc.rect(left, y - 5, tableWidth, headerHeight, 'F');
+        doc.setFontSize(cfg.fonts.smallSize);
+        doc.setFont('helvetica', 'bold');
+        setColor(doc, cfg.colors.tableHeaderText);
+        cols.forEach(col => {
+            let tx = col.x + 2;
+            if (col.align === 'right') tx = col.x + col.w - 2;
+            else if (col.align === 'center') tx = col.x + col.w / 2;
+            doc.text(col.label, tx, y, { align: col.align });
+        });
+        y += headerHeight - 1;
+
+        // Border under header
+        setDrawColor(doc, cfg.colors.border);
+        doc.setLineWidth(0.2);
+        doc.line(left, y - 3, right, y - 3);
+
+        // Rows
+        let grandTotal = 0;
+        if (typeof currentQuote === 'undefined' || !currentQuote.lineItems) return { y: y, total: 0 };
+
+        currentQuote.lineItems.forEach((item, idx) => {
+            y = checkPageBreak(doc, y, rowHeight + 2);
+
+            // Alternating row background
+            if (idx % 2 === 1) {
+                setFillColor(doc, cfg.colors.tableAltRow);
+                doc.rect(left, y - 5, tableWidth, rowHeight, 'F');
+            }
+
+            const prod = PRODUCTS[item.type] || PRODUCTS.custom;
+            const sub = getItemSubtotal(item);
+            grandTotal += sub;
+
+            const productName = (item.type === 'custom' && item.customDesc) ? item.customDesc : prod.name;
+            const colorName = (prod.hasColor && item.color) ? item.color : '';
+            let lengthDisplay = '';
+            if (item.type === 'dexerdry') {
+                lengthDisplay = item.length + ' ft box';
+            } else if (prod.isFt) {
+                const len = item.length === 'custom' ? (item.customLength || 0) : (item.length || 0);
+                lengthDisplay = len + ' ft';
+            }
+
+            doc.setFontSize(cfg.fonts.bodySize);
+            doc.setFont('helvetica', 'normal');
+            setColor(doc, cfg.colors.textMain);
+
+            // Truncate product name if too long
+            const maxProductChars = 35;
+            const displayName = productName.length > maxProductChars
+                ? productName.substring(0, maxProductChars - 2) + '...'
+                : productName;
+
+            doc.text(displayName, cols[0].x + 2, y);
+            doc.text(colorName, cols[1].x + 2, y);
+            doc.text(lengthDisplay, cols[2].x + 2, y);
+            doc.text(String(item.qty), cols[3].x + cols[3].w / 2, y, { align: 'center' });
+            doc.text(formatCurrency(sub), cols[4].x + cols[4].w - 2, y, { align: 'right' });
+
+            y += rowHeight;
+        });
+
+        // Bottom border
+        setDrawColor(doc, cfg.colors.border);
+        doc.line(left, y - 3, right, y - 3);
+
+        // Total row
+        y += 3;
+        y = checkPageBreak(doc, y, 12);
+        setFillColor(doc, cfg.colors.primary);
+        doc.rect(left, y - 6, tableWidth, 10, 'F');
+        doc.setFontSize(cfg.fonts.bodySize + 1);
+        doc.setFont('helvetica', 'bold');
+        setColor(doc, cfg.colors.white);
+        doc.text('ESTIMATED TOTAL', cols[3].x - 30, y, { align: 'right' });
+        doc.text(formatCurrency(grandTotal), cols[4].x + cols[4].w - 2, y, { align: 'right' });
+        y += 10;
+
+        return { y: y, total: grandTotal };
+    }
+
+    // =========================================================================
+    // PAGE FOOTER
+    // =========================================================================
+
+    function drawPageFooter(doc) {
+        const totalPages = doc.internal.getNumberOfPages();
+        for (let i = 1; i <= totalPages; i++) {
+            doc.setPage(i);
+            const pw = pageWidth(doc);
+            const ph = pageHeight(doc);
+            doc.setFontSize(PDF_CONFIG.fonts.tinySize);
+            doc.setFont('helvetica', 'normal');
+            setColor(doc, PDF_CONFIG.colors.textMuted);
+            doc.text(
+                'Page ' + i + ' of ' + totalPages,
+                pw / 2,
+                ph - 10,
+                { align: 'center' }
+            );
+            doc.text(
+                'Generated by AmeriDex Dealer Portal',
+                pw / 2,
+                ph - 6,
+                { align: 'center' }
+            );
+        }
+    }
+
+    // =========================================================================
+    // MAIN PDF GENERATION (overrides window.generatePDF)
+    // =========================================================================
+
+    async function generateBrandedPDF() {
+        if (typeof window.jspdf === 'undefined') {
+            alert('PDF library not loaded. Please try again in a moment.');
+            return;
+        }
+
+        // Load logo if not already loaded
+        if (!PDF_CONFIG.logo.dataUrl) {
+            PDF_CONFIG.logo.dataUrl = await loadLogoAsDataUrl();
+        }
+
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        const cfg = PDF_CONFIG;
+        const today = new Date().toLocaleDateString('en-US', {
+            year: 'numeric', month: 'long', day: 'numeric'
+        });
+
+        // ---- Page 1 Header ----
+        let y = drawPageHeader(doc);
+
+        // ---- Quote Info Bar ----
+        y += 2;
+        doc.setFontSize(cfg.fonts.bodySize);
+        doc.setFont('helvetica', 'normal');
+        setColor(doc, cfg.colors.textMuted);
+        doc.text('Date: ' + today, cfg.margin.left, y);
+
+        if (typeof currentQuote !== 'undefined' && currentQuote.quoteId) {
+            doc.setFont('helvetica', 'bold');
+            setColor(doc, cfg.colors.primary);
+            doc.text('Quote #: ' + currentQuote.quoteId, pageWidth(doc) - cfg.margin.right, y, { align: 'right' });
+        }
+        y += 10;
+
+        // ---- Customer Information ----
+        y = drawSectionTitle(doc, y, 'Customer Information');
+        const custName = document.getElementById('cust-name').value || '';
+        const custEmail = document.getElementById('cust-email').value || '';
+        const custZip = document.getElementById('cust-zip').value || '';
+        const custCompany = document.getElementById('cust-company').value || '';
+        const custPhone = document.getElementById('cust-phone').value || '';
+
+        y = drawKeyValue(doc, y, 'Name', custName);
+        y = drawKeyValue(doc, y, 'Email', custEmail);
+        y = drawKeyValue(doc, y, 'Zip Code', custZip);
+        if (custCompany) y = drawKeyValue(doc, y, 'Company', custCompany);
+        if (custPhone) y = drawKeyValue(doc, y, 'Phone', custPhone);
+
+        // ---- Dealer Info (if available) ----
+        if (typeof dealerSettings !== 'undefined') {
+            const dealerContact = dealerSettings.dealerContact || '';
+            const dealerPhone = dealerSettings.dealerPhone || '';
+            const dealerName = dealerSettings.dealerName || '';
+            if (dealerContact || dealerPhone || dealerName) {
+                y += 4;
+                y = drawSectionTitle(doc, y, 'Dealer Information');
+                if (dealerName) y = drawKeyValue(doc, y, 'Business', dealerName);
+                if (dealerContact) y = drawKeyValue(doc, y, 'Contact', dealerContact);
+                if (dealerPhone) y = drawKeyValue(doc, y, 'Phone', dealerPhone);
+                y = drawKeyValue(doc, y, 'Dealer Code', dealerSettings.dealerCode || '');
+            }
+        }
+
+        // ---- Options ----
+        const hasPicFrame = document.getElementById('pic-frame').checked;
+        const hasStairs = document.getElementById('stairs').checked;
+        if (hasPicFrame || hasStairs) {
+            y += 4;
+            y = drawSectionTitle(doc, y, 'Options');
+            doc.setFontSize(cfg.fonts.bodySize);
+            doc.setFont('helvetica', 'normal');
+            setColor(doc, cfg.colors.success);
+            if (hasPicFrame) {
+                doc.text('\u2713 Picture Framing', cfg.margin.left, y);
+                y += 6;
+            }
+            if (hasStairs) {
+                doc.text('\u2713 Stairs', cfg.margin.left, y);
+                y += 6;
+            }
+        }
+
+        // ---- Line Items ----
+        y += 4;
+        y = drawSectionTitle(doc, y, 'Order Items');
+        const tableResult = drawLineItemsTable(doc, y);
+        y = tableResult.y;
+
+        // ---- Special Instructions ----
+        const special = document.getElementById('special-instr').value;
+        if (special) {
+            y += 4;
+            y = drawSectionTitle(doc, y, 'Special Instructions');
+            y = checkPageBreak(doc, y, 12);
+            doc.setFontSize(cfg.fonts.bodySize);
+            doc.setFont('helvetica', 'normal');
+            setColor(doc, cfg.colors.textMain);
+            const splitLines = doc.splitTextToSize(special, pageWidth(doc) - cfg.margin.left - cfg.margin.right);
+            splitLines.forEach(line => {
+                y = checkPageBreak(doc, y, 6);
+                doc.text(line, cfg.margin.left, y);
+                y += 5;
+            });
+        }
+
+        // ---- Shipping & Delivery ----
+        const shipAddr = document.getElementById('ship-addr').value;
+        const delDate = document.getElementById('del-date').value;
+        if (shipAddr || delDate) {
+            y += 4;
+            y = drawSectionTitle(doc, y, 'Shipping & Delivery');
+            if (shipAddr) {
+                y = drawKeyValue(doc, y, 'Address', shipAddr.replace(/\n/g, ', '));
+            }
+            if (delDate) {
+                y = drawKeyValue(doc, y, 'Pref. Date', delDate);
+            }
+        }
+
+        // ---- Disclaimer ----
+        y += 8;
+        y = checkPageBreak(doc, y, 25);
+        setDrawColor(doc, cfg.colors.border);
+        doc.setLineWidth(0.3);
+        doc.line(cfg.margin.left, y, pageWidth(doc) - cfg.margin.right, y);
+        y += 6;
+        doc.setFontSize(cfg.fonts.tinySize);
+        doc.setFont('helvetica', 'italic');
+        setColor(doc, cfg.colors.textMuted);
+        const disclaimer = 'Disclaimer: This is an estimate only. Final pricing is subject to confirmation by A&M Building Products / AmeriDex. ' +
+            'Prices do not include shipping, taxes, or installation unless otherwise noted. ' +
+            'Product availability and lead times may vary. Contact sales@ameridex.com for questions.';
+        const disclaimerLines = doc.splitTextToSize(disclaimer, pageWidth(doc) - cfg.margin.left - cfg.margin.right);
+        disclaimerLines.forEach(line => {
+            y = checkPageBreak(doc, y, 5);
+            doc.text(line, cfg.margin.left, y);
+            y += 4;
+        });
+
+        // ---- Page Footers ----
+        drawPageFooter(doc);
+
+        // ---- Save ----
+        const quoteId = (typeof currentQuote !== 'undefined' && currentQuote.quoteId)
+            ? currentQuote.quoteId
+            : 'draft';
+        doc.save('AmeriDex-Quote-' + quoteId + '.pdf');
+    }
+
+    // =========================================================================
+    // OVERRIDE: Replace the original generatePDF
+    // =========================================================================
+
+    window.generatePDF = generateBrandedPDF;
+
+    console.log('[ameridex-print-branding] Branded PDF generator loaded.');
+
 })();
