@@ -1,0 +1,28 @@
+<!-- CUSTOMERS SECTION - INSERT THIS AFTER THE SAVED QUOTES SECTION -->
+<!-- Location: After closing </section> tag of id="saved-quotes-section" -->
+
+<!-- Customers Panel -->
+<section class="card" id="customers-section" style="display:none;">
+    <div class="card-header">
+        <div>
+            <h2 class="card-title">Customer Management</h2>
+            <p class="card-subtitle">Browse customers and create quotes</p>
+        </div>
+        <button type="button" class="btn btn-outline btn-sm" id="back-to-quotes-btn">← Back to Quotes</button>
+    </div>
+    
+    <div class="customers-panel">
+        <div class="customers-header">
+            <div class="customers-search">
+                <input type="text" id="customer-search" placeholder="Search by name, email, or company...">
+            </div>
+            <div class="customers-stats">
+                <span id="customer-count">0 customers</span>
+            </div>
+        </div>
+        
+        <div class="customers-list" id="customers-list">
+            <div class="no-customers">No customers yet. Create your first quote to add customers.</div>
+        </div>
+    </div>
+</section>
