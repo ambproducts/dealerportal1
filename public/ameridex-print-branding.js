@@ -27,8 +27,8 @@
 
   /* ── Company Info ── */
   var COMPANY_NAME    = 'A&M Building Products / AmeriDex';
-  var COMPANY_PHONE   = '(732) 899-1440';
-  var COMPANY_ADDRESS = '2401 Bridge Ave, Point Pleasant, NJ 08742';
+  var COMPANY_PHONE   = '1-800-217-9206';
+  var COMPANY_ADDRESS = '1129A Industrial Parkway, Brick, NJ 08724';
   var COMPANY_WEBSITE = 'ameridex.com';
 
   /* ── HTML entity escaper (XSS prevention) ── */
