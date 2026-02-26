@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - Admin Panel v1.6
+// AmeriDex Dealer Portal - Admin Panel v1.7
 // Date: 2026-02-25
 // ============================================================
 // REQUIRES: ameridex-api.js (v2.1+) loaded first
@@ -8,6 +8,15 @@
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
 //   <script src="ameridex-admin.js"></script>
+//
+// v1.7 Changes (2026-02-25):
+//   - REPLACE: editProduct() prompt() chain with full inline edit form.
+//     Clicking "Edit" on a product row now expands an inline form directly
+//     below the row with fields for Name, Base Price, Unit, Category, and
+//     Tier Exempt toggle. Only one product edit form is open at a time.
+//   - ADD: cancelEditProduct() and saveEditProduct() functions.
+//   - ADD: CSS for .admin-inline-edit card styling.
+//   - FIX: Edit button uses primary blue for better visibility.
 //
 // v1.6 Changes (2026-02-25):
 //   - FIX: toggleProduct() boolean logic made explicit.
@@ -154,6 +163,13 @@
         '.admin-loading { text-align:center; padding:2rem; color:#6b7280; }' +
         '.admin-error { background:#fee2e2; color:#dc2626; padding:0.75rem 1rem; border-radius:8px; font-size:0.88rem; margin-bottom:1rem; }' +
         '.admin-success { background:#dcfce7; color:#16a34a; padding:0.75rem 1rem; border-radius:8px; font-size:0.88rem; margin-bottom:1rem; }' +
+        '.admin-inline-edit { background:#f0f7ff; border:2px solid #2563eb; border-radius:10px; ' +
+            'padding:1.25rem; margin:0.5rem 0; }' +
+        '.admin-inline-edit h4 { margin:0 0 1rem; font-size:0.95rem; color:#1e40af; display:flex; ' +
+            'justify-content:space-between; align-items:center; }' +
+        '.admin-inline-edit .admin-form { margin-bottom:0; }' +
+        '.admin-inline-edit .admin-form-field input, .admin-inline-edit .admin-form-field select { ' +
+            'background:#fff; }' +
         '@media (max-width:768px) { ' +
             '#admin-panel { max-width:100%; margin:0; border-radius:10px; } ' +
             '.admin-form-row { grid-template-columns:1fr; } ' +
@@ -527,6 +543,11 @@
         return div.innerHTML;
     }
 
+    function escAttr(str) {
+        if (!str) return '';
+        return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
 
     // ----------------------------------------------------------
     // DEALERS TAB
@@ -857,7 +878,7 @@
 
 
     // ----------------------------------------------------------
-    // PRODUCTS TAB (NEW in v1.4)
+    // PRODUCTS TAB (v1.4, inline edit v1.7)
     // ----------------------------------------------------------
     function loadProducts() {
         var container = document.getElementById('admin-products-list');
@@ -896,7 +917,7 @@
         filtered.forEach(function (p) {
             var isExempt = p.tierOverrides && Object.keys(p.tierOverrides).length > 0;
             var isCustom = p.id === 'custom';
-            html += '<tr>' +
+            html += '<tr id="prod-row-' + esc(p.id) + '">' +
                 '<td><strong>' + esc(p.name) + '</strong></td>' +
                 '<td><code style="font-size:0.78rem;background:#f3f4f6;padding:0.15rem 0.4rem;border-radius:4px;">' + esc(p.id) + '</code></td>' +
                 '<td><span class="admin-badge badge-' + (p.category || 'other') + '">' + esc(p.category || 'other') + '</span></td>' +
@@ -905,10 +926,11 @@
                 '<td style="text-align:center;">' + (isExempt ? '<span style="color:#dc2626;font-weight:600;">Yes</span>' : '<span style="color:#6b7280;">No</span>') + '</td>' +
                 '<td><span class="admin-badge ' + (p.isActive !== false ? 'badge-active' : 'badge-inactive') + '">' + (p.isActive !== false ? 'Active' : 'Inactive') + '</span></td>' +
                 '<td class="admin-actions">' +
-                    '<button class="admin-btn admin-btn-ghost admin-btn-sm" data-action="edit-product" data-id="' + esc(p.id) + '">Edit</button>' +
+                    '<button class="admin-btn admin-btn-primary admin-btn-sm" data-action="edit-product" data-id="' + esc(p.id) + '">Edit</button>' +
                     '<button class="admin-btn ' + (p.isActive !== false ? 'admin-btn-danger' : 'admin-btn-success') + ' admin-btn-sm" data-action="toggle-product" data-id="' + esc(p.id) + '">' + (p.isActive !== false ? 'Disable' : 'Enable') + '</button>' +
                     (isCustom ? '' : '<button class="admin-btn admin-btn-danger admin-btn-sm" data-action="delete-product" data-id="' + esc(p.id) + '">Del</button>') +
-                '</td></tr>';
+                '</td></tr>' +
+                '<tr id="prod-edit-row-' + esc(p.id) + '" style="display:none;"><td colspan="8" style="padding:0;border-bottom:none;"></td></tr>';
         });
 
         html += '</tbody></table>';
@@ -961,34 +983,140 @@
             .catch(function (err) { showAlert('admin-product-alert', 'Failed: ' + esc(err.message), 'error'); });
     });
 
+    // ---- Inline Edit Product (v1.7) ----
     function editProduct(id) {
         var prod = _allProducts.find(function (p) { return p.id === id; });
         if (!prod) return;
 
-        var newName = prompt('Product Name:', prod.name || '');
-        if (newName === null) return;
-        var newPrice = prompt('Base Price ($):', (prod.basePrice || 0).toFixed(2));
-        if (newPrice === null) return;
-        if (isNaN(Number(newPrice))) { showAlert('admin-product-alert', 'Invalid price', 'error'); return; }
-        var newUnit = prompt('Unit (ft, box, each, pack, sqft):', prod.unit || 'each');
-        if (newUnit === null) return;
-        var newCat = prompt('Category (decking, sealing, fasteners, hardware, other):', prod.category || 'other');
-        if (newCat === null) return;
+        // Close any other open edit forms first
+        document.querySelectorAll('[id^="prod-edit-row-"]').forEach(function (row) {
+            row.style.display = 'none';
+            row.querySelector('td').innerHTML = '';
+        });
+
+        var editRow = document.getElementById('prod-edit-row-' + id);
+        if (!editRow) return;
+        var cell = editRow.querySelector('td');
 
         var isExempt = prod.tierOverrides && Object.keys(prod.tierOverrides).length > 0;
-        var exemptAnswer = prompt('Exempt from tier discounts? (yes/no):', isExempt ? 'yes' : 'no');
-        if (exemptAnswer === null) return;
+
+        cell.innerHTML =
+            '<div class="admin-inline-edit">' +
+                '<h4>' +
+                    '<span>Editing: ' + esc(prod.name) + '</span>' +
+                    '<button class="admin-btn admin-btn-ghost admin-btn-sm" id="cancel-edit-' + escAttr(id) + '">Cancel</button>' +
+                '</h4>' +
+                '<div class="admin-form">' +
+                    '<div class="admin-form-row">' +
+                        '<div class="admin-form-field">' +
+                            '<label>Product Name</label>' +
+                            '<input type="text" id="edit-name-' + escAttr(id) + '" value="' + escAttr(prod.name || '') + '">' +
+                        '</div>' +
+                        '<div class="admin-form-field">' +
+                            '<label>Base Price ($)</label>' +
+                            '<input type="number" step="0.01" min="0" id="edit-price-' + escAttr(id) + '" value="' + (prod.basePrice || 0).toFixed(2) + '">' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="admin-form-row">' +
+                        '<div class="admin-form-field">' +
+                            '<label>Unit</label>' +
+                            '<select id="edit-unit-' + escAttr(id) + '">' +
+                                '<option value="ft"' + (prod.unit === 'ft' ? ' selected' : '') + '>per foot (ft)</option>' +
+                                '<option value="box"' + (prod.unit === 'box' ? ' selected' : '') + '>per box</option>' +
+                                '<option value="each"' + (prod.unit === 'each' ? ' selected' : '') + '>each</option>' +
+                                '<option value="pack"' + (prod.unit === 'pack' ? ' selected' : '') + '>per pack</option>' +
+                                '<option value="sqft"' + (prod.unit === 'sqft' ? ' selected' : '') + '>per sq ft</option>' +
+                            '</select>' +
+                        '</div>' +
+                        '<div class="admin-form-field">' +
+                            '<label>Category</label>' +
+                            '<select id="edit-cat-' + escAttr(id) + '">' +
+                                '<option value="decking"' + (prod.category === 'decking' ? ' selected' : '') + '>Decking</option>' +
+                                '<option value="sealing"' + (prod.category === 'sealing' ? ' selected' : '') + '>Sealing & Protection</option>' +
+                                '<option value="fasteners"' + (prod.category === 'fasteners' ? ' selected' : '') + '>Fasteners & Hardware</option>' +
+                                '<option value="hardware"' + (prod.category === 'hardware' ? ' selected' : '') + '>Hardware</option>' +
+                                '<option value="other"' + (prod.category === 'other' ? ' selected' : '') + '>Other</option>' +
+                            '</select>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="admin-form-row">' +
+                        '<div class="admin-form-field">' +
+                            '<label>Exempt from Tier Discounts?</label>' +
+                            '<select id="edit-exempt-' + escAttr(id) + '">' +
+                                '<option value="no"' + (!isExempt ? ' selected' : '') + '>No (apply tier multiplier normally)</option>' +
+                                '<option value="yes"' + (isExempt ? ' selected' : '') + '>Yes (same price for all tiers)</option>' +
+                            '</select>' +
+                        '</div>' +
+                        '<div class="admin-form-field"></div>' +
+                    '</div>' +
+                    '<div class="admin-form-actions">' +
+                        '<button class="admin-btn admin-btn-ghost" id="cancel-edit2-' + escAttr(id) + '">Cancel</button>' +
+                        '<button class="admin-btn admin-btn-primary" id="save-edit-' + escAttr(id) + '">Save Changes</button>' +
+                    '</div>' +
+                '</div>' +
+            '</div>';
+
+        editRow.style.display = 'table-row';
+
+        // Scroll the edit form into view
+        editRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+        // Wire up Cancel and Save buttons
+        document.getElementById('cancel-edit-' + id).addEventListener('click', function () { cancelEditProduct(id); });
+        document.getElementById('cancel-edit2-' + id).addEventListener('click', function () { cancelEditProduct(id); });
+        document.getElementById('save-edit-' + id).addEventListener('click', function () { saveEditProduct(id); });
+    }
+
+    function cancelEditProduct(id) {
+        var editRow = document.getElementById('prod-edit-row-' + id);
+        if (editRow) {
+            editRow.style.display = 'none';
+            editRow.querySelector('td').innerHTML = '';
+        }
+    }
+
+    function saveEditProduct(id) {
+        var nameEl = document.getElementById('edit-name-' + id);
+        var priceEl = document.getElementById('edit-price-' + id);
+        var unitEl = document.getElementById('edit-unit-' + id);
+        var catEl = document.getElementById('edit-cat-' + id);
+        var exemptEl = document.getElementById('edit-exempt-' + id);
+
+        if (!nameEl || !priceEl) return;
+
+        var newName = nameEl.value.trim();
+        var newPrice = priceEl.value;
+        var newUnit = unitEl.value;
+        var newCat = catEl.value;
+        var exemptVal = exemptEl.value;
+
+        if (!newName) { showAlert('admin-product-alert', 'Product name is required', 'error'); return; }
+        if (!newPrice || isNaN(Number(newPrice))) { showAlert('admin-product-alert', 'Valid base price is required', 'error'); return; }
+        if (Number(newPrice) < 0) { showAlert('admin-product-alert', 'Price cannot be negative', 'error'); return; }
 
         var tierOverrides = {};
-        if (exemptAnswer.toLowerCase() === 'yes') {
+        if (exemptVal === 'yes') {
             tierOverrides = { preferred: { multiplier: 1.0 }, vip: { multiplier: 1.0 } };
         }
 
+        var saveBtn = document.getElementById('save-edit-' + id);
+        if (saveBtn) { saveBtn.textContent = 'Saving...'; saveBtn.disabled = true; }
+
         _api('PUT', '/api/admin/products/' + encodeURIComponent(id), {
-            name: newName, basePrice: Number(newPrice), unit: newUnit, category: newCat, tierOverrides: tierOverrides
+            name: newName,
+            basePrice: Number(newPrice),
+            unit: newUnit,
+            category: newCat,
+            tierOverrides: tierOverrides
         })
-            .then(function () { showAlert('admin-product-alert', 'Product updated!', 'success'); loadProducts(); })
-            .catch(function (err) { showAlert('admin-product-alert', 'Update failed: ' + esc(err.message), 'error'); });
+            .then(function () {
+                showAlert('admin-product-alert', 'Product "' + esc(newName) + '" updated successfully!', 'success');
+                loadProducts();
+            })
+            .catch(function (err) {
+                if (saveBtn) { saveBtn.textContent = 'Save Changes'; saveBtn.disabled = false; }
+                showAlert('admin-product-alert', 'Update failed: ' + esc(err.message), 'error');
+            });
     }
 
     function toggleProduct(id) {
@@ -1368,5 +1496,5 @@
     }
 
 
-    console.log('[AmeriDex Admin] v1.6 loaded.');
+    console.log('[AmeriDex Admin] v1.7 loaded.');
 })();
