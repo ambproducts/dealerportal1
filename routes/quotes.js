@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const { readJSON, writeJSON, QUOTES_FILE, TIERS_FILE, generateId } = require('../lib/helpers');
+const crypto = require('crypto');
+const { readJSON, writeJSON, QUOTES_FILE, TIERS_FILE, CUSTOMERS_FILE, generateId } = require('../lib/helpers');
 const { requireAuth, requireRole } = require('../middleware/auth');
 
 router.use(requireAuth);
@@ -17,6 +18,109 @@ function generateQuoteNumber() {
 function recalcQuoteTotal(quote) {
     quote.totalAmount = quote.lineItems.reduce((sum, i) => sum + (i.total || 0), 0);
     quote.totalAmount = Math.round(quote.totalAmount * 100) / 100;
+}
+
+// =============================================================
+// upsertCustomer
+// Finds or creates a customer in customers.json.
+// On update (PUT), prefers matching by customerId first,
+// then falls back to email for legacy quotes.
+// Returns the customer record (with id).
+// =============================================================
+function upsertCustomer(customerData, dealerCode, existingCustomerId) {
+    if (!customerData || !customerData.email || !customerData.name) {
+        return customerData || {};
+    }
+
+    const customers = readJSON(CUSTOMERS_FILE);
+    const normalizedEmail = customerData.email.toLowerCase().trim();
+    const now = new Date().toISOString();
+
+    // Step 1: Try to find by existingCustomerId (for PUT updates)
+    let existing = null;
+    if (existingCustomerId) {
+        existing = customers.find(c => c.id === existingCustomerId);
+    }
+
+    // Step 2: Fall back to email match within this dealer
+    if (!existing) {
+        existing = customers.find(c =>
+            c.email && c.email.toLowerCase() === normalizedEmail
+            && c.dealers && c.dealers.includes(dealerCode)
+        );
+    }
+
+    if (existing) {
+        // Update fields from the quote's customer data
+        existing.name = customerData.name;
+        if (customerData.company !== undefined) existing.company = customerData.company;
+        if (customerData.phone !== undefined) existing.phone = customerData.phone;
+        if (customerData.zipCode !== undefined) existing.zipCode = customerData.zipCode;
+        existing.email = normalizedEmail;
+
+        // Ensure this dealer is in the dealers array
+        if (!existing.dealers) existing.dealers = [];
+        if (!existing.dealers.includes(dealerCode)) {
+            existing.dealers.push(dealerCode);
+        }
+
+        existing.lastContact = now;
+        existing.updatedAt = now;
+
+        writeJSON(CUSTOMERS_FILE, customers);
+
+        console.log('[CustomerDB] Updated via quote: ' + existing.name + ' (' + normalizedEmail + ') dealer: ' + dealerCode);
+        return existing;
+    }
+
+    // Step 3: Create new customer
+    const newCustomer = {
+        id: crypto.randomUUID(),
+        name: customerData.name,
+        email: normalizedEmail,
+        company: customerData.company || '',
+        phone: customerData.phone || '',
+        zipCode: customerData.zipCode || '',
+        dealers: [dealerCode],
+        quoteCount: 0,
+        totalValue: 0,
+        firstContact: now,
+        lastContact: now,
+        createdAt: now,
+        updatedAt: now,
+        notes: ''
+    };
+
+    customers.push(newCustomer);
+    writeJSON(CUSTOMERS_FILE, customers);
+
+    console.log('[CustomerDB] Created via quote: ' + newCustomer.name + ' (' + normalizedEmail + ') dealer: ' + dealerCode);
+    return newCustomer;
+}
+
+// =============================================================
+// recalcCustomerStats
+// Scans all quotes to recompute quoteCount and totalValue
+// for a given customerId. Called after every quote save.
+// =============================================================
+function recalcCustomerStats(customerId) {
+    if (!customerId) return;
+
+    const customers = readJSON(CUSTOMERS_FILE);
+    const custIdx = customers.findIndex(c => c.id === customerId);
+    if (custIdx === -1) return;
+
+    const quotes = readJSON(QUOTES_FILE);
+    const customerQuotes = quotes.filter(q =>
+        q.customer && q.customer.customerId === customerId
+    );
+
+    customers[custIdx].quoteCount = customerQuotes.length;
+    customers[custIdx].totalValue = Math.round(
+        customerQuotes.reduce((sum, q) => sum + (q.totalAmount || 0), 0) * 100
+    ) / 100;
+
+    writeJSON(CUSTOMERS_FILE, customers);
 }
 
 // =============================================================
@@ -118,13 +222,26 @@ router.post('/', (req, res) => {
 
     const totalAmount = items.reduce((sum, i) => sum + i.total, 0);
 
+    // Upsert customer into customers.json and get back the record with id
+    const upsertedCustomer = upsertCustomer(customer, req.user.dealerCode, null);
+
+    // Build the customer snapshot stored on the quote (includes customerId)
+    const customerSnapshot = {
+        customerId: upsertedCustomer.id || null,
+        name: upsertedCustomer.name || (customer && customer.name) || '',
+        email: upsertedCustomer.email || (customer && customer.email) || '',
+        company: upsertedCustomer.company || (customer && customer.company) || '',
+        phone: upsertedCustomer.phone || (customer && customer.phone) || '',
+        zipCode: upsertedCustomer.zipCode || (customer && customer.zipCode) || ''
+    };
+
     const newQuote = {
         id: generateId(),
         quoteNumber: generateQuoteNumber(),
         dealerCode: req.user.dealerCode,
         createdBy: req.user.username,
         createdByRole: req.user.role,
-        customer: customer || {},
+        customer: customerSnapshot,
         lineItems: items,
         notes: notes || '',
         pricingTier: dealerTier,
@@ -143,7 +260,10 @@ router.post('/', (req, res) => {
     quotes.push(newQuote);
     writeJSON(QUOTES_FILE, quotes);
 
-    console.log('[Quotes] Created: ' + newQuote.quoteNumber + ' by ' + req.user.username + ' (' + req.user.role + ') | Dealer: ' + req.user.dealerCode);
+    // Recalculate customer stats now that the quote exists in the file
+    recalcCustomerStats(customerSnapshot.customerId);
+
+    console.log('[Quotes] Created: ' + newQuote.quoteNumber + ' by ' + req.user.username + ' (' + req.user.role + ') | Dealer: ' + req.user.dealerCode + ' | Customer: ' + customerSnapshot.name + ' (' + (customerSnapshot.customerId || 'no-id') + ')');
     res.status(201).json(newQuote);
 });
 
@@ -165,7 +285,25 @@ router.put('/:id', (req, res) => {
     }
 
     const { customer, lineItems, notes } = req.body;
-    if (customer) quotes[idx].customer = customer;
+
+    // Track the old customerId for stats recalc (in case customer changes)
+    const oldCustomerId = quotes[idx].customer ? quotes[idx].customer.customerId : null;
+
+    if (customer) {
+        // Use the existing customerId on the quote to find the right record to update
+        const existingCustomerId = (quotes[idx].customer && quotes[idx].customer.customerId) || null;
+        const upsertedCustomer = upsertCustomer(customer, req.user.dealerCode, existingCustomerId);
+
+        quotes[idx].customer = {
+            customerId: upsertedCustomer.id || null,
+            name: upsertedCustomer.name || customer.name || '',
+            email: upsertedCustomer.email || customer.email || '',
+            company: upsertedCustomer.company || customer.company || '',
+            phone: upsertedCustomer.phone || customer.phone || '',
+            zipCode: upsertedCustomer.zipCode || customer.zipCode || ''
+        };
+    }
+
     if (notes !== undefined) quotes[idx].notes = notes;
 
     if (lineItems) {
@@ -206,6 +344,17 @@ router.put('/:id', (req, res) => {
 
     quotes[idx].updatedAt = new Date().toISOString();
     writeJSON(QUOTES_FILE, quotes);
+
+    // Recalculate stats for the current customer
+    const newCustomerId = quotes[idx].customer ? quotes[idx].customer.customerId : null;
+    if (newCustomerId) {
+        recalcCustomerStats(newCustomerId);
+    }
+    // If the customer changed, also recalc the old customer's stats
+    if (oldCustomerId && oldCustomerId !== newCustomerId) {
+        recalcCustomerStats(oldCustomerId);
+    }
+
     res.json(quotes[idx]);
 });
 
@@ -450,6 +599,7 @@ router.post('/:id/submit', (req, res) => {
 
 // =============================================================
 // DELETE /api/quotes/:id
+// Recalculates customer stats after deletion
 // =============================================================
 router.delete('/:id', (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
@@ -467,6 +617,13 @@ router.delete('/:id', (req, res) => {
 
     const removed = quotes.splice(idx, 1)[0];
     writeJSON(QUOTES_FILE, quotes);
+
+    // Recalculate customer stats since a quote was removed
+    const custId = removed.customer ? removed.customer.customerId : null;
+    if (custId) {
+        recalcCustomerStats(custId);
+    }
+
     res.json({ message: 'Quote ' + removed.quoteNumber + ' deleted' });
 });
 
@@ -501,6 +658,12 @@ router.post('/:id/duplicate', (req, res) => {
 
     quotes.push(dup);
     writeJSON(QUOTES_FILE, quotes);
+
+    // Recalculate customer stats since a new quote references this customer
+    const custId = dup.customer ? dup.customer.customerId : null;
+    if (custId) {
+        recalcCustomerStats(custId);
+    }
 
     console.log('[Quotes] Duplicated: ' + original.quoteNumber + ' -> ' + dup.quoteNumber);
     res.status(201).json(dup);
