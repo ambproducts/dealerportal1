@@ -10,12 +10,21 @@ router.use(requireAuth);
 router.get('/', (req, res) => {
     const customers = readJSON(CUSTOMERS_FILE);
     const dealerCode = req.user.dealerCode;
+    const userRole = req.user.role;
 
-    const myCustomers = customers.filter(c =>
-        c.dealers && c.dealers.includes(dealerCode)
-    );
+    let filtered;
 
-    res.json(myCustomers);
+    // Frontdesk: only see customers whose dealers[] includes their dealerCode
+    if (userRole === 'frontdesk') {
+        filtered = customers.filter(c =>
+            c.dealers && c.dealers.includes(dealerCode)
+        );
+    } else {
+        // GM and Admin: see all customers across all dealers
+        filtered = customers;
+    }
+
+    res.json(filtered);
 });
 
 // GET /api/customers/search?q=...
@@ -27,8 +36,21 @@ router.get('/search', (req, res) => {
 
     const customers = readJSON(CUSTOMERS_FILE);
     const dealerCode = req.user.dealerCode;
+    const userRole = req.user.role;
 
-    const results = customers
+    let searchPool;
+
+    // Frontdesk: only search within their dealer's customers
+    if (userRole === 'frontdesk') {
+        searchPool = customers.filter(c =>
+            c.dealers && c.dealers.includes(dealerCode)
+        );
+    } else {
+        // GM and Admin: search across all customers
+        searchPool = customers;
+    }
+
+    const results = searchPool
         .filter(c => {
             return (c.name || '').toLowerCase().includes(q)
                 || (c.email || '').toLowerCase().includes(q)
