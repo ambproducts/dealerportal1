@@ -38,7 +38,7 @@ router.post('/login', (req, res) => {
     if (!verifyPassword(password, user.passwordHash)) {
         user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
         if (user.failedLoginAttempts >= 5) {
-            user.lockedUntil = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+            user.lockedUntil = new Date(Date.now() + 5 * 60 * 1000).toISOString();
             user.failedLoginAttempts = 0;
         }
         writeJSON(USERS_FILE, users);
