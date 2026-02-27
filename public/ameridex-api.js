@@ -1,12 +1,24 @@
 // ============================================================
-// AmeriDex Dealer Portal - API Integration Patch v2.5
-// Date: 2026-02-26
+// AmeriDex Dealer Portal - API Integration Patch v2.6
+// Date: 2026-02-27
 // ============================================================
 // REQUIRES: ameridex-patches.js (v1.0+) loaded first
 //
 // Load order in dealer-portal.html (before </body>):
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
+//
+// v2.6 Changes (2026-02-27):
+//   - FIX: renderSavedQuotes() now null-guards #quote-search and
+//     #saved-quotes-list. These elements are removed from the DOM
+//     by ameridex-patches.js v1.6 (which deletes the entire
+//     saved-quotes-section). Without these guards, every call to
+//     renderSavedQuotes() threw:
+//       TypeError: Cannot read properties of null (reading 'value')
+//     This error cascaded from handleServerLogin(), saveCurrentQuote(),
+//     and tryResumeSession().
+//   - FIX: saveCurrentQuote() also guards the renderSavedQuotes()
+//     call so it won't crash if the saved-quotes UI is absent.
 //
 // v2.5 Changes (2026-02-26):
 //   - FIX: Expose applyTierPricing to window object so admin panel
@@ -611,7 +623,16 @@
 
         saveToStorage();
         updateCustomerHistory();
-        renderSavedQuotes();
+
+        // v2.6: Guard against missing DOM elements.
+        // The saved-quotes-section may have been removed by
+        // ameridex-patches.js v1.6. Only call renderSavedQuotes
+        // if the target container still exists in the DOM.
+        try {
+            renderSavedQuotes();
+        } catch (e) {
+            console.warn('[API v2.6] renderSavedQuotes() skipped (DOM elements removed):', e.message);
+        }
 
         syncQuoteToServer(savedQuotes[existingIdx >= 0 ? existingIdx : savedQuotes.length - 1]);
 
@@ -849,9 +870,24 @@
     // ----------------------------------------------------------
     // 14. OVERRIDE: renderSavedQuotes (status badges + duplicate)
     // ----------------------------------------------------------
+    // v2.6: Added null guards for #quote-search and
+    // #saved-quotes-list. These elements are removed from the DOM
+    // by ameridex-patches.js v1.6 which deletes the entire
+    // saved-quotes-section. Without guards, every call path that
+    // invokes renderSavedQuotes() would throw a TypeError.
+    // ----------------------------------------------------------
     window.renderSavedQuotes = function () {
         var list = document.getElementById('saved-quotes-list');
-        var searchQuery = (document.getElementById('quote-search').value || '').toLowerCase();
+
+        // v2.6: If the saved-quotes UI has been removed from the DOM
+        // (by ameridex-patches.js v1.6), there is nothing to render.
+        // Exit silently to prevent TypeError on null elements.
+        if (!list) {
+            return;
+        }
+
+        var searchEl = document.getElementById('quote-search');
+        var searchQuery = (searchEl ? searchEl.value : '').toLowerCase();
         var filtered = savedQuotes;
 
         if (searchQuery) {
@@ -1089,5 +1125,5 @@
         tryResumeSession();
     }
 
-    console.log('[AmeriDex API] v2.5 loaded: Auth + API integration active.');
+    console.log('[AmeriDex API] v2.6 loaded: Auth + API integration active.');
 })();
