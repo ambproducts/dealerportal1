@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - Quotes & Customers Page v1.1
+// AmeriDex Dealer Portal - Quotes & Customers Page v1.2
 // Date: 2026-02-27
 // ============================================================
 // Handles all logic for quotes-customers.html:
@@ -9,14 +9,21 @@
 //   - Filter, search, sort, and date range controls
 //   - Pagination controls
 //   - Navigation to dealer-portal.html for loading quotes
+//
+// AUTH STRATEGY:
+//   ameridex-api.js stores the JWT in sessionStorage under key
+//   'ameridex-token'. It also exposes window.getAuthToken(),
+//   window.getCurrentUser(), and window.getCurrentDealer().
+//   Since quotes-customers.html is a SEPARATE page, those window
+//   globals do NOT persist. We must read sessionStorage directly.
 // ============================================================
 
 (function () {
     'use strict';
 
     var API_BASE = window.AMERIDEX_API_BASE || '';
-    var dealerSettings = null;
     var authToken = null;
+    var dealerCode = null;
 
     // --- State ---
     var quotesState = {
@@ -43,48 +50,34 @@
     var activeTab = 'quotes';
 
     // ============================================================
-    // AUTH - aligned with dealer-portal.html storage
+    // AUTH - matches ameridex-api.js storage
     // ============================================================
-    function getDealerSettings() {
-        try {
-            var stored = localStorage.getItem('ameridex_dealer_settings');
-            if (stored) return JSON.parse(stored);
-        } catch (e) {}
-        return null;
-    }
-
-    function getAuthToken() {
-        // Check for token-based auth first (future-proofing)
-        try {
-            var stored = localStorage.getItem('ameridex_auth_token');
-            if (stored) return stored;
-            stored = sessionStorage.getItem('ameridex_auth_token');
-            if (stored) return stored;
-        } catch (e) {}
-        return null;
-    }
-
     function checkAuth() {
-        dealerSettings = getDealerSettings();
-        authToken = getAuthToken();
+        // Primary: JWT token stored by ameridex-api.js
+        authToken = sessionStorage.getItem('ameridex-token') || null;
 
-        // Primary check: dealer settings with a valid dealerCode
-        // This matches how dealer-portal.html handles auth
-        var hasDealer = dealerSettings && dealerSettings.dealerCode && dealerSettings.dealerCode.length > 0;
-        var hasToken = !!authToken;
+        // Secondary: dealer settings in localStorage (offline fallback)
+        var settings = null;
+        try {
+            var raw = localStorage.getItem('ameridex_dealer_settings');
+            if (raw) settings = JSON.parse(raw);
+        } catch (e) {}
 
-        if (!hasDealer && !hasToken) {
-            // Not logged in, redirect to login
+        dealerCode = (settings && settings.dealerCode) ? settings.dealerCode : null;
+
+        // Must have EITHER a valid token OR a dealer code
+        if (!authToken && !dealerCode) {
             window.location.href = 'dealer-portal.html';
             return false;
         }
 
         // Update header with dealer info
         var dealerInfo = document.getElementById('header-dealer-code');
-        if (dealerInfo && dealerSettings) {
-            var parts = ['Dealer: ' + (dealerSettings.dealerCode || '')];
-            if (dealerSettings.dealerName) parts.push(dealerSettings.dealerName);
-            dealerInfo.textContent = parts.join(' | ');
+        if (dealerInfo && settings) {
+            var parts = [];
+            if (settings.dealerCode) parts.push('Dealer: ' + settings.dealerCode);
+            if (settings.dealerName) parts.push(settings.dealerName);
+            dealerInfo.textContent = parts.join(' | ') || '';
         }
 
         return true;
@@ -92,18 +85,16 @@
 
     function handleLogout() {
         try {
-            // Clear dealer code (same as dealer-portal.html logout)
-            if (dealerSettings) {
-                dealerSettings.dealerCode = '';
-                localStorage.setItem('ameridex_dealer_settings', JSON.stringify(dealerSettings));
+            // Clear token (matches ameridex-api.js logout)
+            sessionStorage.removeItem('ameridex-token');
+
+            // Clear dealer code from settings
+            var raw = localStorage.getItem('ameridex_dealer_settings');
+            if (raw) {
+                var settings = JSON.parse(raw);
+                settings.dealerCode = '';
+                localStorage.setItem('ameridex_dealer_settings', JSON.stringify(settings));
             }
-            // Also clear token-based auth if present
-            localStorage.removeItem('ameridex_auth_token');
-            localStorage.removeItem('ameridex_current_user');
-            localStorage.removeItem('ameridex_current_dealer');
-            sessionStorage.removeItem('ameridex_auth_token');
-            sessionStorage.removeItem('ameridex_current_user');
-            sessionStorage.removeItem('ameridex_current_dealer');
         } catch (e) {}
         window.location.href = 'dealer-portal.html';
     }
@@ -115,9 +106,8 @@
         var headers = { 'Content-Type': 'application/json' };
         if (authToken) {
             headers['Authorization'] = 'Bearer ' + authToken;
-        } else if (dealerSettings && dealerSettings.dealerCode) {
-            // Fallback: send dealer code as a header for endpoints that support it
-            headers['X-Dealer-Code'] = dealerSettings.dealerCode;
+        } else if (dealerCode) {
+            headers['X-Dealer-Code'] = dealerCode;
         }
 
         return fetch(API_BASE + path, { method: 'GET', headers: headers })
@@ -217,7 +207,7 @@
             })
             .catch(function (err) {
                 console.error('[QuotesPage] Error fetching quotes:', err);
-                contentEl.innerHTML = '<div class="empty-state"><div class="empty-state-icon">⚠️</div><h3>Unable to load quotes</h3><p>Please check your connection and try again.</p></div>';
+                contentEl.innerHTML = '<div class="empty-state"><div class="empty-state-icon">\u26a0\ufe0f</div><h3>Unable to load quotes</h3><p>Please check your connection and try again.</p></div>';
             });
     }
 
@@ -236,7 +226,7 @@
         var quotes = data.quotes || [];
 
         if (quotes.length === 0) {
-            contentEl.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><h3>No quotes found</h3><p>Try adjusting your filters or create a new quote.</p></div>';
+            contentEl.innerHTML = '<div class="empty-state"><div class="empty-state-icon">\ud83d\udccb</div><h3>No quotes found</h3><p>Try adjusting your filters or create a new quote.</p></div>';
             return;
         }
 
@@ -273,7 +263,6 @@
         html += '</div>';
         contentEl.innerHTML = html;
 
-        // Bind duplicate buttons
         contentEl.querySelectorAll('[data-duplicate]').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 var quoteId = btn.getAttribute('data-duplicate');
@@ -287,8 +276,8 @@
         var headers = { 'Content-Type': 'application/json' };
         if (authToken) {
             headers['Authorization'] = 'Bearer ' + authToken;
-        } else if (dealerSettings && dealerSettings.dealerCode) {
-            headers['X-Dealer-Code'] = dealerSettings.dealerCode;
+        } else if (dealerCode) {
+            headers['X-Dealer-Code'] = dealerCode;
         }
 
         fetch(API_BASE + '/api/quotes/' + quoteId + '/duplicate', {
@@ -349,7 +338,7 @@
             })
             .catch(function (err) {
                 console.error('[QuotesPage] Error fetching customers:', err);
-                contentEl.innerHTML = '<div class="empty-state"><div class="empty-state-icon">⚠️</div><h3>Unable to load customers</h3><p>Please check your connection and try again.</p></div>';
+                contentEl.innerHTML = '<div class="empty-state"><div class="empty-state-icon">\u26a0\ufe0f</div><h3>Unable to load customers</h3><p>Please check your connection and try again.</p></div>';
             });
     }
 
@@ -368,7 +357,7 @@
         var customers = data.customers || [];
 
         if (customers.length === 0) {
-            contentEl.innerHTML = '<div class="empty-state"><div class="empty-state-icon">👥</div><h3>No customers found</h3><p>Customers are automatically created when you save quotes.</p></div>';
+            contentEl.innerHTML = '<div class="empty-state"><div class="empty-state-icon">\ud83d\udc65</div><h3>No customers found</h3><p>Customers are automatically created when you save quotes.</p></div>';
             return;
         }
 
@@ -378,8 +367,8 @@
             html += '<div class="customer-card-name">' + escapeHTML(c.name || 'Unknown') + '</div>';
             if (c.company) html += '<div class="customer-card-company">' + escapeHTML(c.company) + '</div>';
             html += '<div class="customer-card-contact">';
-            if (c.email) html += '<span>✉ ' + escapeHTML(c.email) + '</span>';
-            if (c.phone) html += '<span>☎ ' + escapeHTML(c.phone) + '</span>';
+            if (c.email) html += '<span>\u2709 ' + escapeHTML(c.email) + '</span>';
+            if (c.phone) html += '<span>\u260e ' + escapeHTML(c.phone) + '</span>';
             html += '</div>';
             html += '<div class="customer-card-stats">';
             html += '<div class="customer-card-stat"><span class="stat-num">' + (c.quoteCount || 0) + '</span><span class="stat-lbl">Quotes</span></div>';
@@ -397,7 +386,6 @@
         html += '</div>';
         contentEl.innerHTML = html;
 
-        // Bind "View Quotes" buttons
         contentEl.querySelectorAll('[data-view-quotes]').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 var customerId = btn.getAttribute('data-view-quotes');
