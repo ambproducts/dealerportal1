@@ -7,17 +7,23 @@
 // correct order after the main dealer-portal.html inline script.
 //
 // Load order:
-//   1. ameridex-addrow-fix.js        (DOM repair + missing function defs)
-//   2. ameridex-patches.js           (DOM patches and fixes)
-//   3. ameridex-api.js               (API client and helpers)
-//   4. ameridex-pricing-fix.js       (Pricing resolution + getDisplayPrice)
-//   5. ameridex-overrides.js         (General UI overrides)
-//   6. ameridex-print-branding.js    (Branded print/preview output)
-//   7. ameridex-roles.js             (GM/Frontdesk role system + override buttons)
-//   8. ameridex-admin.js             (Admin panel)
-//   9. ameridex-admin-customers.js   (Admin customer management)
-//  10. ameridex-admin-delete.js      (Soft delete + undo + recently deleted)
-//  11. ameridex-admin-csv-fix.js     (CSV export formula injection prevention)
+//   1. ameridex-addrow-fix.js            (DOM repair + missing function defs)
+//   2. ameridex-patches.js               (DOM patches and fixes)
+//   3. ameridex-api.js                   (API client and helpers)
+//   4. ameridex-pricing-fix.js           (Pricing resolution + getDisplayPrice)
+//   5. ameridex-overrides.js             (General UI overrides)
+//   6. ameridex-print-branding.js        (Branded print/preview output)
+//   7. ameridex-roles.js                 (GM/Frontdesk role system + override buttons)
+//   8. ameridex-admin.js                 (Admin panel)
+//   9. ameridex-admin-customers.js       (Admin customer management)
+//  10. ameridex-admin-delete.js          (Soft delete + undo + recently deleted)
+//  11. ameridex-admin-user-delete.js     (Delete users + dealers from Users tab)
+//  12. ameridex-admin-csv-fix.js         (CSV export formula injection prevention)
+//
+// v1.5 Changes (2026-02-27):
+//   - Added ameridex-admin-user-delete.js for deleting users and dealers
+//     from the Users tab. Injects Delete buttons via MutationObserver.
+//     Loads after admin-delete.js and before csv-fix.
 //
 // v1.4 Changes (2026-02-27):
 //   - Added ameridex-admin-delete.js for soft delete/undo/recently deleted
@@ -51,6 +57,7 @@
         'ameridex-admin.js',
         'ameridex-admin-customers.js',
         'ameridex-admin-delete.js',
+        'ameridex-admin-user-delete.js',
         'ameridex-admin-csv-fix.js'
     ];
 
