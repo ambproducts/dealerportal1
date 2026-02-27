@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - API Integration Patch v2.6
+// AmeriDex Dealer Portal - API Integration Patch v2.7
 // Date: 2026-02-27
 // ============================================================
 // REQUIRES: ameridex-patches.js (v1.0+) loaded first
@@ -7,6 +7,20 @@
 // Load order in dealer-portal.html (before </body>):
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
+//
+// v2.7 Changes (2026-02-27):
+//   - FIX: handleServerLogin() now writes dealerSettings.role =
+//     data.user.role before calling saveDealerSettings(). This
+//     persists the role (gm, admin, frontdesk, etc.) into
+//     localStorage so that ameridex-quotes-page.js can read it
+//     via settings.role and show the dealer scope bar for GM and
+//     Admin users.
+//   - FIX: tryResumeSession() also writes dealerSettings.role =
+//     data.user.role before saveDealerSettings() so resumed
+//     sessions also have the role persisted.
+//   - FIX: handleLogout() clears dealerSettings.role on logout
+//     so the role does not persist if a different user logs in
+//     next on the same browser.
 //
 // v2.6 Changes (2026-02-27):
 //   - FIX: renderSavedQuotes() now null-guards #quote-search and
@@ -378,6 +392,9 @@
                 dealerSettings.dealerContact = data.dealer.contactPerson || '';
                 dealerSettings.dealerPhone = data.dealer.phone || '';
                 dealerSettings.lastLogin = new Date().toISOString();
+                // v2.7: Persist role so quotes-customers page can
+                // read it from localStorage and show dealer scope bar
+                dealerSettings.role = data.user.role;
                 saveDealerSettings();
 
                 applyTierPricing();
@@ -689,6 +706,9 @@
         clearInterval(countdownInterval);
 
         dealerSettings.dealerCode = '';
+        // v2.7: Clear role on logout so it doesn't persist
+        // if a different user with a different role logs in next.
+        dealerSettings.role = '';
         saveDealerSettings();
 
         resetFormOnly();
@@ -1058,6 +1078,7 @@
     //       the login screen appears. It just silently clears
     //       the token and shows the login form.
     // v2.4: Dispatches ameridex-login event on successful resume.
+    // v2.7: Persists role to dealerSettings for quotes page.
     // ----------------------------------------------------------
     function tryResumeSession() {
         if (!_authToken) return;
@@ -1073,6 +1094,9 @@
                 dealerSettings.dealerName = data.dealer.dealerName || '';
                 dealerSettings.dealerContact = data.dealer.contactPerson || '';
                 dealerSettings.dealerPhone = data.dealer.phone || '';
+                // v2.7: Persist role so quotes-customers page can
+                // read it from localStorage and show dealer scope bar
+                dealerSettings.role = data.user.role;
                 saveDealerSettings();
 
                 return applyTierPricing().then(function () {
@@ -1125,5 +1149,5 @@
         tryResumeSession();
     }
 
-    console.log('[AmeriDex API] v2.6 loaded: Auth + API integration active.');
+    console.log('[AmeriDex API] v2.7 loaded: Auth + API integration active.');
 })();
