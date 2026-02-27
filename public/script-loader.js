@@ -64,6 +64,7 @@
     const SCRIPTS = [
         'ameridex-global-scope-fix.js',
         'ameridex-addrow-fix.js',
+        'ameridex-portal-nav.js'
         'ameridex-patches.js',
         'ameridex-idle-fix.js',
         'ameridex-api.js',
