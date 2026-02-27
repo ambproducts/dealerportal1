@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - API Integration Patch v2.10
+// AmeriDex Dealer Portal - API Integration Patch v2.11
 // Date: 2026-02-27
 // ============================================================
 // REQUIRES: ameridex-patches.js (v1.0+) loaded first
@@ -7,6 +7,24 @@
 // Load order in dealer-portal.html (before </body>):
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
+//
+// v2.11 Changes (2026-02-27):
+//   - FIX: saveCurrentQuote() (Section 7) now matches by _serverId
+//     first before falling back to quoteId string comparison.
+//     Root cause: when a quote is opened from the My Quotes page
+//     via ?quoteId=<serverId>, loadQuoteFromUrlParam() (Section 18)
+//     sets currentQuote._serverId immediately. However savedQuotes[]
+//     is populated asynchronously by loadServerQuotes(). If the user
+//     saved before that async call resolved, savedQuotes[] was still
+//     empty, findIndex() returned -1, and the else-branch pushed a
+//     brand new quote entry instead of updating the existing one.
+//     syncQuoteToServer() then fired POST /api/quotes instead of
+//     PUT /api/quotes/:id, creating a duplicate on the server.
+//     Fix: findIndex() now checks _serverId first (with String()
+//     coercion to handle numeric vs string ID mismatches), then
+//     falls back to quoteId. The matched entry's _serverId is also
+//     back-filled onto quoteData so syncQuoteToServer() always
+//     fires PUT for any server-backed quote.
 //
 // v2.10 Changes (2026-02-27):
 //   - FIX: loadQuoteFromUrlParam() (Section 18) added to handle
@@ -829,6 +847,26 @@
     // ----------------------------------------------------------
     // 7. OVERRIDE: saveCurrentQuote (server + local)
     // ----------------------------------------------------------
+    // v2.11 FIX: Match by _serverId first before falling back to
+    // quoteId string comparison. When a quote is opened via
+    // ?quoteId=, currentQuote._serverId is set immediately by
+    // loadQuoteFromUrlParam() (Section 18), but savedQuotes[] is
+    // populated asynchronously by loadServerQuotes(). If the user
+    // saved before that async call resolved, savedQuotes[] was
+    // still empty, findIndex() returned -1, and the else-branch
+    // pushed a brand new quote instead of updating the existing
+    // one. syncQuoteToServer() then fired POST instead of PUT,
+    // creating a duplicate on the server.
+    //
+    // String() coercion on both sides of the _serverId comparison
+    // handles cases where the server returns a numeric ID but
+    // currentQuote._serverId was stored as a string (or vice versa).
+    //
+    // _serverId is also back-filled from the matched savedQuotes
+    // entry onto quoteData so syncQuoteToServer() always fires PUT
+    // for any server-backed quote, even if currentQuote._serverId
+    // was somehow not set before this function ran.
+    // ----------------------------------------------------------
     var _origSaveCurrentQuote = window.saveCurrentQuote;
     window.saveCurrentQuote = function () {
         if (typeof window.syncQuoteFromDOM === 'function') {
@@ -839,15 +877,23 @@
             currentQuote.quoteId = generateQuoteNumber();
         }
 
+        // v2.11: Match by _serverId first, then fall back to quoteId.
         var existingIdx = savedQuotes.findIndex(function (q) {
-            return q.quoteId === currentQuote.quoteId;
+            return (currentQuote._serverId && q._serverId &&
+                    String(q._serverId) === String(currentQuote._serverId))
+                || q.quoteId === currentQuote.quoteId;
         });
 
         var quoteData = JSON.parse(JSON.stringify(currentQuote));
         quoteData.updatedAt = new Date().toISOString();
 
         if (existingIdx >= 0) {
-            quoteData._serverId = savedQuotes[existingIdx]._serverId;
+            // v2.11: Back-fill _serverId from matched record in case
+            // currentQuote didn't carry it (e.g. loaded from localStorage
+            // fallback path). This ensures syncQuoteToServer() fires PUT.
+            if (!quoteData._serverId && savedQuotes[existingIdx]._serverId) {
+                quoteData._serverId = savedQuotes[existingIdx]._serverId;
+            }
             savedQuotes[existingIdx] = quoteData;
         } else {
             quoteData.createdAt = new Date().toISOString();
@@ -868,7 +914,7 @@
             console.warn('[API v2.6] renderSavedQuotes() skipped (DOM elements removed):', e.message);
         }
 
-        syncQuoteToServer(savedQuotes[existingIdx >= 0 ? existingIdx : savedQuotes.length - 1]);
+        syncQuoteToServer(savedQuotes[existingIdx]);
 
         return currentQuote.quoteId;
     };
@@ -1487,5 +1533,5 @@
     // once auth is established.
     loadQuoteFromUrlParam();
 
-    console.log('[AmeriDex API] v2.10 loaded: Auth + API integration active.');
+    console.log('[AmeriDex API] v2.11 loaded: Auth + API integration active.');
 })();
