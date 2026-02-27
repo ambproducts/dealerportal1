@@ -32,6 +32,10 @@ app.use('/api/products', productRoutes);
 const quoteRoutes = require('./routes/quotes');
 app.use('/api/quotes', quoteRoutes);
 
+// Customers
+const customerRoutes = require('./routes/customers');
+app.use('/api/customers', customerRoutes);
+
 // Admin - Dealers
 const adminDealerRoutes = require('./routes/admin-dealers');
 app.use('/api/admin/dealers', adminDealerRoutes);
@@ -51,6 +55,10 @@ app.use('/api/admin/pricing-tiers', adminPricingRoutes);
 // Admin - Users
 const adminUserRoutes = require('./routes/admin-users');
 app.use('/api/admin/users', adminUserRoutes);
+
+// Admin - Customers
+const adminCustomerRoutes = require('./routes/admin-customers');
+app.use('/api/admin/customers', adminCustomerRoutes);
 
 // ----------------------------------------------------------
 // Fallback: serve index.html for SPA-like behavior
