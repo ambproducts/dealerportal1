@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - Customer Address Fields Patch v1.0
+// AmeriDex Dealer Portal - Customer Address Fields Patch v1.1
 // Date: 2026-02-27
 // ============================================================
 // PURPOSE: Adds Address, City, and State fields to the
@@ -11,10 +11,37 @@
 // Load order: add to script tags in dealer-portal.html AFTER
 // the inline <script> block but BEFORE ameridex-portal-nav.js
 // OR load via script-loader.js after DOMContentLoaded.
+//
+// v1.1 FIXES:
+// - Guarded all window.currentQuote / window.customerHistory
+//   references. The inline script declares these with `let`
+//   (not `var`), so they are NOT on the window object.
+//   Bare-name `currentQuote` works across scripts (global
+//   lexical scope), but `window.currentQuote` is undefined.
+// - Section 10 (updateCustomerHistory) no longer crashes on
+//   unguarded access after _origUpdateHistory completes.
 // ============================================================
 
 (function () {
     'use strict';
+
+    // ----------------------------------------------------------
+    // HELPER: safely read currentQuote (let-declared, not on window)
+    // ----------------------------------------------------------
+    function getQuote() {
+        // Try bare global first (works across scripts for let-declared vars)
+        // then fall back to window property (works if var-declared)
+        try { return currentQuote; } catch (e) { /* not in scope */ }
+        return window.currentQuote || null;
+    }
+    function getCustomer() {
+        var q = getQuote();
+        return (q && q.customer) ? q.customer : null;
+    }
+    function getHistory() {
+        try { return customerHistory; } catch (e) { /* not in scope */ }
+        return window.customerHistory || [];
+    }
 
     // ----------------------------------------------------------
     // US STATES LIST
@@ -162,10 +189,11 @@
         // 2. PATCH: currentQuote.customer defaults
         // ----------------------------------------------------------
         // Ensure the global currentQuote has the new fields
-        if (window.currentQuote && window.currentQuote.customer) {
-            if (!('address' in window.currentQuote.customer)) window.currentQuote.customer.address = '';
-            if (!('city' in window.currentQuote.customer)) window.currentQuote.customer.city = '';
-            if (!('state' in window.currentQuote.customer)) window.currentQuote.customer.state = '';
+        var cust2 = getCustomer();
+        if (cust2) {
+            if (!('address' in cust2)) cust2.address = '';
+            if (!('city' in cust2)) cust2.city = '';
+            if (!('state' in cust2)) cust2.state = '';
         }
 
         // ----------------------------------------------------------
@@ -175,10 +203,11 @@
         if (typeof _origSave === 'function') {
             window.saveCurrentQuote = function () {
                 // Ensure fields exist on customer object before save reads them
-                if (window.currentQuote && window.currentQuote.customer) {
-                    window.currentQuote.customer.address = (document.getElementById('cust-address') || {}).value || '';
-                    window.currentQuote.customer.city = (document.getElementById('cust-city') || {}).value || '';
-                    window.currentQuote.customer.state = (document.getElementById('cust-state') || {}).value || '';
+                var cust = getCustomer();
+                if (cust) {
+                    cust.address = (document.getElementById('cust-address') || {}).value || '';
+                    cust.city = (document.getElementById('cust-city') || {}).value || '';
+                    cust.state = (document.getElementById('cust-state') || {}).value || '';
                 }
                 return _origSave.apply(this, arguments);
             };
@@ -192,7 +221,7 @@
             window.loadQuote = function (idx) {
                 _origLoad.apply(this, arguments);
                 // After the original loads, populate our new fields
-                var cust = window.currentQuote ? window.currentQuote.customer : null;
+                var cust = getCustomer();
                 if (cust) {
                     var addrEl = document.getElementById('cust-address');
                     var cityEl = document.getElementById('cust-city');
@@ -218,10 +247,11 @@
                 if (cityEl) cityEl.value = '';
                 if (stateEl) stateEl.value = '';
                 // Also ensure the reset state object has the fields
-                if (window.currentQuote && window.currentQuote.customer) {
-                    window.currentQuote.customer.address = '';
-                    window.currentQuote.customer.city = '';
-                    window.currentQuote.customer.state = '';
+                var cust = getCustomer();
+                if (cust) {
+                    cust.address = '';
+                    cust.city = '';
+                    cust.state = '';
                 }
             };
         }
@@ -372,28 +402,37 @@
         // ----------------------------------------------------------
         // 10. PATCH: updateCustomerHistory() - save new fields
         // ----------------------------------------------------------
+        // FIX v1.1: All window.currentQuote refs replaced with
+        // safe getCustomer()/getQuote() helpers. The original code
+        // crashed because `let currentQuote` in dealer-portal.html
+        // does NOT create a window property, so
+        // `window.currentQuote.customer.email` threw
+        // "Cannot read properties of undefined".
+        // ----------------------------------------------------------
         var _origUpdateHistory = window.updateCustomerHistory;
         if (typeof _origUpdateHistory === 'function') {
             window.updateCustomerHistory = function () {
                 // Ensure currentQuote.customer has the address fields
                 // before the original function runs
-                if (window.currentQuote && window.currentQuote.customer) {
-                    window.currentQuote.customer.address = (document.getElementById('cust-address') || {}).value || '';
-                    window.currentQuote.customer.city = (document.getElementById('cust-city') || {}).value || '';
-                    window.currentQuote.customer.state = (document.getElementById('cust-state') || {}).value || '';
+                var cust = getCustomer();
+                if (cust) {
+                    cust.address = (document.getElementById('cust-address') || {}).value || '';
+                    cust.city = (document.getElementById('cust-city') || {}).value || '';
+                    cust.state = (document.getElementById('cust-state') || {}).value || '';
                 }
                 _origUpdateHistory.apply(this, arguments);
                 // Also patch the customerHistory entry to persist new fields
-                var email = window.currentQuote.customer.email;
-                if (!email) return;
-                var history = window.customerHistory || [];
+                var custAfter = getCustomer();
+                if (!custAfter || !custAfter.email) return;
+                var email = custAfter.email;
+                var history = getHistory();
                 var entry = history.find(function (c) {
                     return c.email && c.email.toLowerCase() === email.toLowerCase();
                 });
                 if (entry) {
-                    entry.address = window.currentQuote.customer.address || '';
-                    entry.city = window.currentQuote.customer.city || '';
-                    entry.state = window.currentQuote.customer.state || '';
+                    entry.address = custAfter.address || '';
+                    entry.city = custAfter.city || '';
+                    entry.state = custAfter.state || '';
                 }
             };
         }
@@ -487,6 +526,6 @@
             };
         }
 
-        console.log('[CustomerAddress] All patches applied successfully.');
+        console.log('[CustomerAddress] All patches applied successfully (v1.1).');
     });
 })();
