@@ -276,99 +276,8 @@
     .scope-dot-local { background: var(--primary); }
     .scope-dot-global { background: var(--warning); }
 
-    /* Quote Cards Grid */
-    .cards-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-        gap: 1rem;
-        margin-bottom: 1.25rem;
-    }
-
-    .quote-card {
-        background: var(--bg-card);
-        border-radius: var(--radius-card);
-        padding: 1.25rem 1.5rem;
-        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
-        border: 1px solid rgba(148, 163, 184, 0.18);
-        transition: box-shadow 0.2s, transform 0.15s;
-        display: flex;
-        flex-direction: column;
-        gap: 0.75rem;
-    }
-    .quote-card:hover {
-        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12);
-        transform: translateY(-1px);
-    }
-    .quote-card-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        gap: 0.5rem;
-    }
-    .quote-card-id {
-        font-weight: 700;
-        font-size: 1rem;
-        color: var(--primary);
-    }
-    .quote-card-status {
-        display: inline-block;
-        padding: 0.2rem 0.65rem;
-        border-radius: 999px;
-        font-size: 0.72rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        white-space: nowrap;
-    }
-    .status-draft { background: #f3f4f6; color: #6b7280; }
-    .status-submitted { background: #dbeafe; color: #1d4ed8; }
-    .status-approved { background: #dcfce7; color: #15803d; }
-    .status-rejected { background: #fee2e2; color: #b91c1c; }
-    .status-revision { background: #fef3c7; color: #92400e; }
-    .status-reviewed { background: #e0e7ff; color: #4338ca; }
-
-    .quote-card-customer {
-        font-weight: 600;
-        font-size: 0.95rem;
-        color: var(--text-main);
-    }
-    .quote-card-company {
-        font-size: 0.82rem;
-        color: var(--text-muted);
-    }
-    .quote-card-meta {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        font-size: 0.82rem;
-        color: var(--text-muted);
-        padding-top: 0.5rem;
-        border-top: 1px solid var(--border-subtle);
-    }
-    .quote-card-total {
-        font-weight: 700;
-        font-size: 1.1rem;
-        color: var(--text-main);
-    }
-    .quote-card-items {
-        font-size: 0.8rem;
-        color: var(--text-muted);
-    }
-    .quote-card-date {
-        font-size: 0.78rem;
-        color: var(--text-muted);
-    }
-    .quote-card-actions {
-        display: flex;
-        gap: 0.5rem;
-        padding-top: 0.5rem;
-    }
-    .quote-card-actions .btn {
-        flex: 1;
-    }
-
-    /* Customer Table (List Layout) */
-    .customer-table-wrap {
+    /* Shared Data Table Styles (Quotes + Customers) */
+    .data-table-wrap {
         background: var(--bg-card);
         border-radius: var(--radius-card);
         box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
@@ -379,17 +288,17 @@
         margin-bottom: 1.25rem;
         position: relative;
     }
-    .customer-table {
+    .data-table {
         width: 100%;
         border-collapse: collapse;
         font-size: 0.88rem;
     }
-    .customer-table thead {
+    .data-table thead {
         position: sticky;
         top: 0;
         z-index: 2;
     }
-    .customer-table thead th {
+    .data-table thead th {
         background: #f9fafb;
         padding: 0.75rem 1rem;
         text-align: left;
@@ -402,18 +311,18 @@
         letter-spacing: 0.04em;
     }
     /* Sortable column headers */
-    .customer-table thead th.sortable-th {
+    .data-table thead th.sortable-th {
         cursor: pointer;
         user-select: none;
         transition: color 0.15s, background 0.15s;
         position: relative;
         padding-right: 1.75rem;
     }
-    .customer-table thead th.sortable-th:hover {
+    .data-table thead th.sortable-th:hover {
         background: #f0f1f3;
         color: var(--primary);
     }
-    .customer-table thead th.sortable-th .sort-arrow {
+    .data-table thead th.sortable-th .sort-arrow {
         position: absolute;
         right: 0.6rem;
         top: 50%;
@@ -422,56 +331,78 @@
         opacity: 0.35;
         line-height: 1;
     }
-    .customer-table thead th.sortable-th.sort-active .sort-arrow {
+    .data-table thead th.sortable-th.sort-active .sort-arrow {
         opacity: 1;
         color: var(--primary);
     }
-    .customer-table tbody td {
+    .data-table tbody td {
         padding: 0.75rem 1rem;
         border-bottom: 1px solid #f3f4f6;
-        vertical-align: top;
+        vertical-align: middle;
         color: var(--text-main);
     }
-    .customer-table tbody tr:hover td {
+    .data-table tbody tr:hover td {
         background: #f9fafb;
     }
-    .customer-table tbody tr:last-child td {
+    .data-table tbody tr:last-child td {
         border-bottom: none;
     }
-    .customer-table .ct-name {
+
+    /* Legacy aliases (customer-table-wrap maps to data-table-wrap) */
+    .customer-table-wrap { /* keep for backward compat */ }
+    .customer-table { /* keep for backward compat */ }
+
+    /* Shared cell styles */
+    .dt-name {
         font-weight: 700;
         color: var(--text-main);
         white-space: nowrap;
     }
-    .customer-table .ct-company {
+    .dt-company {
         color: var(--primary);
         font-weight: 600;
         font-size: 0.85rem;
     }
-    .customer-table .ct-contact {
+    .dt-contact {
         font-size: 0.84rem;
         color: var(--text-muted);
         line-height: 1.6;
     }
-    .customer-table .ct-contact a {
+    .dt-contact a {
         color: var(--text-muted);
         text-decoration: none;
     }
-    .customer-table .ct-contact a:hover {
+    .dt-contact a:hover {
         color: var(--primary);
         text-decoration: underline;
     }
-    .customer-table .ct-stat {
+    .dt-stat {
         font-weight: 700;
         color: var(--primary);
         white-space: nowrap;
     }
-    .customer-table .ct-date {
+    .dt-date {
         font-size: 0.82rem;
         color: var(--text-muted);
         white-space: nowrap;
     }
-    .customer-table .ct-dealers {
+    .dt-actions {
+        white-space: nowrap;
+    }
+    .dt-id {
+        font-weight: 700;
+        color: var(--primary);
+        white-space: nowrap;
+        font-size: 0.85rem;
+    }
+    .dt-items {
+        font-size: 0.84rem;
+        color: var(--text-muted);
+        text-align: center;
+    }
+
+    /* Dealer tags */
+    .ct-dealers {
         display: flex;
         flex-wrap: wrap;
         gap: 0.25rem;
@@ -490,9 +421,24 @@
         background: #dbeafe;
         color: #1d4ed8;
     }
-    .customer-table .ct-actions {
+
+    /* Status Badges (inline in table) */
+    .status-badge {
+        display: inline-block;
+        padding: 0.2rem 0.65rem;
+        border-radius: 999px;
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
         white-space: nowrap;
     }
+    .status-draft { background: #f3f4f6; color: #6b7280; }
+    .status-submitted { background: #dbeafe; color: #1d4ed8; }
+    .status-approved { background: #dcfce7; color: #15803d; }
+    .status-rejected { background: #fee2e2; color: #b91c1c; }
+    .status-revision { background: #fef3c7; color: #92400e; }
+    .status-reviewed { background: #e0e7ff; color: #4338ca; }
 
     /* Buttons */
     .btn {
@@ -615,9 +561,6 @@
             text-align: center;
         }
         .header-brand { flex-direction: column; }
-        .cards-grid {
-            grid-template-columns: 1fr;
-        }
         .filter-bar {
             flex-direction: column;
         }
@@ -639,7 +582,7 @@
         .scope-indicator {
             margin-left: 0;
         }
-        .customer-table-wrap {
+        .data-table-wrap {
             margin-left: -0.5rem;
             margin-right: -0.5rem;
             border-radius: 10px;

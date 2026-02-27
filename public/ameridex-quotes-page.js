@@ -1,32 +1,20 @@
 // ============================================================
-// AmeriDex Dealer Portal - Quotes & Customers Page v2.1
+// AmeriDex Dealer Portal - Quotes & Customers Page v2.2
 // Date: 2026-02-27
 // ============================================================
-// v2.1 Changes:
-//   - Customer table columns are now clickable to sort A-Z / Z-A
-//     Name, Company, Quotes, Total Value, Last Quote all sortable
-//   - Active sort column shows arrow indicator (up/down)
-//   - Table container capped at 600px with sticky headers
-//   - Sort via column header syncs with dropdown filter
+// v2.2 Changes:
+//   - Quotes tab converted from card grid to table layout
+//     matching the customer table style
+//   - Quote table columns: Quote #, Customer, Company, Status,
+//     Items, Total, Date, Actions
+//   - All columns (except Actions) are clickable to sort
+//   - Status shows as colored pill badge in table cell
+//   - Contained at 600px max-height with sticky thead
+//   - Generalized sort helpers work for both tabs
 //
-// v2.0 Changes:
-//   - Customers tab: switched from card grid to table/list layout
-//     so no data is cut off. Columns: Name, Company, Contact,
-//     Quotes, Total Value, Last Quote, Dealers (GM/Admin only),
-//     Actions.
-//   - GM/Admin dealer scope: added a scope toggle bar that lets
-//     GM and Admin users switch between "My Dealer" (default,
-//     filtered to their dealer code) and "Global" (all dealers).
-//     The dealer code input lets them type a specific code to
-//     filter. Customer rows show dealer tags so you can see
-//     which locations a customer belongs to.
-//   - "View Quotes" on a customer now links to that customer's
-//     quotes at the currently-scoped dealer location.
-//   - Clear filters resets dealer scope back to local/my dealer.
-//   - Stats bar shows "At This Dealer" count when scope is not
-//     global.
-//
-// v1.x: original card-based layout, no dealer scope switching
+// v2.1: Customer table sortable column headers
+// v2.0: Customer table layout, dealer scope bar
+// v1.x: Original card-based layout
 // ============================================================
 
 (function () {
@@ -61,21 +49,38 @@
 
     // Dealer scope state (GM/Admin feature)
     var dealerScope = {
-        mode: 'local',       // 'local' = my dealer code, 'global' = all dealers, 'specific' = typed code
-        filterCode: ''       // when mode is 'specific', this holds the typed dealer code
+        mode: 'local',
+        filterCode: ''
     };
 
     var activeTab = 'quotes';
 
-    // Sortable column definitions for customer table
-    // key = API sort field, label = display text
+    // ============================================================
+    // SORTABLE COLUMN DEFINITIONS
+    // ============================================================
+    var quoteSortColumns = [
+        { key: 'quoteNumber',  label: 'Quote #',    sortable: true },
+        { key: 'customerName', label: 'Customer',   sortable: true },
+        { key: 'company',      label: 'Company',    sortable: true },
+        { key: 'status',       label: 'Status',     sortable: true },
+        { key: 'itemCount',    label: 'Items',      sortable: true },
+        { key: 'totalAmount',  label: 'Total',      sortable: true },
+        { key: 'updatedAt',    label: 'Date',       sortable: true }
+    ];
+
     var customerSortColumns = [
-        { key: 'name',       label: 'Name',        sortable: true },
-        { key: 'company',    label: 'Company',     sortable: true },
-        { key: null,         label: 'Contact',     sortable: false },
-        { key: 'quoteCount', label: 'Quotes',      sortable: true },
-        { key: 'totalValue', label: 'Total Value',  sortable: true },
-        { key: 'lastContact',label: 'Last Quote',   sortable: true }
+        { key: 'name',        label: 'Name',        sortable: true },
+        { key: 'company',     label: 'Company',     sortable: true },
+        { key: null,          label: 'Contact',     sortable: false },
+        { key: 'quoteCount',  label: 'Quotes',      sortable: true },
+        { key: 'totalValue',  label: 'Total Value',  sortable: true },
+        { key: 'lastContact', label: 'Last Quote',   sortable: true }
+    ];
+
+    // Fields that default to descending on first click
+    var defaultDescFields = [
+        'quoteCount', 'totalValue', 'lastContact',
+        'totalAmount', 'updatedAt', 'itemCount'
     ];
 
     // ============================================================
@@ -170,12 +175,6 @@
         return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
     }
 
-    function formatDateShort(isoStr) {
-        if (!isoStr) return '';
-        var d = new Date(isoStr);
-        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    }
-
     function computeSinceDate(filterValue) {
         if (!filterValue) return '';
         var now = new Date();
@@ -196,9 +195,8 @@
     }
 
     // ============================================================
-    // SORT HELPERS
+    // GENERIC SORT HELPERS (shared by quotes + customers)
     // ============================================================
-    // Parse current sort string (e.g. '-name' => { field: 'name', desc: true })
     function parseSort(sortStr) {
         if (!sortStr) return { field: '', desc: false };
         if (sortStr.charAt(0) === '-') {
@@ -207,35 +205,85 @@
         return { field: sortStr, desc: false };
     }
 
-    // Given a column key and the current sort, return the next sort string
-    // If already sorting by this column ascending, flip to descending (and vice versa)
-    // If sorting by a different column, default to ascending for name/company, descending for numeric fields
-    function getNextCustomerSort(columnKey) {
-        var current = parseSort(customersState.sort);
+    function getNextSort(currentSortStr, columnKey) {
+        var current = parseSort(currentSortStr);
         if (current.field === columnKey) {
-            // Toggle direction
             return current.desc ? columnKey : ('-' + columnKey);
         }
-        // New column: name and company default A-Z (ascending), numbers default high-to-low (descending)
-        var defaultDescending = ['quoteCount', 'totalValue', 'lastContact'];
-        if (defaultDescending.indexOf(columnKey) !== -1) {
+        if (defaultDescFields.indexOf(columnKey) !== -1) {
             return '-' + columnKey;
         }
         return columnKey;
     }
 
-    // Get the arrow character for a sort column
-    function getSortArrow(columnKey) {
-        var current = parseSort(customersState.sort);
+    function getSortArrow(currentSortStr, columnKey) {
+        var current = parseSort(currentSortStr);
         if (current.field === columnKey) {
-            return current.desc ? '\u25BC' : '\u25B2'; // down or up triangle
+            return current.desc ? '\u25BC' : '\u25B2';
         }
-        return '\u25B4\u25BE'; // both arrows (subtle, indicates sortable)
+        return '\u25B4\u25BE';
     }
 
-    function isSortActive(columnKey) {
-        var current = parseSort(customersState.sort);
-        return current.field === columnKey;
+    function isSortActive(currentSortStr, columnKey) {
+        return parseSort(currentSortStr).field === columnKey;
+    }
+
+    function buildSortableHeader(columns, currentSortStr) {
+        var html = '';
+        columns.forEach(function (col) {
+            if (col.sortable && col.key) {
+                var active = isSortActive(currentSortStr, col.key);
+                var arrow = getSortArrow(currentSortStr, col.key);
+                html += '<th class="sortable-th' + (active ? ' sort-active' : '') + '" data-sort-col="' + col.key + '">';
+                html += col.label;
+                html += '<span class="sort-arrow">' + arrow + '</span>';
+                html += '</th>';
+            } else {
+                html += '<th>' + col.label + '</th>';
+            }
+        });
+        return html;
+    }
+
+    function wireSortableHeaders(contentEl, stateObj, dropdownId, fetchFn) {
+        contentEl.querySelectorAll('.sortable-th[data-sort-col]').forEach(function (th) {
+            th.addEventListener('click', function () {
+                var colKey = th.getAttribute('data-sort-col');
+                var nextSort = getNextSort(stateObj.sort, colKey);
+                stateObj.sort = nextSort;
+                stateObj.page = 1;
+
+                // Sync dropdown
+                var dropdown = document.getElementById(dropdownId);
+                if (dropdown) {
+                    var matchFound = false;
+                    for (var i = 0; i < dropdown.options.length; i++) {
+                        if (dropdown.options[i].value === nextSort) {
+                            dropdown.value = nextSort;
+                            matchFound = true;
+                            break;
+                        }
+                    }
+                    if (!matchFound) {
+                        var current = parseSort(nextSort);
+                        var dirLabel = current.desc ? 'Z-A' : 'A-Z';
+                        if (defaultDescFields.indexOf(current.field) !== -1) {
+                            dirLabel = current.desc ? 'High-Low' : 'Low-High';
+                        }
+                        var label = colKey.charAt(0).toUpperCase() + colKey.slice(1) + ' (' + dirLabel + ')';
+                        var tempOpt = document.createElement('option');
+                        tempOpt.value = nextSort;
+                        tempOpt.textContent = label;
+                        tempOpt.setAttribute('data-temp-sort', 'true');
+                        dropdown.querySelectorAll('[data-temp-sort]').forEach(function (o) { o.remove(); });
+                        dropdown.appendChild(tempOpt);
+                        dropdown.value = nextSort;
+                    }
+                }
+
+                fetchFn();
+            });
+        });
     }
 
     // ============================================================
@@ -275,7 +323,6 @@
 
         container.innerHTML = html;
 
-        // Wire up toggle buttons
         container.querySelectorAll('.scope-toggle-btn').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 var scope = btn.getAttribute('data-scope');
@@ -294,7 +341,6 @@
             });
         });
 
-        // Wire up dealer code input
         var codeInput = document.getElementById(containerId + '-code-input');
         if (codeInput) {
             codeInput.addEventListener('keydown', function (e) {
@@ -314,17 +360,14 @@
     }
 
     function resetAndRefresh() {
-        // Reset pagination and caches
         quotesState.page = 1;
         quotesState.allData = null;
         customersState.page = 1;
         customersState.allData = null;
 
-        // Re-render scope bars on both tabs
         renderDealerScopeBar('quotes-dealer-scope');
         renderDealerScopeBar('customers-dealer-scope');
 
-        // Refresh current tab
         if (activeTab === 'quotes') {
             fetchQuotes();
         } else {
@@ -332,18 +375,16 @@
         }
     }
 
-    // Client-side filter: given an array of items with a dealers[] array,
-    // filter based on current dealer scope
     function filterByDealerScope(items, getDealers) {
-        if (!isElevatedRole()) return items; // non-elevated users are already server-filtered
-        if (dealerScope.mode === 'global') return items; // show everything
+        if (!isElevatedRole()) return items;
+        if (dealerScope.mode === 'global') return items;
 
         var code = dealerScope.mode === 'specific' ? dealerScope.filterCode : dealerCode;
         if (!code) return items;
 
         return items.filter(function (item) {
             var dealers = getDealers(item);
-            if (!dealers || !Array.isArray(dealers)) return true; // no dealer info, include it
+            if (!dealers || !Array.isArray(dealers)) return true;
             return dealers.includes(code);
         });
     }
@@ -370,7 +411,7 @@
         apiFetch(buildQuotesUrl())
             .then(function (data) {
                 quotesState.data = data;
-                renderQuoteCards(data);
+                renderQuotesTable(data);
                 renderPagination('quotes-pagination', data.pagination, function (page) {
                     quotesState.page = page;
                     fetchQuotes();
@@ -402,7 +443,10 @@
             '<div class="stat-card"><div class="stat-value">' + totalFiltered + '</div><div class="stat-label">Showing</div></div>';
     }
 
-    function renderQuoteCards(data) {
+    // ============================================================
+    // QUOTES TABLE (replaces card grid)
+    // ============================================================
+    function renderQuotesTable(data) {
         var contentEl = document.getElementById('quotes-content');
         var quotes = data.quotes || [];
 
@@ -411,7 +455,14 @@
             return;
         }
 
-        var html = '<div class="cards-grid">';
+        var html = '<div class="data-table-wrap">';
+        html += '<table class="data-table">';
+        html += '<thead><tr>';
+        html += buildSortableHeader(quoteSortColumns, quotesState.sort);
+        html += '<th>Actions</th>';
+        html += '</tr></thead>';
+        html += '<tbody>';
+
         quotes.forEach(function (q) {
             var customerName = q.customer ? (q.customer.name || 'No Name') : 'No Customer';
             var company = q.customer ? (q.customer.company || '') : '';
@@ -422,28 +473,46 @@
             var quoteNum = q.quoteNumber || q.quoteId || 'Draft';
             var dateStr = formatDate(q.updatedAt || q.createdAt);
 
-            html += '<div class="quote-card">';
-            html += '<div class="quote-card-header">';
-            html += '<div class="quote-card-id">' + escapeHTML(quoteNum) + '</div>';
-            html += '<span class="quote-card-status ' + statusClass + '">' + escapeHTML(status) + '</span>';
-            html += '</div>';
-            html += '<div>';
-            html += '<div class="quote-card-customer">' + escapeHTML(customerName) + '</div>';
-            if (company) html += '<div class="quote-card-company">' + escapeHTML(company) + '</div>';
-            html += '</div>';
-            html += '<div class="quote-card-meta">';
-            html += '<div><span class="quote-card-total">' + formatCurrency(total) + '</span> <span class="quote-card-items">(' + itemCount + ' item' + (itemCount !== 1 ? 's' : '') + ')</span></div>';
-            html += '<div class="quote-card-date">' + escapeHTML(dateStr) + '</div>';
-            html += '</div>';
-            html += '<div class="quote-card-actions">';
-            html += '<a href="dealer-portal.html?quoteId=' + encodeURIComponent(q.id) + '" class="btn btn-primary btn-sm">Load Quote</a>';
-            html += '<button class="btn btn-outline btn-sm" data-duplicate="' + escapeHTML(q.id) + '">Duplicate</button>';
-            html += '</div>';
-            html += '</div>';
+            html += '<tr>';
+
+            // Quote #
+            html += '<td class="dt-id">' + escapeHTML(quoteNum) + '</td>';
+
+            // Customer
+            html += '<td class="dt-name">' + escapeHTML(customerName) + '</td>';
+
+            // Company
+            html += '<td class="dt-company">' + escapeHTML(company) + '</td>';
+
+            // Status
+            html += '<td><span class="status-badge ' + statusClass + '">' + escapeHTML(status) + '</span></td>';
+
+            // Items
+            html += '<td class="dt-items">' + itemCount + '</td>';
+
+            // Total
+            html += '<td class="dt-stat">' + formatCurrency(total) + '</td>';
+
+            // Date
+            html += '<td class="dt-date">' + escapeHTML(dateStr) + '</td>';
+
+            // Actions
+            html += '<td class="dt-actions">';
+            html += '<a href="dealer-portal.html?quoteId=' + encodeURIComponent(q.id) + '" class="btn btn-primary btn-xs">Open</a> ';
+            html += '<button class="btn btn-outline btn-xs" data-duplicate="' + escapeHTML(q.id) + '">Duplicate</button>';
+            html += '</td>';
+
+            html += '</tr>';
         });
+
+        html += '</tbody></table>';
         html += '</div>';
         contentEl.innerHTML = html;
 
+        // Wire up sortable headers
+        wireSortableHeaders(contentEl, quotesState, 'quotes-sort', fetchQuotes);
+
+        // Wire up duplicate buttons
         contentEl.querySelectorAll('[data-duplicate]').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 var quoteId = btn.getAttribute('data-duplicate');
@@ -502,7 +571,6 @@
             .then(function (data) {
                 customersState.data = data;
 
-                // Apply client-side dealer scope filtering
                 var customers = data.customers || [];
                 var scopedCustomers = filterByDealerScope(customers, function (c) { return c.dealers; });
                 var scopedData = {
@@ -541,7 +609,6 @@
             '<div class="stat-card"><div class="stat-value">' + totalAll + '</div><div class="stat-label">Total Customers</div></div>' +
             '<div class="stat-card"><div class="stat-value">' + totalFiltered + '</div><div class="stat-label">Matching Filters</div></div>';
 
-        // Show scoped count if different from filtered (GM/Admin with local scope)
         if (isElevatedRole() && dealerScope.mode !== 'global' && scopedCount !== undefined) {
             html += '<div class="stat-card"><div class="stat-value">' + scopedCount + '</div><div class="stat-label">At This Dealer</div></div>';
         }
@@ -550,7 +617,7 @@
     }
 
     // ============================================================
-    // CUSTOMER TABLE (List layout with sortable column headers)
+    // CUSTOMER TABLE
     // ============================================================
     function renderCustomerTable(data) {
         var contentEl = document.getElementById('customers-content');
@@ -568,24 +635,10 @@
 
         var showDealerCol = isElevatedRole();
 
-        var html = '<div class="customer-table-wrap">';
-        html += '<table class="customer-table">';
+        var html = '<div class="data-table-wrap">';
+        html += '<table class="data-table">';
         html += '<thead><tr>';
-
-        // Render sortable column headers
-        customerSortColumns.forEach(function (col) {
-            if (col.sortable && col.key) {
-                var active = isSortActive(col.key);
-                var arrow = getSortArrow(col.key);
-                html += '<th class="sortable-th' + (active ? ' sort-active' : '') + '" data-sort-col="' + col.key + '">';
-                html += col.label;
-                html += '<span class="sort-arrow">' + arrow + '</span>';
-                html += '</th>';
-            } else {
-                html += '<th>' + col.label + '</th>';
-            }
-        });
-
+        html += buildSortableHeader(customerSortColumns, customersState.sort);
         if (showDealerCol) html += '<th>Dealers</th>';
         html += '<th>Actions</th>';
         html += '</tr></thead>';
@@ -594,29 +647,19 @@
         customers.forEach(function (c) {
             html += '<tr>';
 
-            // Name
-            html += '<td class="ct-name">' + escapeHTML(c.name || 'Unknown') + '</td>';
+            html += '<td class="dt-name">' + escapeHTML(c.name || 'Unknown') + '</td>';
+            html += '<td class="dt-company">' + escapeHTML(c.company || '') + '</td>';
 
-            // Company
-            html += '<td class="ct-company">' + escapeHTML(c.company || '') + '</td>';
-
-            // Contact (email + phone stacked)
-            html += '<td class="ct-contact">';
+            html += '<td class="dt-contact">';
             if (c.email) html += '<a href="mailto:' + escapeHTML(c.email) + '">' + escapeHTML(c.email) + '</a><br>';
             if (c.phone) html += '<span>' + escapeHTML(c.phone) + '</span>';
             if (!c.email && !c.phone) html += '<span style="color:#d1d5db;">No contact</span>';
             html += '</td>';
 
-            // Quotes count
-            html += '<td class="ct-stat">' + (c.quoteCount || 0) + '</td>';
+            html += '<td class="dt-stat">' + (c.quoteCount || 0) + '</td>';
+            html += '<td class="dt-stat">' + formatCurrency(c.totalValue || 0) + '</td>';
+            html += '<td class="dt-date">' + (c.lastQuoteDate ? formatDate(c.lastQuoteDate) : (c.lastContact ? formatDate(c.lastContact) : 'N/A')) + '</td>';
 
-            // Total Value
-            html += '<td class="ct-stat">' + formatCurrency(c.totalValue || 0) + '</td>';
-
-            // Last Quote Date
-            html += '<td class="ct-date">' + (c.lastQuoteDate ? formatDate(c.lastQuoteDate) : (c.lastContact ? formatDate(c.lastContact) : 'N/A')) + '</td>';
-
-            // Dealers column (GM/Admin only)
             if (showDealerCol) {
                 html += '<td><div class="ct-dealers">';
                 if (c.dealers && c.dealers.length > 0) {
@@ -630,8 +673,7 @@
                 html += '</div></td>';
             }
 
-            // Actions
-            html += '<td class="ct-actions">';
+            html += '<td class="dt-actions">';
             html += '<button class="btn btn-outline btn-xs" data-view-quotes="' + escapeHTML(c.id) + '" data-customer-name="' + escapeHTML(c.name) + '">View Quotes</button> ';
             html += '<a href="dealer-portal.html?newQuote=1&custName=' + encodeURIComponent(c.name || '') + '&custEmail=' + encodeURIComponent(c.email || '') + '&custCompany=' + encodeURIComponent(c.company || '') + '&custPhone=' + encodeURIComponent(c.phone || '') + '" class="btn btn-primary btn-xs">+ Quote</a>';
             html += '</td>';
@@ -643,49 +685,8 @@
         html += '</div>';
         contentEl.innerHTML = html;
 
-        // Wire up sortable column header clicks
-        contentEl.querySelectorAll('.sortable-th[data-sort-col]').forEach(function (th) {
-            th.addEventListener('click', function () {
-                var colKey = th.getAttribute('data-sort-col');
-                var nextSort = getNextCustomerSort(colKey);
-                customersState.sort = nextSort;
-                customersState.page = 1;
-
-                // Sync the dropdown filter to match
-                var dropdown = document.getElementById('customers-sort');
-                if (dropdown) {
-                    // Try to select matching option; if not found, that's ok
-                    var matchFound = false;
-                    for (var i = 0; i < dropdown.options.length; i++) {
-                        if (dropdown.options[i].value === nextSort) {
-                            dropdown.value = nextSort;
-                            matchFound = true;
-                            break;
-                        }
-                    }
-                    // If no exact match in dropdown (e.g. company sort), set to empty or leave as is
-                    if (!matchFound) {
-                        // Add a temporary option so the dropdown shows what's happening
-                        var current = parseSort(nextSort);
-                        var dirLabel = current.desc ? 'Z-A' : 'A-Z';
-                        if (['quoteCount', 'totalValue', 'lastContact'].indexOf(current.field) !== -1) {
-                            dirLabel = current.desc ? 'High-Low' : 'Low-High';
-                        }
-                        var label = colKey.charAt(0).toUpperCase() + colKey.slice(1) + ' (' + dirLabel + ')';
-                        var tempOpt = document.createElement('option');
-                        tempOpt.value = nextSort;
-                        tempOpt.textContent = label;
-                        tempOpt.setAttribute('data-temp-sort', 'true');
-                        // Remove any previous temp options
-                        dropdown.querySelectorAll('[data-temp-sort]').forEach(function (o) { o.remove(); });
-                        dropdown.appendChild(tempOpt);
-                        dropdown.value = nextSort;
-                    }
-                }
-
-                fetchCustomers();
-            });
-        });
+        // Wire up sortable headers
+        wireSortableHeaders(contentEl, customersState, 'customers-sort', fetchCustomers);
 
         // Wire up "View Quotes" buttons
         contentEl.querySelectorAll('[data-view-quotes]').forEach(function (btn) {
@@ -738,11 +739,9 @@
                 var page = parseInt(btn.getAttribute('data-page'));
                 if (!isNaN(page) && page >= 1) {
                     onPageChange(page);
-                    // Scroll to top of the table container, not the page top
-                    var tableWrap = document.querySelector('.customer-table-wrap');
-                    if (activeTab === 'customers' && tableWrap) {
-                        tableWrap.scrollTop = 0; // reset table scroll to top
-                    }
+                    // Reset table scroll to top on page change
+                    var tableWrap = document.querySelector('#view-' + activeTab + ' .data-table-wrap');
+                    if (tableWrap) tableWrap.scrollTop = 0;
                     window.scrollTo({ top: 200, behavior: 'smooth' });
                 }
             });
@@ -787,10 +786,8 @@
     function init() {
         if (!checkAuth()) return;
 
-        // Logout
         document.getElementById('logout-btn').addEventListener('click', handleLogout);
 
-        // Tabs
         document.getElementById('tab-quotes').addEventListener('click', function () { switchTab('quotes'); });
         document.getElementById('tab-customers').addEventListener('click', function () { switchTab('customers'); });
 
@@ -823,6 +820,7 @@
         quotesSortSelect.addEventListener('change', function () {
             quotesState.sort = quotesSortSelect.value;
             quotesState.page = 1;
+            quotesSortSelect.querySelectorAll('[data-temp-sort]').forEach(function (o) { o.remove(); });
             fetchQuotes();
         });
 
@@ -836,7 +834,7 @@
             quotesState.since = '';
             quotesState.sort = '-updatedAt';
             quotesState.page = 1;
-            // Reset dealer scope to local
+            quotesSortSelect.querySelectorAll('[data-temp-sort]').forEach(function (o) { o.remove(); });
             dealerScope.mode = 'local';
             dealerScope.filterCode = '';
             renderDealerScopeBar('quotes-dealer-scope');
@@ -859,7 +857,6 @@
         customersSortSelect.addEventListener('change', function () {
             customersState.sort = customersSortSelect.value;
             customersState.page = 1;
-            // Remove any temp sort options since user picked from dropdown
             customersSortSelect.querySelectorAll('[data-temp-sort]').forEach(function (o) { o.remove(); });
             fetchCustomers();
         });
@@ -878,20 +875,16 @@
             customersState.sort = '-lastContact';
             customersState.hasQuotes = false;
             customersState.page = 1;
-            // Remove any temp sort options
             customersSortSelect.querySelectorAll('[data-temp-sort]').forEach(function (o) { o.remove(); });
-            // Reset dealer scope to local
             dealerScope.mode = 'local';
             dealerScope.filterCode = '';
             renderDealerScopeBar('customers-dealer-scope');
             fetchCustomers();
         });
 
-        // --- Render dealer scope bars if elevated role ---
         renderDealerScopeBar('quotes-dealer-scope');
         renderDealerScopeBar('customers-dealer-scope');
 
-        // --- Check URL params ---
         var urlParams = new URLSearchParams(window.location.search);
         if (urlParams.get('tab') === 'customers') {
             switchTab('customers');
@@ -900,7 +893,6 @@
         }
     }
 
-    // Run on DOM ready
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
     } else {
