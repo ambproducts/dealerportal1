@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - API Integration Patch v2.7
+// AmeriDex Dealer Portal - API Integration Patch v2.8
 // Date: 2026-02-27
 // ============================================================
 // REQUIRES: ameridex-patches.js (v1.0+) loaded first
@@ -7,6 +7,20 @@
 // Load order in dealer-portal.html (before </body>):
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
+//
+// v2.8 Changes (2026-02-27):
+//   - FIX: syncQuoteToServer() now maps frontend line item fields
+//     to the backend's expected format before sending the payload.
+//     Frontend uses { type, qty, length, customLength, unitPrice }
+//     but the backend POST/PUT expects { productId, quantity,
+//     basePrice, price, total }. Without this mapping, basePrice
+//     resolved to undefined (defaulting to 0) and quantity resolved
+//     to undefined (defaulting to 1), causing every quote to save
+//     with $0.00 total on the server.
+//   - FIX: Each mapped line item now includes productId, productName,
+//     basePrice (resolved via getItemPrice), quantity (from qty),
+//     and pre-calculated total (from getItemSubtotal), plus color
+//     and length metadata for accurate server-side storage.
 //
 // v2.7 Changes (2026-02-27):
 //   - FIX: handleServerLogin() now writes dealerSettings.role =
@@ -569,17 +583,45 @@
     function syncQuoteToServer(quote) {
         if (!_authToken) return Promise.resolve(null);
 
+        // v2.8 FIX: Transform frontend line items into the backend's
+        // expected format. The frontend uses { type, qty, length, ... }
+        // but the backend expects { productId, quantity, basePrice, ... }.
+        // Without this mapping, basePrice resolves to undefined (-> 0)
+        // and quantity resolves to undefined (-> 1), causing $0.00 totals.
+        var mappedLineItems = quote.lineItems.map(function (li) {
+            var price = (typeof getItemPrice === 'function') ? getItemPrice(li) : 0;
+            var subtotal = (typeof getItemSubtotal === 'function') ? getItemSubtotal(li) : 0;
+            var prod = (typeof PRODUCTS !== 'undefined' && PRODUCTS[li.type])
+                ? PRODUCTS[li.type] : null;
+            return {
+                productId: li.productId || li.type || '',
+                productName: li.productName || (prod ? prod.name : '') || li.type || 'Custom Item',
+                basePrice: price,
+                price: price,
+                quantity: parseInt(li.qty, 10) || parseInt(li.quantity, 10) || 1,
+                length: li.length || null,
+                customLength: li.customLength || null,
+                total: subtotal,
+                unitPrice: li.unitPrice || null,
+                customUnitPrice: li.customUnitPrice || null,
+                priceOverride: li.priceOverride || null,
+                type: li.type || '',
+                color: li.color || li.color1 || '',
+                color2: li.color2 || ''
+            };
+        });
+
         var payload = {
             quoteNumber: quote.quoteId,
             customer: quote.customer,
-            lineItems: quote.lineItems,
+            lineItems: mappedLineItems,
             options: quote.options,
             specialInstructions: quote.specialInstructions,
             internalNotes: quote.internalNotes,
             shippingAddress: quote.shippingAddress,
             deliveryDate: quote.deliveryDate,
             totalAmount: quote.lineItems.reduce(function (sum, li) {
-                return sum + getItemSubtotal(li);
+                return sum + ((typeof getItemSubtotal === 'function') ? getItemSubtotal(li) : 0);
             }, 0)
         };
 
@@ -1149,5 +1191,5 @@
         tryResumeSession();
     }
 
-    console.log('[AmeriDex API] v2.7 loaded: Auth + API integration active.');
+    console.log('[AmeriDex API] v2.8 loaded: Auth + API integration active.');
 })();
