@@ -404,24 +404,72 @@
         var _origPDF = window.generatePDF;
         if (typeof _origPDF === 'function') {
             window.generatePDF = function () {
-                // The original PDF generator reads DOM fields directly.
-                // We wrap it to inject extra lines. However, since jsPDF
-                // builds sequentially, we instead patch the approach:
-                // We temporarily set the cust-name value to include address,
-                // which is hacky. Instead, let's just replace entirely.
-                // 
-                // Actually, the simplest safe approach: add address info
-                // to the special instructions temporarily, generate, restore.
-                // 
-                // Better approach: monkey-patch is too fragile for PDF.
-                // Instead, we'll just call the original and let the print
-                // HTML version handle the full address. PDF will show the
-                // fields that the original PDF generator already reads.
-                //
-                // For a clean PDF integration we would need to rewrite
-                // generatePDF. For now, call original as-is.
-                // The print/HTML preview will show full address.
-                _origPDF.apply(this, arguments);
+                // Read the address fields
+                var address = (document.getElementById('cust-address') || {}).value || '';
+                var city = (document.getElementById('cust-city') || {}).value || '';
+                var state = (document.getElementById('cust-state') || {}).value || '';
+
+                // The original generatePDF reads these DOM fields for customer info:
+                // cust-name, cust-email, cust-company, cust-phone, cust-zip
+                // It renders them at specific Y positions starting around yPos = 80.
+                // We need to inject address/city/state lines after the zip line.
+                
+                // Strategy: Temporarily cache the jsPDF.text method, intercept calls,
+                // and inject our extra lines right after the "Zip Code:" label is rendered.
+                
+                var injected = false;
+                if (window.jspdf && window.jspdf.jsPDF) {
+                    var pdf = new window.jspdf.jsPDF();
+                    var origText = pdf.text.bind(pdf);
+                    
+                    pdf.text = function (textOrLines, x, y, options) {
+                        // Call original
+                        origText(textOrLines, x, y, options);
+                        
+                        // If this is the "Zip Code:" label line and we haven't injected yet
+                        if (!injected && typeof textOrLines === 'string' && textOrLines.indexOf('Zip Code:') !== -1) {
+                            injected = true;
+                            var extraY = y + 6; // Move down 6 units per line
+                            
+                            if (address) {
+                                pdf.setFontSize(10);
+                                pdf.setFont('helvetica', 'bold');
+                                origText('Address:', 20, extraY);
+                                pdf.setFont('helvetica', 'normal');
+                                origText(address, 60, extraY);
+                                extraY += 6;
+                            }
+                            
+                            if (city || state) {
+                                var locationLine = [city, state].filter(Boolean).join(', ');
+                                pdf.setFontSize(10);
+                                pdf.setFont('helvetica', 'bold');
+                                origText('City/State:', 20, extraY);
+                                pdf.setFont('helvetica', 'normal');
+                                origText(locationLine, 60, extraY);
+                            }
+                        }
+                        
+                        return this;
+                    };
+                    
+                    // Now monkey-patch window.jspdf.jsPDF to return our wrapped instance
+                    var OrigJsPDF = window.jspdf.jsPDF;
+                    window.jspdf.jsPDF = function () {
+                        return pdf;
+                    };
+                    
+                    // Call the original generatePDF (it will use our patched jsPDF)
+                    var result = _origPDF.apply(this, arguments);
+                    
+                    // Restore original jsPDF constructor
+                    window.jspdf.jsPDF = OrigJsPDF;
+                    
+                    return result;
+                } else {
+                    // jsPDF not available, just call original
+                    return _origPDF.apply(this, arguments);
+                }
             };
         }
 
