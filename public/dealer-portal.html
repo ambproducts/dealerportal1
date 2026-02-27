@@ -2102,7 +2102,9 @@ function addSuggestionToOrder() {
 // ============================================
 function renderSavedQuotes() {
     const list = document.getElementById('saved-quotes-list');
-    const searchQuery = (document.getElementById('quote-search').value || '').toLowerCase();
+    if (!list) return;
+    const searchEl = document.getElementById('quote-search');
+    const searchQuery = (searchEl ? searchEl.value : '').toLowerCase();
     let filtered = savedQuotes;
     if (searchQuery) filtered = savedQuotes.filter(q => (q.customer.name && q.customer.name.toLowerCase().includes(searchQuery)) || (q.customer.company && q.customer.company.toLowerCase().includes(searchQuery)) || (q.quoteId && q.quoteId.toLowerCase().includes(searchQuery)));
     filtered.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
