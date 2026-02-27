@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - Admin User & Dealer Delete v1.1
+// AmeriDex Dealer Portal - Admin User & Dealer Delete v1.2
 // Date: 2026-02-27
 // ============================================================
 // Adds Delete buttons to the Users tab in the Admin Panel.
@@ -8,21 +8,32 @@
 // - Soft-delete via backend API with confirmation prompts
 //
 // REQUIRES: ameridex-api.js and ameridex-admin.js loaded first
-// Load AFTER ameridex-admin.js in dealer-portal.html
+// Load AFTER ameridex-admin-delete.js in script-loader.js
 //
-// v1.1 Changes (2026-02-27):
-//   - FIX: Replace MutationObserver with polling interval for
-//     reliable button injection regardless of DOM timing.
-//   - FIX: Use robust parent traversal instead of CSS attribute
-//     selectors for group header detection (browser style
-//     normalization was breaking [style*="display:flex"] matches).
-//   - FIX: Increase delay and add retry logic for tab clicks.
+// v1.2 Changes (2026-02-27):
+//   - FIX: Lazy-resolve window.ameridexAPI inside apiCall() wrapper.
+//   - FIX: Observe document.body (not specific container) + 300ms poll.
+//   - FIX: Matches patterns from working ameridex-admin-delete.js.
 // ============================================================
 
 (function () {
     'use strict';
 
-    var _api = window.ameridexAPI;
+    // ----------------------------------------------------------
+    // CONFIG
+    // ----------------------------------------------------------
+    var POLL_MS = 300;
+    var MAX_POLLS = 400;
+    var _polls = 0;
+
+    // ----------------------------------------------------------
+    // API HELPER (lazy resolve - do NOT cache at top)
+    // ----------------------------------------------------------
+    function apiCall(method, url, body) {
+        var api = window.ameridexAPI;
+        if (api) return api(method, url, body);
+        return Promise.reject(new Error('ameridexAPI not available'));
+    }
 
     // ----------------------------------------------------------
     // HELPERS
@@ -34,9 +45,23 @@
         return div.innerHTML;
     }
 
+    function getCurrentDealer() {
+        return window.getCurrentDealer ? window.getCurrentDealer() : null;
+    }
+
     function getCurrentUsername() {
-        var dealer = window.getCurrentDealer ? window.getCurrentDealer() : null;
+        var dealer = getCurrentDealer();
         return dealer ? (dealer.username || '').toLowerCase() : '';
+    }
+
+    function getCurrentRole() {
+        var dealer = getCurrentDealer();
+        return dealer ? dealer.role : null;
+    }
+
+    function canDelete() {
+        var role = getCurrentRole();
+        return role === 'admin' || role === 'gm';
     }
 
     function showUserAlert(msg, type) {
@@ -47,104 +72,121 @@
     }
 
     // ----------------------------------------------------------
-    // INJECT DELETE BUTTONS
+    // INJECT DELETE BUTTONS INTO USERS TABLE
     // ----------------------------------------------------------
-    function injectDeleteButtons() {
-        var container = document.getElementById('admin-users-list');
-        if (!container) return false;
+    function injectUserDeleteButtons() {
+        if (!canDelete()) return;
 
-        // Check if there are any user tables rendered yet
-        var tables = container.querySelectorAll('.admin-table');
-        if (tables.length === 0) return false;
+        var container = document.getElementById('admin-users-list');
+        if (!container) return;
 
         var currentUsername = getCurrentUsername();
-        var injectedAny = false;
 
-        // --- 1. Add Delete button to each user row ---
-        var actionCells = container.querySelectorAll('.admin-actions');
-        actionCells.forEach(function (td) {
-            // Skip if already injected
-            if (td.querySelector('[data-udelete="1"]')) return;
+        // Find all tables inside the users list
+        var tables = container.querySelectorAll('table');
+        if (tables.length === 0) return;
 
-            // Find the toggle-user button to get the user ID
-            var toggleBtn = td.querySelector('[data-action="toggle-user"]');
-            if (!toggleBtn) return;
-            var userId = toggleBtn.getAttribute('data-id');
-            if (!userId) return;
+        tables.forEach(function (table) {
+            // Skip if already processed
+            if (table.dataset.adxUserDelInjected === 'true') return;
 
-            // Find the username from this row
-            var row = td.closest('tr');
-            if (!row) return;
-            var usernameCell = row.querySelector('td:first-child strong');
-            var rowUsername = usernameCell ? usernameCell.textContent.trim().toLowerCase() : '';
+            var rows = table.querySelectorAll('tbody tr');
+            if (rows.length === 0) return;
 
-            // Don't show delete for the currently logged-in admin
-            if (rowUsername === currentUsername) {
-                injectedAny = true;
-                return;
-            }
+            // Mark as processed
+            table.dataset.adxUserDelInjected = 'true';
 
-            var deleteBtn = document.createElement('button');
-            deleteBtn.className = 'admin-btn admin-btn-danger admin-btn-sm';
-            deleteBtn.setAttribute('data-udelete', '1');
-            deleteBtn.setAttribute('data-id', userId);
-            deleteBtn.textContent = 'Delete';
-            deleteBtn.addEventListener('click', function () {
-                deleteAdminUser(userId, rowUsername);
+            rows.forEach(function (row) {
+                // Find the actions cell (last td, or td with admin-actions class)
+                var actionCell = row.querySelector('.admin-actions') || row.querySelector('td:last-child');
+                if (!actionCell) return;
+                if (actionCell.querySelector('.adx-user-del-btn')) return;
+
+                // Get user ID from toggle-user button
+                var toggleBtn = actionCell.querySelector('[data-action="toggle-user"]');
+                if (!toggleBtn) return;
+                var userId = toggleBtn.getAttribute('data-id');
+                if (!userId) return;
+
+                // Get username from first cell
+                var firstCell = row.querySelector('td:first-child');
+                var usernameEl = firstCell ? firstCell.querySelector('strong') : null;
+                var rowUsername = usernameEl ? usernameEl.textContent.trim().toLowerCase() : '';
+
+                // Don't show delete for the currently logged-in admin
+                if (rowUsername === currentUsername && currentUsername !== '') return;
+
+                var deleteBtn = document.createElement('button');
+                deleteBtn.className = 'admin-btn admin-btn-danger admin-btn-sm adx-user-del-btn';
+                deleteBtn.textContent = 'Delete';
+                deleteBtn.style.marginLeft = '0.2rem';
+                deleteBtn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    deleteAdminUser(userId, rowUsername);
+                });
+                actionCell.appendChild(deleteBtn);
             });
-            td.appendChild(deleteBtn);
-            injectedAny = true;
         });
+    }
 
-        // --- 2. Add Delete Dealer button to each group header ---
-        // The group headers are built by ameridex-admin.js as:
-        //   <div style="margin-bottom:1.25rem;">
-        //     <div style="display:flex;align-items:center;gap:0.5rem;...">
-        //       <span style="font-weight:700;...">CODE</span>
-        //       <span class="admin-badge badge-dealer">N users</span>
-        //     </div>
-        //     <table class="admin-table">...</table>
-        //   </div>
-        // Strategy: find all .admin-badge.badge-dealer spans, then go to parentElement (the header div)
-        var dealerBadges = container.querySelectorAll('.admin-badge.badge-dealer');
-        dealerBadges.forEach(function (badge) {
+    // ----------------------------------------------------------
+    // INJECT DELETE DEALER BUTTONS INTO GROUP HEADERS
+    // ----------------------------------------------------------
+    function injectDealerDeleteButtons() {
+        if (!canDelete()) return;
+
+        var container = document.getElementById('admin-users-list');
+        if (!container) return;
+
+        // Strategy: find .admin-badge.badge-dealer spans ("N users" badges)
+        // Their parent div is the group header flex container
+        var badges = container.querySelectorAll('.admin-badge.badge-dealer');
+        if (badges.length === 0) return;
+
+        badges.forEach(function (badge) {
             var headerDiv = badge.parentElement;
             if (!headerDiv) return;
 
             // Skip if already injected
-            if (headerDiv.querySelector('[data-ddelete="1"]')) return;
+            if (headerDiv.querySelector('.adx-dealer-del-btn')) return;
 
-            // Find the dealer code from the sibling bold span
-            var codeSpan = null;
+            // Find dealer code span (sibling span with font-weight in style)
+            var dealerCode = '';
             var children = headerDiv.children;
             for (var i = 0; i < children.length; i++) {
                 var child = children[i];
-                if (child.tagName === 'SPAN' && child !== badge) {
-                    var style = child.getAttribute('style') || '';
-                    if (style.indexOf('font-weight') !== -1 || child.style.fontWeight) {
-                        codeSpan = child;
+                if (child === badge) continue;
+                if (child.tagName === 'SPAN') {
+                    var st = child.getAttribute('style') || '';
+                    if (st.indexOf('font-weight') !== -1) {
+                        dealerCode = child.textContent.trim();
                         break;
                     }
                 }
             }
-            if (!codeSpan) return;
-            var dealerCode = codeSpan.textContent.trim();
+
+            // Fallback: try first span that is not the badge
+            if (!dealerCode) {
+                for (var j = 0; j < children.length; j++) {
+                    if (children[j] !== badge && children[j].tagName === 'SPAN') {
+                        dealerCode = children[j].textContent.trim();
+                        break;
+                    }
+                }
+            }
+
             if (!dealerCode || dealerCode === 'UNKNOWN') return;
 
             var deleteBtn = document.createElement('button');
-            deleteBtn.className = 'admin-btn admin-btn-danger admin-btn-sm';
-            deleteBtn.style.marginLeft = 'auto';
-            deleteBtn.setAttribute('data-ddelete', '1');
-            deleteBtn.setAttribute('data-code', dealerCode);
+            deleteBtn.className = 'admin-btn admin-btn-danger admin-btn-sm adx-dealer-del-btn';
             deleteBtn.textContent = 'Delete Dealer';
-            deleteBtn.addEventListener('click', function () {
+            deleteBtn.style.marginLeft = 'auto';
+            deleteBtn.addEventListener('click', function (e) {
+                e.stopPropagation();
                 deleteEntireDealer(dealerCode);
             });
             headerDiv.appendChild(deleteBtn);
-            injectedAny = true;
         });
-
-        return injectedAny;
     }
 
     // ----------------------------------------------------------
@@ -161,12 +203,12 @@
 
         if (!confirm(
             'Delete user "' + displayInfo + '"?\n\n' +
-            'This will soft-delete the user. They can be restored later.'
+            'This will soft-delete the user.'
         )) return;
 
-        _api('DELETE', '/api/admin/users/' + userId)
+        apiCall('DELETE', '/api/admin/users/' + userId)
             .then(function () {
-                showUserAlert('User "' + esc(displayInfo) + '" deleted successfully.', 'success');
+                showUserAlert('User "' + esc(displayInfo) + '" deleted.', 'success');
                 reloadUsersTab();
             })
             .catch(function (err) {
@@ -180,61 +222,23 @@
     function deleteEntireDealer(dealerCode) {
         if (!dealerCode) return;
 
-        // Count users in this dealer group from the DOM
-        var container = document.getElementById('admin-users-list');
-        var userCount = 0;
-        var userList = '';
-        if (container) {
-            var dealerBadges = container.querySelectorAll('.admin-badge.badge-dealer');
-            dealerBadges.forEach(function (badge) {
-                var headerDiv = badge.parentElement;
-                if (!headerDiv) return;
-                var codeSpan = null;
-                var children = headerDiv.children;
-                for (var i = 0; i < children.length; i++) {
-                    if (children[i].tagName === 'SPAN' && children[i] !== badge) {
-                        codeSpan = children[i];
-                        break;
-                    }
-                }
-                if (!codeSpan || codeSpan.textContent.trim() !== dealerCode) return;
-                var groupDiv = headerDiv.parentElement;
-                if (!groupDiv) return;
-                var rows = groupDiv.querySelectorAll('tbody tr');
-                userCount = rows.length;
-                rows.forEach(function (row) {
-                    var un = row.querySelector('td:first-child strong');
-                    var role = row.querySelector('.admin-badge');
-                    if (un) {
-                        userList += '\n  - ' + un.textContent.trim();
-                        if (role) userList += ' (' + role.textContent.trim() + ')';
-                    }
-                });
-            });
-        }
+        if (!confirm(
+            'Delete dealer "' + dealerCode + '" and ALL its users?\n\n' +
+            'This will soft-delete the dealer and all associated users.'
+        )) return;
 
-        var msg = 'Delete dealer "' + dealerCode + '"';
-        if (userCount > 0) {
-            msg += ' and all ' + userCount + ' user(s)?' + '\n\nUsers affected:' + userList;
-        } else {
-            msg += '?';
-        }
-        msg += '\n\nThis will soft-delete the dealer. It can be restored later.';
-
-        if (!confirm(msg)) return;
-
-        _api('GET', '/api/admin/dealers')
+        apiCall('GET', '/api/admin/dealers')
             .then(function (dealers) {
                 var dealer = dealers.find(function (d) { return d.dealerCode === dealerCode; });
                 if (!dealer) {
-                    showUserAlert('Dealer record not found for code: ' + dealerCode, 'error');
+                    showUserAlert('Dealer not found: ' + dealerCode, 'error');
                     return;
                 }
-                return _api('DELETE', '/api/admin/dealers/' + dealer.id);
+                return apiCall('DELETE', '/api/admin/dealers/' + dealer.id);
             })
             .then(function (result) {
                 if (result !== undefined) {
-                    showUserAlert('Dealer "' + esc(dealerCode) + '" and associated users deleted.', 'success');
+                    showUserAlert('Dealer "' + esc(dealerCode) + '" deleted.', 'success');
                     reloadUsersTab();
                 }
             })
@@ -254,38 +258,33 @@
     }
 
     // ----------------------------------------------------------
-    // POLLING: Check every 500ms if Users tab needs buttons
-    // Much more reliable than MutationObserver for innerHTML swaps
+    // RUN ALL INJECTIONS
     // ----------------------------------------------------------
-    var _pollTimer = null;
-    var _lastCount = 0;
-
-    function startPolling() {
-        if (_pollTimer) return;
-        _pollTimer = setInterval(function () {
-            var container = document.getElementById('admin-users-list');
-            if (!container) return;
-
-            // Only inject when the Users tab is visible
-            var usersTabContent = document.getElementById('admin-tab-users');
-            if (!usersTabContent || !usersTabContent.classList.contains('active')) return;
-
-            // Check if tables exist and buttons haven't been injected yet
-            var tables = container.querySelectorAll('.admin-table');
-            var existingDeleteBtns = container.querySelectorAll('[data-udelete="1"]');
-            var existingDealerBtns = container.querySelectorAll('[data-ddelete="1"]');
-
-            // If table count changed or no delete buttons yet, inject
-            var tableCount = tables.length;
-            if (tableCount > 0 && (existingDeleteBtns.length === 0 && existingDealerBtns.length === 0) || tableCount !== _lastCount) {
-                _lastCount = tableCount;
-                injectDeleteButtons();
-            }
-        }, 500);
+    function runInjections() {
+        if (!canDelete()) return;
+        injectUserDeleteButtons();
+        injectDealerDeleteButtons();
     }
 
-    // Start polling immediately
-    startPolling();
+    // ----------------------------------------------------------
+    // MUTATION OBSERVER on document.body (proven pattern)
+    // ----------------------------------------------------------
+    var observer = new MutationObserver(function () {
+        runInjections();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
 
-    console.log('[AmeriDex Admin User Delete] v1.1 loaded.');
+    // ----------------------------------------------------------
+    // POLLING FALLBACK (proven pattern from admin-delete.js)
+    // ----------------------------------------------------------
+    var poller = setInterval(function () {
+        _polls++;
+        if (_polls > MAX_POLLS) {
+            clearInterval(poller);
+            return;
+        }
+        runInjections();
+    }, POLL_MS);
+
+    console.log('[ameridex-admin-user-delete] v1.2 loaded');
 })();
