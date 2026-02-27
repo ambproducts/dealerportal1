@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - Global Scope Fix v1.0
+// AmeriDex Dealer Portal - Global Scope Fix v1.1
 // Date: 2026-02-27
 // ============================================================
 // PURPOSE:
@@ -31,6 +31,22 @@
 //   This makes `window.currentQuote` and `currentQuote` point to
 //   the same value, with writes in either direction staying in sync.
 //
+// v1.1 Changes (2026-02-27):
+//   - FIX: Replaced `new Function(name + ' = arguments[0]')` setter
+//     with indirect eval via `window.__scopeTransfer`. In V8
+//     (Chrome/Edge), `new Function()` creates its own scope and
+//     CANNOT assign to top-level `let` bindings in the Script scope.
+//     It silently created a shadow property on `window`, splitting
+//     state between the `let` binding and `window.*`. This caused
+//     the "Add Line Item" button to stop working after any external
+//     script wrote to `window.currentQuote`.
+//   - FIX: Indirect eval `(0, eval)()` runs in global scope and CAN
+//     both read and assign to top-level `let` bindings, solving the
+//     state-split problem.
+//   - ADD: Verification pass after exposure that tests a write-read
+//     roundtrip for each variable to confirm the setter works. Any
+//     failures are logged with a clear warning.
+//
 // LOAD ORDER:
 //   Must load AFTER the inline <script> in dealer-portal.html
 //   (so the `let` variables exist) but BEFORE any external patch
@@ -61,6 +77,7 @@
     ];
 
     var exposed = 0;
+    var verified = 0;
 
     GLOBALS.forEach(function (name) {
         // Skip if already a real window property (e.g., if the HTML
@@ -82,12 +99,21 @@
                 get: function () {
                     return (0, eval)(name);
                 },
-                set: function (v) {
-                    // Assign back to the global let binding.
-                    // `eval` in sloppy mode can assign to global lets
-                    // via indirect eval, but strict mode forbids it.
-                    // Use Function constructor which runs in sloppy mode.
-                    (new Function(name + ' = arguments[0]'))(v);
+                set: function (val) {
+                    // v1.1 FIX: Use indirect eval instead of new Function().
+                    //
+                    // `new Function(name + ' = arguments[0]')` creates its
+                    // own scope and CANNOT reach `let` bindings in V8's
+                    // Script scope. It silently creates an implicit global
+                    // (a shadow property on window), splitting state.
+                    //
+                    // Indirect eval `(0, eval)(...)` runs in the global
+                    // scope and CAN assign to top-level `let` bindings.
+                    // We pass the value through a temporary window property
+                    // because `val` is not visible inside the eval string.
+                    window.__scopeTransfer = val;
+                    (0, eval)(name + ' = window.__scopeTransfer');
+                    delete window.__scopeTransfer;
                 },
                 configurable: true,
                 enumerable: true
@@ -100,5 +126,49 @@
         }
     });
 
-    console.log('[GlobalScopeFix] Exposed ' + exposed + '/' + GLOBALS.length + ' let-declared globals to window.');
+    // ----------------------------------------------------------
+    // VERIFICATION PASS
+    // ----------------------------------------------------------
+    // Test a write-read roundtrip for each exposed variable to
+    // confirm the setter actually modifies the `let` binding
+    // and not a shadow property.
+    // ----------------------------------------------------------
+    GLOBALS.forEach(function (name) {
+        if (!(name in window)) return;
+
+        try {
+            // Read the current value via the getter (indirect eval)
+            var original = (0, eval)(name);
+
+            // Write a sentinel value through window (uses our setter)
+            var sentinel = '__scopefix_verify_' + name;
+            window[name] = sentinel;
+
+            // Read back via indirect eval (bypasses our getter, reads
+            // the actual let binding directly)
+            var readBack = (0, eval)(name);
+
+            if (readBack === sentinel) {
+                // Setter works: the let binding was updated.
+                verified++;
+            } else {
+                console.warn('[GlobalScopeFix] SETTER BROKEN for "' + name +
+                    '": wrote sentinel but let binding still has:', readBack);
+            }
+
+            // Restore the original value
+            window[name] = original;
+        } catch (e) {
+            console.warn('[GlobalScopeFix] Verification failed for "' + name + '":', e.message);
+        }
+    });
+
+    console.log('[GlobalScopeFix] v1.1 | Exposed ' + exposed + '/' + GLOBALS.length +
+        ' globals | Verified ' + verified + '/' + exposed + ' setters working.');
+
+    if (verified < exposed) {
+        console.error('[GlobalScopeFix] WARNING: ' + (exposed - verified) +
+            ' setter(s) failed verification. State may split between let bindings and window properties. ' +
+            'Consider changing let to var in dealer-portal.html inline script as a permanent fix.');
+    }
 })();
