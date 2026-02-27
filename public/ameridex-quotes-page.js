@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - Quotes & Customers Page v1.0
+// AmeriDex Dealer Portal - Quotes & Customers Page v1.1
 // Date: 2026-02-27
 // ============================================================
 // Handles all logic for quotes-customers.html:
@@ -15,9 +15,8 @@
     'use strict';
 
     var API_BASE = window.AMERIDEX_API_BASE || '';
+    var dealerSettings = null;
     var authToken = null;
-    var currentUser = null;
-    var currentDealer = null;
 
     // --- State ---
     var quotesState = {
@@ -28,7 +27,7 @@
         search: '',
         since: '',
         data: null,
-        allData: null  // for stats (first load, no filters)
+        allData: null
     };
 
     var customersState = {
@@ -44,54 +43,48 @@
     var activeTab = 'quotes';
 
     // ============================================================
-    // AUTH
+    // AUTH - aligned with dealer-portal.html storage
     // ============================================================
+    function getDealerSettings() {
+        try {
+            var stored = localStorage.getItem('ameridex_dealer_settings');
+            if (stored) return JSON.parse(stored);
+        } catch (e) {}
+        return null;
+    }
+
     function getAuthToken() {
+        // Check for token-based auth first (future-proofing)
         try {
             var stored = localStorage.getItem('ameridex_auth_token');
             if (stored) return stored;
-            // Also check sessionStorage as fallback
             stored = sessionStorage.getItem('ameridex_auth_token');
             if (stored) return stored;
         } catch (e) {}
         return null;
     }
 
-    function getCurrentUser() {
-        try {
-            var stored = localStorage.getItem('ameridex_current_user');
-            if (stored) return JSON.parse(stored);
-            stored = sessionStorage.getItem('ameridex_current_user');
-            if (stored) return JSON.parse(stored);
-        } catch (e) {}
-        return null;
-    }
-
-    function getCurrentDealer() {
-        try {
-            var stored = localStorage.getItem('ameridex_current_dealer');
-            if (stored) return JSON.parse(stored);
-            stored = sessionStorage.getItem('ameridex_current_dealer');
-            if (stored) return JSON.parse(stored);
-        } catch (e) {}
-        return null;
-    }
-
     function checkAuth() {
+        dealerSettings = getDealerSettings();
         authToken = getAuthToken();
-        currentUser = getCurrentUser();
-        currentDealer = getCurrentDealer();
 
-        if (!authToken || !currentUser) {
-            // Redirect to login
+        // Primary check: dealer settings with a valid dealerCode
+        // This matches how dealer-portal.html handles auth
+        var hasDealer = dealerSettings && dealerSettings.dealerCode && dealerSettings.dealerCode.length > 0;
+        var hasToken = !!authToken;
+
+        if (!hasDealer && !hasToken) {
+            // Not logged in, redirect to login
             window.location.href = 'dealer-portal.html';
             return false;
         }
 
-        // Update header
+        // Update header with dealer info
         var dealerInfo = document.getElementById('header-dealer-code');
-        if (dealerInfo) {
-            dealerInfo.textContent = 'Dealer: ' + (currentDealer ? currentDealer.code || currentDealer.dealerCode || '' : '') + ' | ' + (currentUser.username || '');
+        if (dealerInfo && dealerSettings) {
+            var parts = ['Dealer: ' + (dealerSettings.dealerCode || '')];
+            if (dealerSettings.dealerName) parts.push(dealerSettings.dealerName);
+            dealerInfo.textContent = parts.join(' | ');
         }
 
         return true;
@@ -99,6 +92,12 @@
 
     function handleLogout() {
         try {
+            // Clear dealer code (same as dealer-portal.html logout)
+            if (dealerSettings) {
+                dealerSettings.dealerCode = '';
+                localStorage.setItem('ameridex_dealer_settings', JSON.stringify(dealerSettings));
+            }
+            // Also clear token-based auth if present
             localStorage.removeItem('ameridex_auth_token');
             localStorage.removeItem('ameridex_current_user');
             localStorage.removeItem('ameridex_current_dealer');
@@ -114,7 +113,12 @@
     // ============================================================
     function apiFetch(path) {
         var headers = { 'Content-Type': 'application/json' };
-        if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+        if (authToken) {
+            headers['Authorization'] = 'Bearer ' + authToken;
+        } else if (dealerSettings && dealerSettings.dealerCode) {
+            // Fallback: send dealer code as a header for endpoints that support it
+            headers['X-Dealer-Code'] = dealerSettings.dealerCode;
+        }
 
         return fetch(API_BASE + path, { method: 'GET', headers: headers })
             .then(function (res) {
@@ -200,7 +204,6 @@
                     quotesState.page = page;
                     fetchQuotes();
                 });
-                // Fetch stats (unfiltered) on first load
                 if (!quotesState.allData) {
                     apiFetch('/api/quotes?page=1&limit=1')
                         .then(function (statsData) {
@@ -282,7 +285,11 @@
 
     function duplicateQuote(quoteId) {
         var headers = { 'Content-Type': 'application/json' };
-        if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+        if (authToken) {
+            headers['Authorization'] = 'Bearer ' + authToken;
+        } else if (dealerSettings && dealerSettings.dealerCode) {
+            headers['X-Dealer-Code'] = dealerSettings.dealerCode;
+        }
 
         fetch(API_BASE + '/api/quotes/' + quoteId + '/duplicate', {
             method: 'POST',
@@ -294,7 +301,7 @@
         })
         .then(function (newQuote) {
             alert('Quote duplicated! New quote: ' + (newQuote.quoteNumber || newQuote.id));
-            quotesState.allData = null; // reset stats
+            quotesState.allData = null;
             fetchQuotes();
         })
         .catch(function (err) {
@@ -329,7 +336,6 @@
                     customersState.page = page;
                     fetchCustomers();
                 });
-                // Stats on first load
                 if (!customersState.allData) {
                     apiFetch('/api/customers?page=1&limit=1')
                         .then(function (statsData) {
@@ -384,7 +390,7 @@
             html += '</div>';
             html += '<div class="customer-card-actions">';
             html += '<button class="btn btn-outline btn-sm" data-view-quotes="' + escapeHTML(c.id) + '" data-customer-name="' + escapeHTML(c.name) + '">View Quotes</button>';
-            html += '<a href="dealer-portal.html?newQuote=true&custName=' + encodeURIComponent(c.name || '') + '&custEmail=' + encodeURIComponent(c.email || '') + '&custCompany=' + encodeURIComponent(c.company || '') + '&custPhone=' + encodeURIComponent(c.phone || '') + '" class="btn btn-primary btn-sm">+ New Quote</a>';
+            html += '<a href="dealer-portal.html?newQuote=1&custName=' + encodeURIComponent(c.name || '') + '&custEmail=' + encodeURIComponent(c.email || '') + '&custCompany=' + encodeURIComponent(c.company || '') + '&custPhone=' + encodeURIComponent(c.phone || '') + '" class="btn btn-primary btn-sm">+ New Quote</a>';
             html += '</div>';
             html += '</div>';
         });
@@ -396,7 +402,6 @@
             btn.addEventListener('click', function () {
                 var customerId = btn.getAttribute('data-view-quotes');
                 var customerName = btn.getAttribute('data-customer-name');
-                // Switch to quotes tab filtered by this customer
                 switchTab('quotes');
                 document.getElementById('quotes-search').value = customerName || '';
                 quotesState.search = customerName || '';
@@ -423,10 +428,8 @@
         html += '<div class="pagination-info">Showing ' + startItem + ' to ' + endItem + ' of ' + pag.totalCount + '</div>';
         html += '<div class="pagination-controls">';
 
-        // Previous button
         html += '<button class="pagination-btn" data-page="' + (pag.page - 1) + '"' + (pag.hasPrev ? '' : ' disabled') + '>&laquo; Prev</button>';
 
-        // Page number buttons (show max 5)
         var startPage = Math.max(1, pag.page - 2);
         var endPage = Math.min(pag.totalPages, startPage + 4);
         if (endPage - startPage < 4) startPage = Math.max(1, endPage - 4);
@@ -435,20 +438,17 @@
             html += '<button class="pagination-btn' + (i === pag.page ? ' active' : '') + '" data-page="' + i + '">' + i + '</button>';
         }
 
-        // Next button
         html += '<button class="pagination-btn" data-page="' + (pag.page + 1) + '"' + (pag.hasNext ? '' : ' disabled') + '>Next &raquo;</button>';
 
         html += '</div></div>';
         container.innerHTML = html;
 
-        // Bind page buttons
         container.querySelectorAll('.pagination-btn[data-page]').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 if (btn.disabled) return;
                 var page = parseInt(btn.getAttribute('data-page'));
                 if (!isNaN(page) && page >= 1) {
                     onPageChange(page);
-                    // Scroll to top of content
                     window.scrollTo({ top: 200, behavior: 'smooth' });
                 }
             });
@@ -584,7 +584,6 @@
         if (urlParams.get('tab') === 'customers') {
             switchTab('customers');
         } else {
-            // Default: quotes tab
             fetchQuotes();
         }
     }
