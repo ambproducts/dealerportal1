@@ -1,8 +1,10 @@
 // ============================================================
-// routes/admin-quotes.js - Admin Quote Management v3.0
+// routes/admin-quotes.js - Admin Quote Management v3.1
 // Date: 2026-02-27
 // ============================================================
 // Soft delete with undo for quotes. Only admin/gm can access.
+// GM is scoped to their own dealer code for delete/restore.
+// Admin has unrestricted access across all dealers.
 //
 // Endpoints:
 //   GET    /api/admin/quotes              - List active quotes
@@ -21,6 +23,17 @@ const { requireAuth, requireRole, requireAdmin } = require('../middleware/auth')
 
 // All routes require authenticated admin or gm
 router.use(requireAuth, requireRole('admin', 'gm'));
+
+// -----------------------------------------------------------
+// HELPER: Check if GM owns this quote (by dealer code)
+// Admin always passes. GM must match dealerCode.
+// -----------------------------------------------------------
+function gmOwnsQuote(user, quote) {
+    if (user.role === 'admin') return true;
+    // GM: quote must belong to their dealer
+    return quote.dealerCode &&
+           quote.dealerCode.toUpperCase() === user.dealerCode.toUpperCase();
+}
 
 // -----------------------------------------------------------
 // GET /api/admin/quotes - List active (non-deleted) quotes
@@ -48,10 +61,18 @@ router.get('/', (req, res) => {
 
 // -----------------------------------------------------------
 // GET /api/admin/quotes/deleted - List soft-deleted quotes
+// GM only sees their dealer's deleted quotes.
 // -----------------------------------------------------------
 router.get('/deleted', (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
-    const deleted = quotes.filter(q => q.deleted === true);
+    let deleted = quotes.filter(q => q.deleted === true);
+
+    // Scope for GM: only their dealer's quotes
+    if (req.user.role === 'gm') {
+        const myCode = req.user.dealerCode.toUpperCase();
+        deleted = deleted.filter(q => q.dealerCode && q.dealerCode.toUpperCase() === myCode);
+    }
+
     deleted.sort((a, b) => new Date(b.deletedAt || 0) - new Date(a.deletedAt || 0));
     res.json(deleted);
 });
@@ -109,12 +130,20 @@ router.put('/:id/status', (req, res) => {
 
 // -----------------------------------------------------------
 // DELETE /api/admin/quotes/:id - Soft delete a quote
+// GM: only if quote belongs to their dealer code.
 // -----------------------------------------------------------
 router.delete('/:id', (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
     const idx = quotes.findIndex(q => q.id === req.params.id && !q.deleted);
     if (idx === -1) {
         return res.status(404).json({ error: 'Quote not found' });
+    }
+
+    // GM ownership check
+    if (!gmOwnsQuote(req.user, quotes[idx])) {
+        return res.status(403).json({
+            error: 'Access denied. You can only delete quotes for your dealer (' + req.user.dealerCode + ')'
+        });
     }
 
     quotes[idx].deleted = true;
@@ -134,12 +163,20 @@ router.delete('/:id', (req, res) => {
 
 // -----------------------------------------------------------
 // POST /api/admin/quotes/:id/restore - Undo / restore a quote
+// GM: only if quote belongs to their dealer code.
 // -----------------------------------------------------------
 router.post('/:id/restore', (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
     const idx = quotes.findIndex(q => q.id === req.params.id && q.deleted === true);
     if (idx === -1) {
         return res.status(404).json({ error: 'Deleted quote not found' });
+    }
+
+    // GM ownership check
+    if (!gmOwnsQuote(req.user, quotes[idx])) {
+        return res.status(403).json({
+            error: 'Access denied. You can only restore quotes for your dealer (' + req.user.dealerCode + ')'
+        });
     }
 
     delete quotes[idx].deleted;

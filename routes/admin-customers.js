@@ -1,8 +1,10 @@
 // ============================================================
-// routes/admin-customers.js - Admin Customer Management v3.0
+// routes/admin-customers.js - Admin Customer Management v3.1
 // Date: 2026-02-27
 // ============================================================
 // Soft delete with undo for customers. Only admin/gm can access.
+// GM is scoped to their own dealer code for delete/restore.
+// Admin has unrestricted access across all dealers.
 // Deleting a customer cascade-soft-deletes their quotes.
 //
 // Endpoints:
@@ -24,6 +26,30 @@ const { requireAuth, requireRole, requireAdmin } = require('../middleware/auth')
 router.use(requireAuth, requireRole('admin', 'gm'));
 
 // -----------------------------------------------------------
+// HELPER: Check if GM owns this customer (by dealer code)
+// Admin always passes. GM must have their dealerCode in the
+// customer's dealers array or dealerCode field.
+// -----------------------------------------------------------
+function gmOwnsCustomer(user, customer) {
+    if (user.role === 'admin') return true;
+
+    const myCode = user.dealerCode.toUpperCase();
+
+    // Check the dealers array (primary method)
+    if (customer.dealers && Array.isArray(customer.dealers)) {
+        return customer.dealers.some(d => d.toUpperCase() === myCode);
+    }
+
+    // Fallback: check single dealerCode field
+    if (customer.dealerCode) {
+        return customer.dealerCode.toUpperCase() === myCode;
+    }
+
+    // If customer has no dealer association, deny for GM
+    return false;
+}
+
+// -----------------------------------------------------------
 // GET /api/admin/customers - List active (non-deleted) customers
 // -----------------------------------------------------------
 router.get('/', (req, res) => {
@@ -33,10 +59,17 @@ router.get('/', (req, res) => {
 
 // -----------------------------------------------------------
 // GET /api/admin/customers/deleted - List soft-deleted customers
+// GM only sees their dealer's deleted customers.
 // -----------------------------------------------------------
 router.get('/deleted', (req, res) => {
     const customers = readJSON(CUSTOMERS_FILE);
-    const deleted = customers.filter(c => c.deleted === true);
+    let deleted = customers.filter(c => c.deleted === true);
+
+    // Scope for GM: only their dealer's customers
+    if (req.user.role === 'gm') {
+        deleted = deleted.filter(c => gmOwnsCustomer(req.user, c));
+    }
+
     deleted.sort((a, b) => new Date(b.deletedAt || 0) - new Date(a.deletedAt || 0));
     res.json(deleted);
 });
@@ -68,12 +101,20 @@ router.put('/:id', (req, res) => {
 
 // -----------------------------------------------------------
 // DELETE /api/admin/customers/:id - Soft delete customer + cascade quotes
+// GM: only if customer belongs to their dealer code.
 // -----------------------------------------------------------
 router.delete('/:id', (req, res) => {
     const customers = readJSON(CUSTOMERS_FILE);
     const idx = customers.findIndex(c => c.id === req.params.id && !c.deleted);
     if (idx === -1) {
         return res.status(404).json({ error: 'Customer not found' });
+    }
+
+    // GM ownership check
+    if (!gmOwnsCustomer(req.user, customers[idx])) {
+        return res.status(403).json({
+            error: 'Access denied. You can only delete customers for your dealer (' + req.user.dealerCode + ')'
+        });
     }
 
     const now = new Date().toISOString();
@@ -87,11 +128,18 @@ router.delete('/:id', (req, res) => {
     customers[idx].deletedByRole = req.user.role;
     writeJSON(CUSTOMERS_FILE, customers);
 
-    // Cascade: soft delete all quotes for this customer
+    // Cascade: soft delete quotes for this customer
+    // GM cascade only deletes quotes at their dealer; admin deletes all
     const quotes = readJSON(QUOTES_FILE);
     let cascadeCount = 0;
     quotes.forEach(q => {
         if (q.customerId === customerId && !q.deleted) {
+            // For GM, only cascade-delete quotes that belong to their dealer
+            if (req.user.role === 'gm') {
+                if (!q.dealerCode || q.dealerCode.toUpperCase() !== req.user.dealerCode.toUpperCase()) {
+                    return; // Skip quotes from other dealers
+                }
+            }
             q.deleted = true;
             q.deletedAt = now;
             q.deletedBy = req.user.username;
@@ -116,12 +164,20 @@ router.delete('/:id', (req, res) => {
 
 // -----------------------------------------------------------
 // POST /api/admin/customers/:id/restore - Undo / restore customer + quotes
+// GM: only if customer belongs to their dealer code.
 // -----------------------------------------------------------
 router.post('/:id/restore', (req, res) => {
     const customers = readJSON(CUSTOMERS_FILE);
     const idx = customers.findIndex(c => c.id === req.params.id && c.deleted === true);
     if (idx === -1) {
         return res.status(404).json({ error: 'Deleted customer not found' });
+    }
+
+    // GM ownership check
+    if (!gmOwnsCustomer(req.user, customers[idx])) {
+        return res.status(403).json({
+            error: 'Access denied. You can only restore customers for your dealer (' + req.user.dealerCode + ')'
+        });
     }
 
     const customerId = customers[idx].id;
@@ -137,10 +193,17 @@ router.post('/:id/restore', (req, res) => {
     writeJSON(CUSTOMERS_FILE, customers);
 
     // Restore cascade-deleted quotes for this customer
+    // GM only restores quotes at their dealer; admin restores all
     const quotes = readJSON(QUOTES_FILE);
     let restoredQuotes = 0;
     quotes.forEach(q => {
         if (q.deletedReason === 'cascade:customer:' + customerId && q.deleted === true) {
+            // For GM, only restore quotes that belong to their dealer
+            if (req.user.role === 'gm') {
+                if (!q.dealerCode || q.dealerCode.toUpperCase() !== req.user.dealerCode.toUpperCase()) {
+                    return; // Skip quotes from other dealers
+                }
+            }
             delete q.deleted;
             delete q.deletedAt;
             delete q.deletedBy;
