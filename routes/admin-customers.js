@@ -1,5 +1,5 @@
 // ============================================================
-// routes/admin-customers.js - Admin Customer Management v3.1
+// routes/admin-customers.js - Admin Customer Management v3.2
 // Date: 2026-02-27
 // ============================================================
 // Soft delete with undo for customers. Only admin/gm can access.
@@ -7,9 +7,19 @@
 // Admin has unrestricted access across all dealers.
 // Deleting a customer cascade-soft-deletes their quotes.
 //
+// v3.2 Changes (2026-02-27):
+//   - ADD: POST /api/admin/customers/recalc-all endpoint to
+//     recalculate quoteCount and totalValue for ALL customers
+//     from current (non-deleted) quote data. Admin only.
+//   - FIX: Call recalcCustomerStats after cascade soft-delete,
+//     cascade restore, and permanent delete so stats stay
+//     accurate in real-time.
+//   - Import recalcCustomerStats from shared lib/helpers.js.
+//
 // Endpoints:
 //   GET    /api/admin/customers              - List active customers
 //   GET    /api/admin/customers/deleted       - List soft-deleted customers
+//   POST   /api/admin/customers/recalc-all   - Recalc all customer stats
 //   PUT    /api/admin/customers/:id          - Update a customer
 //   DELETE /api/admin/customers/:id          - Soft delete customer + quotes
 //   POST   /api/admin/customers/:id/restore  - Undo / restore customer + quotes
@@ -19,7 +29,7 @@
 
 const express = require('express');
 const router = express.Router();
-const { readJSON, writeJSON, CUSTOMERS_FILE, QUOTES_FILE } = require('../lib/helpers');
+const { readJSON, writeJSON, CUSTOMERS_FILE, QUOTES_FILE, recalcCustomerStats } = require('../lib/helpers');
 const { requireAuth, requireRole, requireAdmin } = require('../middleware/auth');
 
 // All routes require authenticated admin or gm
@@ -75,6 +85,65 @@ router.get('/deleted', (req, res) => {
 });
 
 // -----------------------------------------------------------
+// POST /api/admin/customers/recalc-all - Recalculate stats
+// for every customer from current quote data. Admin only.
+// MUST be defined before /:id routes to avoid param conflict.
+// -----------------------------------------------------------
+router.post('/recalc-all', requireAdmin, (req, res) => {
+    const customers = readJSON(CUSTOMERS_FILE);
+    const quotes = readJSON(QUOTES_FILE);
+
+    // Build a map of customerId -> { count, total } from non-deleted quotes
+    const statsMap = {};
+    quotes.forEach(q => {
+        if (q.deleted) return;
+        const custId = q.customer && q.customer.customerId;
+        if (!custId) return;
+        if (!statsMap[custId]) {
+            statsMap[custId] = { count: 0, total: 0 };
+        }
+        statsMap[custId].count += 1;
+        statsMap[custId].total += (q.totalAmount || 0);
+    });
+
+    let updated = 0;
+    const changes = [];
+
+    customers.forEach(c => {
+        if (c.deleted) return; // skip deleted customers
+
+        const stats = statsMap[c.id] || { count: 0, total: 0 };
+        const newCount = stats.count;
+        const newTotal = Math.round(stats.total * 100) / 100;
+
+        const oldCount = c.quoteCount || 0;
+        const oldTotal = c.totalValue || 0;
+
+        if (oldCount !== newCount || oldTotal !== newTotal) {
+            changes.push({
+                id: c.id,
+                name: c.name,
+                quoteCount: { was: oldCount, now: newCount },
+                totalValue: { was: oldTotal, now: newTotal }
+            });
+            c.quoteCount = newCount;
+            c.totalValue = newTotal;
+            updated++;
+        }
+    });
+
+    writeJSON(CUSTOMERS_FILE, customers);
+
+    console.log('[Admin] Customer stats recalculated: ' + updated + ' of ' + customers.length + ' customers updated by ' + req.user.username);
+    res.json({
+        message: 'Customer stats recalculated',
+        totalCustomers: customers.filter(c => !c.deleted).length,
+        customersUpdated: updated,
+        changes: changes
+    });
+});
+
+// -----------------------------------------------------------
 // PUT /api/admin/customers/:id - Update a customer
 // -----------------------------------------------------------
 router.put('/:id', (req, res) => {
@@ -102,6 +171,7 @@ router.put('/:id', (req, res) => {
 // -----------------------------------------------------------
 // DELETE /api/admin/customers/:id - Soft delete customer + cascade quotes
 // GM: only if customer belongs to their dealer code.
+// Recalculates customer stats after cascade soft-delete.
 // -----------------------------------------------------------
 router.delete('/:id', (req, res) => {
     const customers = readJSON(CUSTOMERS_FILE);
@@ -152,6 +222,9 @@ router.delete('/:id', (req, res) => {
         writeJSON(QUOTES_FILE, quotes);
     }
 
+    // Recalculate customer stats (now 0 active quotes for this customer)
+    recalcCustomerStats(customerId);
+
     console.log('[Admin] Customer soft-deleted: ' + customerName + ' by ' + req.user.username + ' (' + req.user.role + ') | Cascade quotes: ' + cascadeCount);
     res.json({
         message: 'Customer deleted',
@@ -165,6 +238,7 @@ router.delete('/:id', (req, res) => {
 // -----------------------------------------------------------
 // POST /api/admin/customers/:id/restore - Undo / restore customer + quotes
 // GM: only if customer belongs to their dealer code.
+// Recalculates customer stats after cascade restore.
 // -----------------------------------------------------------
 router.post('/:id/restore', (req, res) => {
     const customers = readJSON(CUSTOMERS_FILE);
@@ -218,6 +292,9 @@ router.post('/:id/restore', (req, res) => {
     if (restoredQuotes > 0) {
         writeJSON(QUOTES_FILE, quotes);
     }
+
+    // Recalculate customer stats (restored quotes now count again)
+    recalcCustomerStats(customerId);
 
     console.log('[Admin] Customer restored: ' + customers[idx].name + ' by ' + req.user.username + ' | Cascade restored quotes: ' + restoredQuotes);
     res.json({
