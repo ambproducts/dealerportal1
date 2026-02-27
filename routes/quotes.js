@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
-const { readJSON, writeJSON, QUOTES_FILE, TIERS_FILE, CUSTOMERS_FILE, generateId } = require('../lib/helpers');
+const { readJSON, writeJSON, QUOTES_FILE, TIERS_FILE, CUSTOMERS_FILE, generateId, recalcCustomerStats } = require('../lib/helpers');
 const { requireAuth, requireRole } = require('../middleware/auth');
 
 router.use(requireAuth);
@@ -96,32 +96,6 @@ function upsertCustomer(customerData, dealerCode, existingCustomerId) {
 
     console.log('[CustomerDB] Created via quote: ' + newCustomer.name + ' (' + normalizedEmail + ') dealer: ' + dealerCode);
     return newCustomer;
-}
-
-// =============================================================
-// recalcCustomerStats
-// Scans all quotes to recompute quoteCount and totalValue
-// for a given customerId. Called after every quote save.
-// Excludes soft-deleted quotes from the calculation.
-// =============================================================
-function recalcCustomerStats(customerId) {
-    if (!customerId) return;
-
-    const customers = readJSON(CUSTOMERS_FILE);
-    const custIdx = customers.findIndex(c => c.id === customerId);
-    if (custIdx === -1) return;
-
-    const quotes = readJSON(QUOTES_FILE);
-    const customerQuotes = quotes.filter(q =>
-        !q.deleted && q.customer && q.customer.customerId === customerId
-    );
-
-    customers[custIdx].quoteCount = customerQuotes.length;
-    customers[custIdx].totalValue = Math.round(
-        customerQuotes.reduce((sum, q) => sum + (q.totalAmount || 0), 0) * 100
-    ) / 100;
-
-    writeJSON(CUSTOMERS_FILE, customers);
 }
 
 // =============================================================

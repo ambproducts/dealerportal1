@@ -1,10 +1,16 @@
 // ============================================================
-// routes/admin-quotes.js - Admin Quote Management v3.1
+// routes/admin-quotes.js - Admin Quote Management v3.2
 // Date: 2026-02-27
 // ============================================================
 // Soft delete with undo for quotes. Only admin/gm can access.
 // GM is scoped to their own dealer code for delete/restore.
 // Admin has unrestricted access across all dealers.
+//
+// v3.2 Changes (2026-02-27):
+//   - FIX: Call recalcCustomerStats after soft-delete, restore,
+//     and permanent-delete so customer quoteCount and totalValue
+//     stay accurate in real-time.
+//   - Import recalcCustomerStats from shared lib/helpers.js.
 //
 // Endpoints:
 //   GET    /api/admin/quotes              - List active quotes
@@ -18,7 +24,7 @@
 
 const express = require('express');
 const router = express.Router();
-const { readJSON, writeJSON, QUOTES_FILE } = require('../lib/helpers');
+const { readJSON, writeJSON, QUOTES_FILE, recalcCustomerStats } = require('../lib/helpers');
 const { requireAuth, requireRole, requireAdmin } = require('../middleware/auth');
 
 // All routes require authenticated admin or gm
@@ -33,6 +39,13 @@ function gmOwnsQuote(user, quote) {
     // GM: quote must belong to their dealer
     return quote.dealerCode &&
            quote.dealerCode.toUpperCase() === user.dealerCode.toUpperCase();
+}
+
+// -----------------------------------------------------------
+// HELPER: Extract customerId from a quote record
+// -----------------------------------------------------------
+function getCustomerId(quote) {
+    return (quote && quote.customer && quote.customer.customerId) || null;
 }
 
 // -----------------------------------------------------------
@@ -131,6 +144,7 @@ router.put('/:id/status', (req, res) => {
 // -----------------------------------------------------------
 // DELETE /api/admin/quotes/:id - Soft delete a quote
 // GM: only if quote belongs to their dealer code.
+// Recalculates customer stats after soft-delete.
 // -----------------------------------------------------------
 router.delete('/:id', (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
@@ -146,11 +160,19 @@ router.delete('/:id', (req, res) => {
         });
     }
 
+    // Capture customerId before marking deleted
+    const custId = getCustomerId(quotes[idx]);
+
     quotes[idx].deleted = true;
     quotes[idx].deletedAt = new Date().toISOString();
     quotes[idx].deletedBy = req.user.username;
     quotes[idx].deletedByRole = req.user.role;
     writeJSON(QUOTES_FILE, quotes);
+
+    // Recalculate customer stats (quote is now excluded from totals)
+    if (custId) {
+        recalcCustomerStats(custId);
+    }
 
     console.log('[Admin] Quote soft-deleted: ' + (quotes[idx].quoteNumber || quotes[idx].id) + ' by ' + req.user.username + ' (' + req.user.role + ')');
     res.json({
@@ -164,6 +186,7 @@ router.delete('/:id', (req, res) => {
 // -----------------------------------------------------------
 // POST /api/admin/quotes/:id/restore - Undo / restore a quote
 // GM: only if quote belongs to their dealer code.
+// Recalculates customer stats after restore.
 // -----------------------------------------------------------
 router.post('/:id/restore', (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
@@ -179,6 +202,9 @@ router.post('/:id/restore', (req, res) => {
         });
     }
 
+    // Capture customerId before restoring
+    const custId = getCustomerId(quotes[idx]);
+
     delete quotes[idx].deleted;
     delete quotes[idx].deletedAt;
     delete quotes[idx].deletedBy;
@@ -187,6 +213,11 @@ router.post('/:id/restore', (req, res) => {
     quotes[idx].restoredBy = req.user.username;
     quotes[idx].updatedAt = new Date().toISOString();
     writeJSON(QUOTES_FILE, quotes);
+
+    // Recalculate customer stats (quote is now included in totals again)
+    if (custId) {
+        recalcCustomerStats(custId);
+    }
 
     console.log('[Admin] Quote restored: ' + (quotes[idx].quoteNumber || quotes[idx].id) + ' by ' + req.user.username);
     res.json({
@@ -198,6 +229,7 @@ router.post('/:id/restore', (req, res) => {
 // -----------------------------------------------------------
 // DELETE /api/admin/quotes/:id/permanent - Permanently remove
 // Only admin can permanently delete (extra safety)
+// Recalculates customer stats after permanent deletion.
 // -----------------------------------------------------------
 router.delete('/:id/permanent', requireAdmin, (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
@@ -206,8 +238,16 @@ router.delete('/:id/permanent', requireAdmin, (req, res) => {
         return res.status(404).json({ error: 'Quote not found' });
     }
 
+    // Capture customerId before removing
+    const custId = getCustomerId(quotes[idx]);
+
     const removed = quotes.splice(idx, 1)[0];
     writeJSON(QUOTES_FILE, quotes);
+
+    // Recalculate customer stats (quote is permanently gone)
+    if (custId) {
+        recalcCustomerStats(custId);
+    }
 
     console.log('[Admin] Quote PERMANENTLY deleted: ' + (removed.quoteNumber || removed.id) + ' by ' + req.user.username);
     res.json({
