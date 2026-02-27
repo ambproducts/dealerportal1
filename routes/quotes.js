@@ -164,6 +164,26 @@ router.get('/pending-overrides', requireRole('admin', 'gm'), (req, res) => {
 
 // =============================================================
 // GET /api/quotes
+// Supports pagination, filtering, and search.
+//
+// Query params:
+//   page       (int, default: none = legacy mode returns raw array)
+//   limit      (int, default 20, max 100)
+//   sort       (string, default '-updatedAt', prefix '-' for desc)
+//   status     (string, filter by quote status)
+//   search     (string, fuzzy match on customer name/company/email/quoteNumber/notes)
+//   since      (ISO date string, quotes updated on or after this date)
+//   customerId (string, filter by customer ID)
+//
+// Backward compatible: If 'page' is NOT provided, returns the
+// raw array exactly as before so existing dealer-portal.html
+// and overrides code continues to work without changes.
+//
+// Paginated response shape:
+//   {
+//     quotes: [ ... ],
+//     pagination: { page, limit, totalCount, totalPages, hasNext, hasPrev }
+//   }
 // =============================================================
 router.get('/', (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
@@ -174,8 +194,96 @@ router.get('/', (req, res) => {
         mine = mine.filter(q => q.createdBy === req.user.username);
     }
 
-    mine.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
-    res.json(mine);
+    // --- STATUS FILTER ---
+    const statusFilter = (req.query.status || '').trim().toLowerCase();
+    if (statusFilter) {
+        mine = mine.filter(q => q.status === statusFilter);
+    }
+
+    // --- CUSTOMER FILTER ---
+    const customerIdFilter = (req.query.customerId || '').trim();
+    if (customerIdFilter) {
+        mine = mine.filter(q =>
+            q.customer && q.customer.customerId === customerIdFilter
+        );
+    }
+
+    // --- DATE RANGE FILTER (since) ---
+    const sinceFilter = req.query.since;
+    if (sinceFilter) {
+        const sinceDate = new Date(sinceFilter);
+        if (!isNaN(sinceDate.getTime())) {
+            mine = mine.filter(q => {
+                const qDate = new Date(q.updatedAt || q.createdAt);
+                return qDate >= sinceDate;
+            });
+        }
+    }
+
+    // --- SEARCH ---
+    const search = (req.query.search || '').trim().toLowerCase();
+    if (search) {
+        mine = mine.filter(q => {
+            const hay = [
+                q.quoteNumber || '',
+                q.customer ? (q.customer.name || '') : '',
+                q.customer ? (q.customer.company || '') : '',
+                q.customer ? (q.customer.email || '') : '',
+                q.notes || ''
+            ].join(' ').toLowerCase();
+            return hay.includes(search);
+        });
+    }
+
+    // --- SORT ---
+    const sortParam = (req.query.sort || '-updatedAt').trim();
+    const sortDesc = sortParam.startsWith('-');
+    const sortField = sortDesc ? sortParam.slice(1) : sortParam;
+
+    mine.sort((a, b) => {
+        let aVal, bVal;
+        if (sortField === 'totalAmount') {
+            aVal = a.totalAmount || 0;
+            bVal = b.totalAmount || 0;
+        } else if (sortField === 'quoteNumber') {
+            aVal = a.quoteNumber || '';
+            bVal = b.quoteNumber || '';
+            return sortDesc
+                ? bVal.localeCompare(aVal)
+                : aVal.localeCompare(bVal);
+        } else {
+            // Date fields: updatedAt, createdAt, submittedAt, etc.
+            aVal = new Date(a[sortField] || a.updatedAt || a.createdAt || 0).getTime();
+            bVal = new Date(b[sortField] || b.updatedAt || b.createdAt || 0).getTime();
+        }
+        return sortDesc ? bVal - aVal : aVal - bVal;
+    });
+
+    // --- BACKWARD COMPAT ---
+    // If no 'page' param, return raw array (existing code expects this)
+    if (!req.query.page) {
+        return res.json(mine);
+    }
+
+    // --- PAGINATION ---
+    const totalCount = mine.length;
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100);
+    const totalPages = Math.max(Math.ceil(totalCount / limit), 1);
+    const page = Math.min(Math.max(parseInt(req.query.page) || 1, 1), totalPages);
+    const startIdx = (page - 1) * limit;
+    const paged = mine.slice(startIdx, startIdx + limit);
+
+    res.json({
+        quotes: paged,
+        pagination: {
+            page: page,
+            limit: limit,
+            totalCount: totalCount,
+            totalPages: totalPages,
+            hasNext: page < totalPages,
+            hasPrev: page > 1
+        }
+    });
 });
 
 // =============================================================
