@@ -1,6 +1,6 @@
 // ============================================================
-// AmeriDex Dealer Portal - Patch File v1.5
-// Date: 2026-02-26
+// AmeriDex Dealer Portal - Patch File v1.6
+// Date: 2026-02-27
 // ============================================================
 // HOW TO USE:
 //   Add this <script> tag at the very bottom of dealer-portal.html,
@@ -10,6 +10,16 @@
 //
 //   This file monkey-patches the existing global functions
 //   in-place. No edits to the main file required.
+//
+// v1.6 Changes (2026-02-27):
+//   - PATCH 0 rewritten: Instead of repairing broken DOM nesting
+//     in saved-quotes-section, we now REMOVE the entire section.
+//     The My Quotes tab (quotes-customers.html) fully replaces
+//     this functionality with server-backed quotes and customers.
+//   - PATCH 0b retained but deprecated (renderCustomersList is
+//     no longer called since the section is removed).
+//   - PATCH 6 updated: Loads ameridex-customer-sync.js to migrate
+//     localStorage customers to the server API.
 //
 // v1.5 Changes (2026-02-26):
 //   - CRITICAL FIX: Prepended DOM repair (PATCH 0) to fix unclosed
@@ -24,191 +34,116 @@
     'use strict';
 
     // ===========================================================
-    // PATCH 0 (CRITICAL): Repair Broken DOM Nesting
+    // PATCH 0 (v1.6): Remove Saved Quotes Section Entirely
     // ===========================================================
-    // The saved-quotes-section card-header has an unclosed <div>
-    // wrapper around the Customers + New Quote buttons. The browser
-    // swallows all subsequent <section> elements (calculator, colors,
-    // customer, order) inside the card-header div, which breaks:
-    //   - Add Line Item button
-    //   - Product/color/length dropdowns
-    //   - Quantity inputs
-    //   - Delete row buttons
-    //   - Settings modal
-    //   - Customer progress badge
-    //   - Calculator results
+    // The saved-quotes-section on the dashboard is now redundant.
+    // The My Quotes tab (quotes-customers.html) provides full
+    // server-backed quote management and customer browsing.
     //
-    // This patch detects the corruption and physically moves the
-    // displaced sections back to their correct DOM positions.
+    // This patch:
+    //   1. Finds the saved-quotes-section element
+    //   2. Rescues any child sections that were trapped inside
+    //      due to the unclosed <div> bug (same as v1.5 repair)
+    //   3. Removes the saved-quotes-section from the DOM
+    //   4. Also hides the customers-section if it exists on
+    //      the dashboard (separate from My Quotes page)
     // ===========================================================
 
-    function repairSavedQuotesDOM() {
+    function removeSavedQuotesSection() {
         var savedSection = document.getElementById('saved-quotes-section');
-        if (!savedSection) return;
+        if (!savedSection) {
+            console.log('[patches v1.6] PATCH 0: No saved-quotes-section found, nothing to remove.');
+            return;
+        }
 
-        var orderSection = document.getElementById('order');
-        if (!orderSection) return;
+        var form = document.getElementById('order-form');
+        if (!form) {
+            // Fallback: just hide it
+            savedSection.style.display = 'none';
+            console.log('[patches v1.6] PATCH 0: No order-form found, hid saved-quotes-section.');
+            return;
+        }
 
-        // If order section is a descendant of saved-quotes-section, DOM is broken
-        if (savedSection.contains(orderSection)) {
-            console.warn('[patches v1.5] PATCH 0: Detected corrupted DOM nesting. Repairing...');
+        // Step 1: Rescue any sections trapped inside due to the
+        // unclosed <div> bug from the original HTML
+        var sectionIds = ['customers-section', 'calculator', 'colors', 'customer', 'order'];
+        var insertAfter = savedSection;
 
-            var form = document.getElementById('order-form');
-            if (!form) return;
-
-            // Sections that should be direct children of the form, after saved-quotes-section
-            var sectionIds = ['customers-section', 'calculator', 'colors', 'customer', 'order'];
-            var sectionsToMove = [];
-
-            sectionIds.forEach(function(id) {
-                var el = document.getElementById(id);
-                if (el && savedSection.contains(el) && el !== savedSection) {
-                    sectionsToMove.push(el);
-                }
-            });
-
-            // Move each displaced section to be a direct child of the form
-            var insertAfter = savedSection;
-            sectionsToMove.forEach(function(section) {
-                section.parentNode.removeChild(section);
+        sectionIds.forEach(function (id) {
+            var el = document.getElementById(id);
+            if (el && savedSection.contains(el) && el !== savedSection) {
+                el.parentNode.removeChild(el);
                 if (insertAfter.nextSibling) {
-                    form.insertBefore(section, insertAfter.nextSibling);
+                    form.insertBefore(el, insertAfter.nextSibling);
                 } else {
-                    form.appendChild(section);
+                    form.appendChild(el);
                 }
-                insertAfter = section;
-            });
-
-            // Also move any remaining card sections (shipping, total bar, actions)
-            // that may have been trapped. These don't have IDs we can target by name,
-            // so walk all <section> children of savedSection and move them too.
-            var trappedSections = savedSection.querySelectorAll(':scope > section, :scope section.card');
-            trappedSections.forEach(function(section) {
-                // Skip sections we already moved or the saved-quotes section itself
-                if (sectionIds.indexOf(section.id) !== -1) return;
-                section.parentNode.removeChild(section);
-                form.appendChild(section);
-                console.log('[patches v1.5] PATCH 0: Also rescued unnamed section.');
-            });
-
-            console.log('[patches v1.5] PATCH 0: DOM repair complete. Moved ' + sectionsToMove.length + ' named sections.');
-
-            // Force a re-render if render() exists, since the DOM was restructured
-            if (typeof window.render === 'function') {
-                try { window.render(); } catch(e) { /* will retry later */ }
+                insertAfter = el;
+                console.log('[patches v1.6] PATCH 0: Rescued section #' + id + ' from saved-quotes.');
             }
-            if (typeof window.updateTotalAndFasteners === 'function') {
-                try { window.updateTotalAndFasteners(); } catch(e) {}
-            }
-            if (typeof window.updateCustomerProgress === 'function') {
-                try { window.updateCustomerProgress(); } catch(e) {}
-            }
-        } else {
-            console.log('[patches v1.5] PATCH 0: DOM nesting OK, no repair needed.');
+        });
+
+        // Also rescue any other trapped sections/cards
+        var trappedSections = savedSection.querySelectorAll('section, .card');
+        trappedSections.forEach(function (section) {
+            if (sectionIds.indexOf(section.id) !== -1) return;
+            if (section === savedSection) return;
+            section.parentNode.removeChild(section);
+            form.appendChild(section);
+            console.log('[patches v1.6] PATCH 0: Rescued unnamed trapped section.');
+        });
+
+        // Step 2: Remove the saved-quotes-section itself
+        savedSection.parentNode.removeChild(savedSection);
+        console.log('[patches v1.6] PATCH 0: Removed saved-quotes-section from DOM.');
+
+        // Step 3: Also remove the old customers-section on the dashboard
+        // (not the one on quotes-customers.html, which has different IDs)
+        var customersSection = document.getElementById('customers-section');
+        if (customersSection && form.contains(customersSection)) {
+            customersSection.parentNode.removeChild(customersSection);
+            console.log('[patches v1.6] PATCH 0: Removed customers-section from dashboard DOM.');
+        }
+
+        // Step 4: Force re-render to fix any layout issues
+        if (typeof window.render === 'function') {
+            try { window.render(); } catch (e) { /* will retry later */ }
+        }
+        if (typeof window.updateTotalAndFasteners === 'function') {
+            try { window.updateTotalAndFasteners(); } catch (e) {}
+        }
+        if (typeof window.updateCustomerProgress === 'function') {
+            try { window.updateCustomerProgress(); } catch (e) {}
         }
     }
 
-    // Run DOM repair immediately if DOM is ready, or on DOMContentLoaded
+    // Run removal immediately if DOM is ready, or on DOMContentLoaded
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', repairSavedQuotesDOM);
+        document.addEventListener('DOMContentLoaded', removeSavedQuotesSection);
     } else {
-        repairSavedQuotesDOM();
+        removeSavedQuotesSection();
     }
 
-    // Also expose globally so other scripts can re-run if needed
-    window.repairSavedQuotesDOM = repairSavedQuotesDOM;
+    // Expose globally so other scripts can call if needed
+    window.repairSavedQuotesDOM = removeSavedQuotesSection;
 
 
     // ===========================================================
     // PATCH 0b: Define missing renderCustomersList()
     // ===========================================================
-    // This function is called by event handlers but was never defined
-    // in the inline script. A ReferenceError here silently kills the
-    // JS execution context and can block subsequent handlers.
+    // DEPRECATED in v1.6: The customers-section has been removed
+    // from the dashboard. This function is kept as a no-op safety
+    // net in case any other code calls it.
     // ===========================================================
 
     if (typeof window.renderCustomersList !== 'function') {
         window.renderCustomersList = function renderCustomersList() {
-            var list = document.getElementById('customers-list');
-            var searchInput = document.getElementById('customer-search');
-            var countEl = document.getElementById('customer-count');
-            if (!list) return;
-
-            var query = (searchInput ? searchInput.value : '').toLowerCase().trim();
-            var customers = (typeof customerHistory !== 'undefined') ? customerHistory : [];
-
-            if (query.length >= 2) {
-                customers = customers.filter(function(c) {
-                    return (c.name && c.name.toLowerCase().indexOf(query) !== -1) ||
-                           (c.email && c.email.toLowerCase().indexOf(query) !== -1) ||
-                           (c.company && c.company.toLowerCase().indexOf(query) !== -1);
-                });
-            }
-
-            if (countEl) {
-                countEl.textContent = customers.length + ' customer' + (customers.length !== 1 ? 's' : '');
-            }
-
-            if (customers.length === 0) {
-                list.innerHTML = '<div class="no-customers">' +
-                    (query ? 'No customers match your search.' : 'No customers yet. Create your first quote to add customers.') +
-                    '</div>';
-                return;
-            }
-
-            list.innerHTML = '';
-            customers.forEach(function(customer) {
-                var item = document.createElement('div');
-                item.className = 'customer-item';
-
-                var info = document.createElement('div');
-                info.className = 'customer-info';
-
-                var nameEl = document.createElement('div');
-                nameEl.className = 'customer-name';
-                nameEl.textContent = customer.name || 'Unknown';
-                info.appendChild(nameEl);
-
-                if (customer.email) {
-                    var emailEl = document.createElement('div');
-                    emailEl.className = 'customer-email';
-                    emailEl.textContent = customer.email;
-                    info.appendChild(emailEl);
-                }
-
-                if (customer.company) {
-                    var companyEl = document.createElement('div');
-                    companyEl.className = 'customer-company';
-                    companyEl.textContent = customer.company;
-                    info.appendChild(companyEl);
-                }
-
-                item.appendChild(info);
-
-                var actions = document.createElement('div');
-                actions.className = 'customer-actions';
-
-                var newQuoteBtn = document.createElement('button');
-                newQuoteBtn.type = 'button';
-                newQuoteBtn.className = 'btn btn-primary btn-sm';
-                newQuoteBtn.textContent = '+ New Quote';
-                newQuoteBtn.addEventListener('click', function() {
-                    document.getElementById('cust-name').value = customer.name || '';
-                    document.getElementById('cust-email').value = customer.email || '';
-                    document.getElementById('cust-company').value = customer.company || '';
-                    document.getElementById('cust-phone').value = customer.phone || '';
-                    if (typeof updateCustomerProgress === 'function') updateCustomerProgress();
-                    if (typeof showQuotesView === 'function') showQuotesView();
-                    var custSection = document.getElementById('customer');
-                    if (custSection) custSection.scrollIntoView({ behavior: 'smooth' });
-                });
-                actions.appendChild(newQuoteBtn);
-                item.appendChild(actions);
-
-                list.appendChild(item);
-            });
+            // v1.6: No-op. The old customers list on the dashboard
+            // has been removed. Customer management now lives on
+            // the My Quotes page (quotes-customers.html).
+            console.log('[patches v1.6] renderCustomersList() called but customers-section has been removed. Use My Quotes tab.');
         };
-        console.log('[patches v1.5] PATCH 0b: Registered missing renderCustomersList().');
+        console.log('[patches v1.6] PATCH 0b: Registered renderCustomersList() as no-op (section removed).');
     }
 
 
@@ -396,30 +331,26 @@
     // ===========================================================
     // PATCH 6: Bootstrap Loader for Additional Scripts
     //
-    // Dynamically loads scripts that are not in the static <script>
-    // tags of dealer-portal.html. These scripts override functions
-    // defined above (e.g., generatePrintHTML gets replaced by the
-    // branded version from ameridex-print-branding.js).
-    //
-    // Load order matters: addrow-fix first, then print-branding,
-    // then ui-fixes.
+    // v1.6: Added ameridex-customer-sync.js to sync localStorage
+    //       customers to the server API.
     // ===========================================================
     var EXTRA_SCRIPTS = [
         'ameridex-addrow-fix.js',
         'ameridex-print-branding.js',
         'ameridex-ui-fixes.js',
-        'ameridex-admin-csv-fix.js'
+        'ameridex-admin-csv-fix.js',
+        'ameridex-customer-sync.js'
     ];
 
     var scriptIndex = 0;
 
     function loadNextScript() {
         if (scriptIndex >= EXTRA_SCRIPTS.length) {
-            console.log('[patches v1.5] PATCH 6: All ' + EXTRA_SCRIPTS.length + ' extra scripts loaded.');
-            // Run DOM repair one more time after all scripts are loaded,
-            // in case any script re-rendered and broke the DOM again
+            console.log('[patches v1.6] PATCH 6: All ' + EXTRA_SCRIPTS.length + ' extra scripts loaded.');
+            // Run removal one more time after all scripts loaded,
+            // in case any script re-rendered the section
             setTimeout(function() {
-                repairSavedQuotesDOM();
+                removeSavedQuotesSection();
             }, 100);
             return;
         }
@@ -427,12 +358,12 @@
         var el = document.createElement('script');
         el.src = src;
         el.onload = function () {
-            console.log('[patches v1.5] PATCH 6: Loaded ' + src);
+            console.log('[patches v1.6] PATCH 6: Loaded ' + src);
             scriptIndex++;
             loadNextScript();
         };
         el.onerror = function () {
-            console.error('[patches v1.5] PATCH 6: FAILED to load ' + src);
+            console.error('[patches v1.6] PATCH 6: FAILED to load ' + src);
             scriptIndex++;
             loadNextScript();
         };
