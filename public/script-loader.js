@@ -1,7 +1,7 @@
 // ============================================================
 // AmeriDex Dealer Portal - Script Loader
 // File: script-loader.js
-// Date: 2026-02-26
+// Date: 2026-02-27
 // ============================================================
 // This file ensures all extension scripts are loaded in the
 // correct order after the main dealer-portal.html inline script.
@@ -16,7 +16,13 @@
 //   7. ameridex-roles.js             (GM/Frontdesk role system + override buttons)
 //   8. ameridex-admin.js             (Admin panel)
 //   9. ameridex-admin-customers.js   (Admin customer management)
-//  10. ameridex-admin-csv-fix.js     (CSV export formula injection prevention)
+//  10. ameridex-admin-delete.js      (Soft delete + undo + recently deleted)
+//  11. ameridex-admin-csv-fix.js     (CSV export formula injection prevention)
+//
+// v1.4 Changes (2026-02-27):
+//   - Added ameridex-admin-delete.js for soft delete/undo/recently deleted
+//     feature. Loads after admin-customers so delete buttons inject into
+//     already-rendered admin tables. Only active for admin and gm roles.
 //
 // v1.3 Changes (2026-02-26):
 //   - FIX: Added ameridex-addrow-fix.js as FIRST script in the load
@@ -44,6 +50,7 @@
         'ameridex-roles.js',
         'ameridex-admin.js',
         'ameridex-admin-customers.js',
+        'ameridex-admin-delete.js',
         'ameridex-admin-csv-fix.js'
     ];
 
