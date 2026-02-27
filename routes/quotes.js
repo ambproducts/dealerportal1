@@ -102,6 +102,7 @@ function upsertCustomer(customerData, dealerCode, existingCustomerId) {
 // recalcCustomerStats
 // Scans all quotes to recompute quoteCount and totalValue
 // for a given customerId. Called after every quote save.
+// Excludes soft-deleted quotes from the calculation.
 // =============================================================
 function recalcCustomerStats(customerId) {
     if (!customerId) return;
@@ -112,7 +113,7 @@ function recalcCustomerStats(customerId) {
 
     const quotes = readJSON(QUOTES_FILE);
     const customerQuotes = quotes.filter(q =>
-        q.customer && q.customer.customerId === customerId
+        !q.deleted && q.customer && q.customer.customerId === customerId
     );
 
     customers[custIdx].quoteCount = customerQuotes.length;
@@ -133,6 +134,9 @@ router.get('/pending-overrides', requireRole('admin', 'gm'), (req, res) => {
     const results = [];
 
     quotes.forEach(q => {
+        // Skip soft-deleted quotes
+        if (q.deleted) return;
+
         // GM can only see their own dealer's overrides
         if (req.user.role === 'gm' && q.dealerCode !== req.user.dealerCode) return;
 
@@ -187,7 +191,8 @@ router.get('/pending-overrides', requireRole('admin', 'gm'), (req, res) => {
 // =============================================================
 router.get('/', (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
-    let mine = quotes.filter(q => q.dealerCode === req.user.dealerCode);
+    // Filter to this dealer's non-deleted quotes
+    let mine = quotes.filter(q => q.dealerCode === req.user.dealerCode && !q.deleted);
 
     // Frontdesk users only see their own quotes
     if (req.user.role === 'frontdesk') {
@@ -291,7 +296,7 @@ router.get('/', (req, res) => {
 // =============================================================
 router.get('/:id', (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
-    const quote = quotes.find(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode);
+    const quote = quotes.find(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
     if (!quote) return res.status(404).json({ error: 'Quote not found' });
 
     // Frontdesk can only see their own quotes
@@ -380,7 +385,7 @@ router.post('/', (req, res) => {
 // =============================================================
 router.put('/:id', (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
-    const idx = quotes.findIndex(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode);
+    const idx = quotes.findIndex(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
     if (idx === -1) return res.status(404).json({ error: 'Quote not found' });
 
     // Frontdesk can only edit their own quotes
@@ -486,7 +491,7 @@ router.post('/:id/items/:itemIndex/request-override', (req, res) => {
     }
 
     const quotes = readJSON(QUOTES_FILE);
-    const quote = quotes.find(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode);
+    const quote = quotes.find(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
     if (!quote) return res.status(404).json({ error: 'Quote not found' });
 
     if (quote.status !== 'draft' && quote.status !== 'revision') {
@@ -557,7 +562,7 @@ router.post('/:id/items/:itemIndex/request-override', (req, res) => {
 // =============================================================
 router.post('/:id/items/:itemIndex/approve-override', requireRole('admin', 'gm'), (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
-    const quote = quotes.find(q => q.id === req.params.id);
+    const quote = quotes.find(q => q.id === req.params.id && !q.deleted);
     if (!quote) return res.status(404).json({ error: 'Quote not found' });
 
     // GM can only approve for their own dealer
@@ -614,7 +619,7 @@ router.post('/:id/items/:itemIndex/reject-override', requireRole('admin', 'gm'),
     const { rejectedReason } = req.body;
 
     const quotes = readJSON(QUOTES_FILE);
-    const quote = quotes.find(q => q.id === req.params.id);
+    const quote = quotes.find(q => q.id === req.params.id && !q.deleted);
     if (!quote) return res.status(404).json({ error: 'Quote not found' });
 
     // GM can only reject for their own dealer
@@ -670,7 +675,7 @@ router.post('/:id/items/:itemIndex/reject-override', requireRole('admin', 'gm'),
 // =============================================================
 router.post('/:id/submit', (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
-    const idx = quotes.findIndex(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode);
+    const idx = quotes.findIndex(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
     if (idx === -1) return res.status(404).json({ error: 'Quote not found' });
 
     // Frontdesk can only submit their own quotes
@@ -711,7 +716,7 @@ router.post('/:id/submit', (req, res) => {
 // =============================================================
 router.delete('/:id', (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
-    const idx = quotes.findIndex(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode);
+    const idx = quotes.findIndex(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
     if (idx === -1) return res.status(404).json({ error: 'Quote not found' });
 
     // Frontdesk can only delete their own quotes
@@ -740,7 +745,7 @@ router.delete('/:id', (req, res) => {
 // =============================================================
 router.post('/:id/duplicate', (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
-    const original = quotes.find(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode);
+    const original = quotes.find(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
     if (!original) return res.status(404).json({ error: 'Quote not found' });
 
     const dup = JSON.parse(JSON.stringify(original));
