@@ -48,17 +48,7 @@
         nav.querySelectorAll('.role-injected').forEach(function (el) { el.remove(); });
 
         // Admin: show Admin Panel button
-        if (dealer.role === 'admin') {
-            var adminBtn = document.createElement('button');
-            adminBtn.className = 'btn btn-admin role-injected';
-            adminBtn.textContent = 'Admin Panel';
-            adminBtn.style.cssText = 'background:#dc2626;color:#fff;border:none;padding:0.5rem 1rem;border-radius:8px;font-weight:600;cursor:pointer;font-size:0.88rem;';
-            adminBtn.addEventListener('click', function () {
-                if (window.toggleAdminPanel) window.toggleAdminPanel();
-            });
-            nav.appendChild(adminBtn);
-        }
-
+    
         // GM: show My Team button (full management)
         if (dealer.role === 'gm') {
             var teamBtn = document.createElement('button');
