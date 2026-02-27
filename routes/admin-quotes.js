@@ -1,32 +1,35 @@
 // ============================================================
-// routes/admin-quotes.js - Admin Quote Management Endpoints v2.0
+// routes/admin-quotes.js - Admin Quote Management v3.0
 // Date: 2026-02-27
 // ============================================================
-// Provides admin/GM quote management including delete capability.
-// Only users with 'admin' or 'gm' role can access these endpoints.
-//
-// Mounted at /api/admin/quotes in server.js.
+// Soft delete with undo for quotes. Only admin/gm can access.
 //
 // Endpoints:
-//   GET    /api/admin/quotes              - List/filter all quotes
-//   GET    /api/admin/quotes/export       - Export quotes as CSV
-//   PUT    /api/admin/quotes/:id/status   - Update quote status
-//   DELETE /api/admin/quotes/:id          - Delete a quote (admin/gm only)
+//   GET    /api/admin/quotes              - List active quotes
+//   GET    /api/admin/quotes/deleted       - List soft-deleted quotes
+//   GET    /api/admin/quotes/export        - Export quotes as CSV
+//   PUT    /api/admin/quotes/:id/status    - Update quote status
+//   DELETE /api/admin/quotes/:id           - Soft delete a quote
+//   POST   /api/admin/quotes/:id/restore  - Undo / restore a quote
+//   DELETE /api/admin/quotes/:id/permanent - Permanently remove (admin only)
 // ============================================================
 
 const express = require('express');
 const router = express.Router();
 const { readJSON, writeJSON, QUOTES_FILE } = require('../lib/helpers');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth, requireRole, requireAdmin } = require('../middleware/auth');
 
 // All routes require authenticated admin or gm
 router.use(requireAuth, requireRole('admin', 'gm'));
 
-// GET /api/admin/quotes
+// -----------------------------------------------------------
+// GET /api/admin/quotes - List active (non-deleted) quotes
+// -----------------------------------------------------------
 router.get('/', (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
     const { dealerCode, status, from, to } = req.query;
-    let filtered = quotes;
+    // Filter out soft-deleted quotes
+    let filtered = quotes.filter(q => !q.deleted);
     if (dealerCode) {
         filtered = filtered.filter(q => q.dealerCode === dealerCode.toUpperCase());
     }
@@ -43,49 +46,21 @@ router.get('/', (req, res) => {
     res.json(filtered);
 });
 
-// PUT /api/admin/quotes/:id/status
-router.put('/:id/status', (req, res) => {
-    const { status } = req.body;
-    const validStatuses = ['draft', 'submitted', 'reviewed', 'approved', 'revision'];
-    if (!validStatuses.includes(status)) {
-        return res.status(400).json({ error: 'Invalid status. Must be: ' + validStatuses.join(', ') });
-    }
+// -----------------------------------------------------------
+// GET /api/admin/quotes/deleted - List soft-deleted quotes
+// -----------------------------------------------------------
+router.get('/deleted', (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
-    const idx = quotes.findIndex(q => q.id === req.params.id);
-    if (idx === -1) return res.status(404).json({ error: 'Quote not found' });
-
-    quotes[idx].status = status;
-    quotes[idx].updatedAt = new Date().toISOString();
-    if (status === 'approved') quotes[idx].approvedAt = new Date().toISOString();
-    if (status === 'reviewed') quotes[idx].reviewedAt = new Date().toISOString();
-    writeJSON(QUOTES_FILE, quotes);
-    res.json(quotes[idx]);
+    const deleted = quotes.filter(q => q.deleted === true);
+    deleted.sort((a, b) => new Date(b.deletedAt || 0) - new Date(a.deletedAt || 0));
+    res.json(deleted);
 });
 
 // -----------------------------------------------------------
-// DELETE /api/admin/quotes/:id - Delete a quote (admin/gm only)
+// GET /api/admin/quotes/export - CSV export (active only)
 // -----------------------------------------------------------
-router.delete('/:id', (req, res) => {
-    const quotes = readJSON(QUOTES_FILE);
-    const idx = quotes.findIndex(q => q.id === req.params.id);
-    if (idx === -1) {
-        return res.status(404).json({ error: 'Quote not found' });
-    }
-
-    const deleted = quotes.splice(idx, 1)[0];
-    writeJSON(QUOTES_FILE, quotes);
-
-    console.log('[Admin] Quote deleted: ' + (deleted.quoteNumber || deleted.id) + ' by ' + req.user.username + ' (' + req.user.role + ')');
-    res.json({
-        message: 'Quote deleted',
-        quoteNumber: deleted.quoteNumber || null,
-        id: deleted.id
-    });
-});
-
-// GET /api/admin/quotes/export
 router.get('/export', (req, res) => {
-    const quotes = readJSON(QUOTES_FILE);
+    const quotes = readJSON(QUOTES_FILE).filter(q => !q.deleted);
     const headers = ['Quote Number', 'Dealer Code', 'Status', 'Customer Name',
                      'Customer Email', 'Customer Zip', 'Total Amount',
                      'Created', 'Submitted', 'Line Item Count'];
@@ -109,6 +84,100 @@ router.get('/export', (req, res) => {
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename="ameridex-quotes-export.csv"');
     res.send(csvContent);
+});
+
+// -----------------------------------------------------------
+// PUT /api/admin/quotes/:id/status - Update quote status
+// -----------------------------------------------------------
+router.put('/:id/status', (req, res) => {
+    const { status } = req.body;
+    const validStatuses = ['draft', 'submitted', 'reviewed', 'approved', 'revision'];
+    if (!validStatuses.includes(status)) {
+        return res.status(400).json({ error: 'Invalid status. Must be: ' + validStatuses.join(', ') });
+    }
+    const quotes = readJSON(QUOTES_FILE);
+    const idx = quotes.findIndex(q => q.id === req.params.id && !q.deleted);
+    if (idx === -1) return res.status(404).json({ error: 'Quote not found' });
+
+    quotes[idx].status = status;
+    quotes[idx].updatedAt = new Date().toISOString();
+    if (status === 'approved') quotes[idx].approvedAt = new Date().toISOString();
+    if (status === 'reviewed') quotes[idx].reviewedAt = new Date().toISOString();
+    writeJSON(QUOTES_FILE, quotes);
+    res.json(quotes[idx]);
+});
+
+// -----------------------------------------------------------
+// DELETE /api/admin/quotes/:id - Soft delete a quote
+// -----------------------------------------------------------
+router.delete('/:id', (req, res) => {
+    const quotes = readJSON(QUOTES_FILE);
+    const idx = quotes.findIndex(q => q.id === req.params.id && !q.deleted);
+    if (idx === -1) {
+        return res.status(404).json({ error: 'Quote not found' });
+    }
+
+    quotes[idx].deleted = true;
+    quotes[idx].deletedAt = new Date().toISOString();
+    quotes[idx].deletedBy = req.user.username;
+    quotes[idx].deletedByRole = req.user.role;
+    writeJSON(QUOTES_FILE, quotes);
+
+    console.log('[Admin] Quote soft-deleted: ' + (quotes[idx].quoteNumber || quotes[idx].id) + ' by ' + req.user.username + ' (' + req.user.role + ')');
+    res.json({
+        message: 'Quote deleted',
+        quoteNumber: quotes[idx].quoteNumber || null,
+        id: quotes[idx].id,
+        canUndo: true
+    });
+});
+
+// -----------------------------------------------------------
+// POST /api/admin/quotes/:id/restore - Undo / restore a quote
+// -----------------------------------------------------------
+router.post('/:id/restore', (req, res) => {
+    const quotes = readJSON(QUOTES_FILE);
+    const idx = quotes.findIndex(q => q.id === req.params.id && q.deleted === true);
+    if (idx === -1) {
+        return res.status(404).json({ error: 'Deleted quote not found' });
+    }
+
+    delete quotes[idx].deleted;
+    delete quotes[idx].deletedAt;
+    delete quotes[idx].deletedBy;
+    delete quotes[idx].deletedByRole;
+    quotes[idx].restoredAt = new Date().toISOString();
+    quotes[idx].restoredBy = req.user.username;
+    quotes[idx].updatedAt = new Date().toISOString();
+    writeJSON(QUOTES_FILE, quotes);
+
+    console.log('[Admin] Quote restored: ' + (quotes[idx].quoteNumber || quotes[idx].id) + ' by ' + req.user.username);
+    res.json({
+        message: 'Quote restored',
+        quote: quotes[idx]
+    });
+});
+
+// -----------------------------------------------------------
+// DELETE /api/admin/quotes/:id/permanent - Permanently remove
+// Only admin can permanently delete (extra safety)
+// -----------------------------------------------------------
+router.delete('/:id/permanent', requireAdmin, (req, res) => {
+    const quotes = readJSON(QUOTES_FILE);
+    const idx = quotes.findIndex(q => q.id === req.params.id);
+    if (idx === -1) {
+        return res.status(404).json({ error: 'Quote not found' });
+    }
+
+    const removed = quotes.splice(idx, 1)[0];
+    writeJSON(QUOTES_FILE, quotes);
+
+    console.log('[Admin] Quote PERMANENTLY deleted: ' + (removed.quoteNumber || removed.id) + ' by ' + req.user.username);
+    res.json({
+        message: 'Quote permanently deleted',
+        quoteNumber: removed.quoteNumber || null,
+        id: removed.id
+    });
 });
 
 module.exports = router;
