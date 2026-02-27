@@ -6,7 +6,26 @@ const { requireAuth } = require('../middleware/auth');
 
 router.use(requireAuth);
 
+// =============================================================
 // GET /api/customers
+// Supports pagination, filtering, and search.
+//
+// Query params:
+//   page       (int, default: none = legacy mode returns raw array)
+//   limit      (int, default 20, max 100)
+//   sort       (string, default '-lastContact', prefix '-' for desc)
+//   search     (string, fuzzy match on name/email/company/phone)
+//   hasQuotes  ('true' to only return customers with quoteCount >= 1)
+//
+// Backward compatible: If 'page' is NOT provided, returns the
+// raw array exactly as before so existing code continues to work.
+//
+// Paginated response shape:
+//   {
+//     customers: [ ... ],
+//     pagination: { page, limit, totalCount, totalPages, hasNext, hasPrev }
+//   }
+// =============================================================
 router.get('/', (req, res) => {
     const customers = readJSON(CUSTOMERS_FILE);
     const dealerCode = req.user.dealerCode;
@@ -24,10 +43,111 @@ router.get('/', (req, res) => {
         filtered = customers;
     }
 
-    res.json(filtered);
+    // --- SEARCH ---
+    const search = (req.query.search || '').trim().toLowerCase();
+    if (search) {
+        filtered = filtered.filter(c => {
+            const hay = [
+                c.name || '',
+                c.email || '',
+                c.company || '',
+                c.phone || ''
+            ].join(' ').toLowerCase();
+            return hay.includes(search);
+        });
+    }
+
+    // --- HAS QUOTES FILTER ---
+    if (req.query.hasQuotes === 'true') {
+        filtered = filtered.filter(c => (c.quoteCount || 0) >= 1);
+    }
+
+    // --- ENRICH: Add lastQuoteDate from quotes data ---
+    // Only do this for paginated requests to avoid perf hit on legacy calls
+    if (req.query.page) {
+        const quotes = readJSON(QUOTES_FILE);
+
+        // Build a lookup: customerId -> most recent quote date
+        const lastQuoteDateMap = {};
+        quotes.forEach(q => {
+            if (!q.customer || !q.customer.customerId) return;
+            const cid = q.customer.customerId;
+            const qDate = q.updatedAt || q.createdAt;
+            if (!lastQuoteDateMap[cid] || qDate > lastQuoteDateMap[cid]) {
+                lastQuoteDateMap[cid] = qDate;
+            }
+        });
+
+        filtered = filtered.map(c => {
+            const enriched = Object.assign({}, c);
+            enriched.lastQuoteDate = lastQuoteDateMap[c.id] || null;
+            return enriched;
+        });
+    }
+
+    // --- SORT ---
+    const sortParam = (req.query.sort || '-lastContact').trim();
+    const sortDesc = sortParam.startsWith('-');
+    const sortField = sortDesc ? sortParam.slice(1) : sortParam;
+
+    filtered.sort((a, b) => {
+        let aVal, bVal;
+
+        if (sortField === 'name') {
+            aVal = (a.name || '').toLowerCase();
+            bVal = (b.name || '').toLowerCase();
+            return sortDesc
+                ? bVal.localeCompare(aVal)
+                : aVal.localeCompare(bVal);
+        } else if (sortField === 'quoteCount') {
+            aVal = a.quoteCount || 0;
+            bVal = b.quoteCount || 0;
+        } else if (sortField === 'totalValue') {
+            aVal = a.totalValue || 0;
+            bVal = b.totalValue || 0;
+        } else if (sortField === 'lastQuoteDate') {
+            aVal = new Date(a.lastQuoteDate || a.lastContact || 0).getTime();
+            bVal = new Date(b.lastQuoteDate || b.lastContact || 0).getTime();
+        } else {
+            // Date fields: lastContact, createdAt, updatedAt
+            aVal = new Date(a[sortField] || a.lastContact || a.createdAt || 0).getTime();
+            bVal = new Date(b[sortField] || b.lastContact || b.createdAt || 0).getTime();
+        }
+
+        return sortDesc ? bVal - aVal : aVal - bVal;
+    });
+
+    // --- BACKWARD COMPAT ---
+    // If no 'page' param, return raw array (existing code expects this)
+    if (!req.query.page) {
+        return res.json(filtered);
+    }
+
+    // --- PAGINATION ---
+    const totalCount = filtered.length;
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100);
+    const totalPages = Math.max(Math.ceil(totalCount / limit), 1);
+    const page = Math.min(Math.max(parseInt(req.query.page) || 1, 1), totalPages);
+    const startIdx = (page - 1) * limit;
+    const paged = filtered.slice(startIdx, startIdx + limit);
+
+    res.json({
+        customers: paged,
+        pagination: {
+            page: page,
+            limit: limit,
+            totalCount: totalCount,
+            totalPages: totalPages,
+            hasNext: page < totalPages,
+            hasPrev: page > 1
+        }
+    });
 });
 
+// =============================================================
 // GET /api/customers/search?q=...
+// Quick search for autocomplete / typeahead (max 15 results)
+// =============================================================
 router.get('/search', (req, res) => {
     const q = (req.query.q || '').toLowerCase().trim();
     if (q.length < 2) {
@@ -72,7 +192,9 @@ router.get('/search', (req, res) => {
     res.json(results);
 });
 
+// =============================================================
 // POST /api/customers
+// =============================================================
 router.post('/', (req, res) => {
     const { name, email, company, phone, zipCode } = req.body;
 
@@ -126,7 +248,9 @@ router.post('/', (req, res) => {
     res.status(201).json(newCustomer);
 });
 
+// =============================================================
 // PUT /api/customers/:id
+// =============================================================
 router.put('/:id', (req, res) => {
     const customers = readJSON(CUSTOMERS_FILE);
     const idx = customers.findIndex(c => c.id === req.params.id);
