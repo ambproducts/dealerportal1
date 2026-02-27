@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - API Integration Patch v2.11
+// AmeriDex Dealer Portal - API Integration Patch v2.12
 // Date: 2026-02-27
 // ============================================================
 // REQUIRES: ameridex-patches.js (v1.0+) loaded first
@@ -8,132 +8,84 @@
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
 //
+// v2.12 Changes (2026-02-27):
+//   - FIX: All bare `currentQuote` and `savedQuotes` references
+//     inside the IIFE now use `window.currentQuote` and
+//     `window.savedQuotes` throughout.
+//
+//     Root cause: ameridex-global-scope-fix.js proxies the inline
+//     script's `let` bindings onto window via indirect eval getter/
+//     setter pairs. The IIFE's closed-over `var currentQuote` and
+//     `var savedQuotes` were completely separate references from
+//     window.currentQuote and window.savedQuotes. Writes in either
+//     direction never propagated to the other side, causing two bugs:
+//
+//     Bug 1 - Duplicate quote on open+save:
+//       loadServerQuotes() did `savedQuotes = serverQuotes.map(...)`
+//       which updated only the IIFE-local var. window.savedQuotes
+//       (the let binding) remained the old empty array. Meanwhile
+//       applyQuoteToDOM() wrote currentQuote._serverId to
+//       window.currentQuote (the proxy). saveCurrentQuote()'s
+//       findIndex ran against IIFE-local savedQuotes but compared
+//       against window.currentQuote._serverId - they never matched.
+//       findIndex always returned -1, the else-branch pushed a new
+//       entry, syncQuoteToServer() fired POST instead of PUT, and
+//       a duplicate was created on the server every single save.
+//
+//     Bug 2 - Line items not adding up:
+//       render(), getItemSubtotal(), updateTotalAndFasteners() all
+//       read the global let currentQuote (via window proxy).
+//       applyQuoteToDOM() wrote lineItems onto window.currentQuote.
+//       But every bare `currentQuote` read inside the IIFE (e.g.
+//       syncQuoteToServer totalAmount reducer, duplicateQuote,
+//       handleLogout, saveAndClose, applyTierPricing re-render
+//       guard) still read the stale IIFE-local var holding the
+//       original empty { lineItems: [] }. Result: totals always
+//       $0.00, render saw no line items.
+//
+//     Fix: use window.currentQuote and window.savedQuotes throughout
+//     the IIFE so all code paths share the same live object reference
+//     as the inline script, render functions, and patch scripts.
+//
 // v2.11 Changes (2026-02-27):
 //   - FIX: saveCurrentQuote() (Section 7) now matches by _serverId
 //     first before falling back to quoteId string comparison.
-//     Root cause: when a quote is opened from the My Quotes page
-//     via ?quoteId=<serverId>, loadQuoteFromUrlParam() (Section 18)
-//     sets currentQuote._serverId immediately. However savedQuotes[]
-//     is populated asynchronously by loadServerQuotes(). If the user
-//     saved before that async call resolved, savedQuotes[] was still
-//     empty, findIndex() returned -1, and the else-branch pushed a
-//     brand new quote entry instead of updating the existing one.
-//     syncQuoteToServer() then fired POST /api/quotes instead of
-//     PUT /api/quotes/:id, creating a duplicate on the server.
-//     Fix: findIndex() now checks _serverId first (with String()
-//     coercion to handle numeric vs string ID mismatches), then
-//     falls back to quoteId. The matched entry's _serverId is also
-//     back-filled onto quoteData so syncQuoteToServer() always
-//     fires PUT for any server-backed quote.
 //
 // v2.10 Changes (2026-02-27):
 //   - FIX: loadQuoteFromUrlParam() (Section 18) added to handle
-//     the ?quoteId= URL parameter set by the My Quotes page when
-//     the user clicks "Open" on a quote row.
-//     Root cause: the previous code called loadQuote() against
-//     savedQuotes[] before loadServerQuotes() had resolved,
-//     so savedQuotes[] was still empty, the lookup returned -1,
-//     and the line items table stayed blank.
-//     Fix: fetch GET /api/quotes/:id directly by server ID,
-//     reverse-map line items + customer via the v2.9 helpers,
-//     populate all DOM fields, then call render() +
-//     updateTotalAndFasteners() + updateCustomerProgress().
-//     If the session is not yet established when the script runs,
-//     execution is deferred via the 'ameridex-login' event so
-//     timing is correct regardless of the async resume chain.
-//     Falls back to savedQuotes[] lookup if server fetch fails.
+//     the ?quoteId= URL parameter set by the My Quotes page.
 //
 // v2.9 Changes (2026-02-27):
 //   - FIX: loadServerQuotes() now reverse-maps server line items
 //     back to frontend format using mapServerLineItemToFrontend().
-//     The v2.8 fix added frontend->server mapping in syncQuoteToServer()
-//     but never added the reverse server->frontend mapping. Without it:
-//       * item.type was undefined (server returns productId), causing
-//         PRODUCTS[undefined] to fall back to PRODUCTS.custom where
-//         isFt=false, so getItemSubtotal() skipped length multiplication
-//         and returned raw basePrice instead of basePrice * length * qty.
-//       * item.qty was undefined (server returns quantity), defaulting
-//         to 0 via (item.qty || 0), making subtotals $0.00.
-//   - FIX: loadServerQuotes() now normalizes customer objects via
-//     mapServerCustomerToFrontend(), handling field name variations
-//     (zipCode/zipcode/zip_code/zip, etc.) so customer info fields
-//     populate correctly when loading a saved quote.
 //
 // v2.8 Changes (2026-02-27):
 //   - FIX: syncQuoteToServer() now maps frontend line item fields
 //     to the backend's expected format before sending the payload.
-//     Frontend uses { type, qty, length, customLength, unitPrice }
-//     but the backend POST/PUT expects { productId, quantity,
-//     basePrice, price, total }. Without this mapping, basePrice
-//     resolved to undefined (defaulting to 0) and quantity resolved
-//     to undefined (defaulting to 1), causing every quote to save
-//     with $0.00 total on the server.
-//   - FIX: Each mapped line item now includes productId, productName,
-//     basePrice (resolved via getItemPrice), quantity (from qty),
-//     and pre-calculated total (from getItemSubtotal), plus color
-//     and length metadata for accurate server-side storage.
 //
 // v2.7 Changes (2026-02-27):
-//   - FIX: handleServerLogin() now writes dealerSettings.role =
-//     data.user.role before calling saveDealerSettings(). This
-//     persists the role (gm, admin, frontdesk, etc.) into
-//     localStorage so that ameridex-quotes-page.js can read it
-//     via settings.role and show the dealer scope bar for GM and
-//     Admin users.
-//   - FIX: tryResumeSession() also writes dealerSettings.role =
-//     data.user.role before saveDealerSettings() so resumed
-//     sessions also have the role persisted.
-//   - FIX: handleLogout() clears dealerSettings.role on logout
-//     so the role does not persist if a different user logs in
-//     next on the same browser.
+//   - FIX: handleServerLogin() now writes dealerSettings.role.
 //
 // v2.6 Changes (2026-02-27):
 //   - FIX: renderSavedQuotes() now null-guards #quote-search and
-//     #saved-quotes-list. These elements are removed from the DOM
-//     by ameridex-patches.js v1.6 (which deletes the entire
-//     saved-quotes-section). Without these guards, every call to
-//     renderSavedQuotes() threw:
-//       TypeError: Cannot read properties of null (reading 'value')
-//     This error cascaded from handleServerLogin(), saveCurrentQuote(),
-//     and tryResumeSession().
-//   - FIX: saveCurrentQuote() also guards the renderSavedQuotes()
-//     call so it won't crash if the saved-quotes UI is absent.
+//     #saved-quotes-list.
 //
 // v2.5 Changes (2026-02-26):
-//   - FIX: Expose applyTierPricing to window object so admin panel
-//     can call it to refresh pricing after product edits. This
-//     allows ameridex-admin.js refreshPricingNow() to trigger
-//     pricing updates in active dealer quotes.
+//   - FIX: Expose applyTierPricing to window object.
 //
 // v2.4 Changes (2026-02-16):
-//   - FIX: Dispatch 'ameridex-login' custom event after both
-//     handleServerLogin() and tryResumeSession() complete. This
-//     event is consumed by ameridex-roles.js to inject role-based
-//     nav buttons (GM "My Team", Admin Panel) at the correct time.
-//   - Previously these buttons never appeared because the event
-//     was never fired, and the DOMContentLoaded fallback ran
-//     before the user had authenticated.
+//   - FIX: Dispatch 'ameridex-login' custom event after auth.
 //
 // v2.3 Changes (2026-02-14):
 //   - FIX: api() helper no longer treats 401 from /api/auth/login
-//     as "session expired". Login failures now show the server's
-//     error message (e.g. "Invalid credentials") instead of
-//     clearing the session and redirecting to login screen.
-//   - FIX: applyTierPricing() guards every price assignment
-//     against undefined/null/NaN to prevent $undefined display.
-//   - FIX: tryResumeSession() silently falls back to login on
-//     failure without flashing "Session expired" error text.
+//     as "session expired".
 //
 // v2.2 Changes (2026-02-14):
 //   - FIX: Section 14 loadQuote() now resolves real savedQuotes
-//     index via indexOf() instead of using filtered array index.
+//     index via indexOf().
 //
 // v2.1 Changes (2026-02-14):
 //   - FIX: Login now sends { dealerCode, username, password }
-//   - FIX: Login/resume response unwraps { user, dealer } shape
-//   - FIX: Session resume (GET /api/auth/me) unwraps nested response
-//   - FIX: Self password change uses POST /api/auth/change-password
-//   - ADD: Expose _authToken getter for admin-customers.js
 // ============================================================
 
 (function () {
@@ -158,11 +110,6 @@
     // ----------------------------------------------------------
     // API HELPER
     // ----------------------------------------------------------
-    // options.skipAuthRedirect: when true, a 401 response will NOT
-    //   trigger the automatic session-clear + login redirect.
-    //   Used by handleServerLogin() so that bad-credentials 401s
-    //   are returned to the caller as a normal rejected promise.
-    // ----------------------------------------------------------
     function api(method, path, body, options) {
         var opts = {
             method: method,
@@ -183,7 +130,6 @@
 
                 if (res.status === 401) {
                     if (!skipAuthRedirect) {
-                        // Genuine session expiry on an authenticated request
                         sessionStorage.removeItem('ameridex-token');
                         _authToken = null;
                         _currentUser = null;
@@ -191,7 +137,6 @@
                         showLoginScreen();
                         showLoginError('Session expired. Please log in again.');
                     }
-                    // Always reject so the caller's .catch() fires
                     return res.json().catch(function () { return {}; }).then(function (errBody) {
                         return Promise.reject(new Error(
                             errBody.error || (skipAuthRedirect ? 'Invalid credentials' : 'Unauthorized')
@@ -234,17 +179,11 @@
     // ----------------------------------------------------------
     // EVENT DISPATCH HELPER
     // ----------------------------------------------------------
-    // Fires the 'ameridex-login' custom event on window.
-    // Consumed by ameridex-roles.js to inject role-based buttons
-    // (GM "My Team", Admin "Admin Panel") into the header.
-    // Also consumed by ameridex-overrides.js for init timing.
-    // ----------------------------------------------------------
     function dispatchLoginEvent() {
         try {
             window.dispatchEvent(new Event('ameridex-login'));
             console.log('[Auth] Dispatched ameridex-login event (role: ' + (_currentUser ? _currentUser.role : 'unknown') + ')');
         } catch (e) {
-            // IE11 fallback (unlikely but safe)
             var evt = document.createEvent('Event');
             evt.initEvent('ameridex-login', true, true);
             window.dispatchEvent(evt);
@@ -262,7 +201,6 @@
 
         var codeField = document.getElementById('dealer-code-input').closest('.field');
 
-        // Username field
         var userField = document.createElement('div');
         userField.className = 'field';
         userField.innerHTML =
@@ -273,7 +211,6 @@
             '<div class="help-text">Your login username (provided by AmeriDex)</div>';
         codeField.parentNode.insertBefore(userField, codeField.nextSibling);
 
-        // Password field
         var pwField = document.createElement('div');
         pwField.className = 'field';
         pwField.innerHTML =
@@ -284,23 +221,19 @@
             '<div class="help-text">Contact AmeriDex if you need a password reset</div>';
         userField.parentNode.insertBefore(pwField, userField.nextSibling);
 
-        // Update subtitle text
         var subtitle = loginCard.querySelector('.subtitle');
         if (subtitle) {
             subtitle.textContent = 'Enter your dealer code, username, and password to continue';
         }
 
-        // Update error text
         var errorEl = document.getElementById('dealer-code-error');
         if (errorEl) {
             errorEl.textContent = 'Invalid credentials';
         }
 
-        // Uppercase styling on code input
         var codeInput = document.getElementById('dealer-code-input');
         codeInput.style.textTransform = 'uppercase';
 
-        // Enter key handlers
         document.getElementById('dealer-username-input').addEventListener('keypress', function (e) {
             if (e.key === 'Enter') {
                 var pwInput = document.getElementById('dealer-password-input');
@@ -434,8 +367,6 @@
         loginBtn.textContent = 'Signing in...';
         loginBtn.disabled = true;
 
-        // v2.3: Pass skipAuthRedirect so 401 from login endpoint
-        // does NOT trigger "Session expired" + screen redirect.
         api('POST', '/api/auth/login', {
             dealerCode: code,
             username: username,
@@ -445,21 +376,17 @@
                 _authToken = data.token;
                 sessionStorage.setItem('ameridex-token', data.token);
 
-                // Backend returns { token, user, dealer }
                 _currentUser = data.user;
                 _currentDealer = data.dealer;
-                // Merge role from user onto dealer for compatibility
                 _currentDealer.role = data.user.role;
 
-                // Populate dealerSettings for compatibility
-                dealerSettings.dealerCode = data.dealer.dealerCode;
-                dealerSettings.dealerName = data.dealer.dealerName || '';
-                dealerSettings.dealerContact = data.dealer.contactPerson || '';
-                dealerSettings.dealerPhone = data.dealer.phone || '';
-                dealerSettings.lastLogin = new Date().toISOString();
-                // v2.7: Persist role so quotes-customers page can
-                // read it from localStorage and show dealer scope bar
-                dealerSettings.role = data.user.role;
+                // v2.12: use window.dealerSettings (proxied let binding)
+                window.dealerSettings.dealerCode = data.dealer.dealerCode;
+                window.dealerSettings.dealerName = data.dealer.dealerName || '';
+                window.dealerSettings.dealerContact = data.dealer.contactPerson || '';
+                window.dealerSettings.dealerPhone = data.dealer.phone || '';
+                window.dealerSettings.lastLogin = new Date().toISOString();
+                window.dealerSettings.role = data.user.role;
                 saveDealerSettings();
 
                 applyTierPricing();
@@ -472,10 +399,6 @@
                     loginBtn.disabled = false;
                     if (pwInput) pwInput.value = '';
                     console.log('[Auth] Logged in as ' + data.user.username + ' (' + data.user.role + ') | Dealer: ' + data.dealer.dealerCode);
-
-                    // v2.4: Dispatch login event so role-based modules
-                    // (ameridex-roles.js, ameridex-overrides.js) can
-                    // inject their UI now that auth is complete.
                     dispatchLoginEvent();
                 });
             })
@@ -483,14 +406,11 @@
                 loginBtn.textContent = 'Enter Portal';
                 loginBtn.disabled = false;
 
-                // v2.3: Since we used skipAuthRedirect, we get here for
-                // bad credentials (401) with err.message from the server.
-                // No "Session expired" flash, no screen redirect.
                 if (!_serverOnline) {
                     if (validateDealerCode(code)) {
                         showLoginError('Server unavailable. Logging in offline mode (limited features).');
-                        dealerSettings.dealerCode = code;
-                        dealerSettings.lastLogin = new Date().toISOString();
+                        window.dealerSettings.dealerCode = code;
+                        window.dealerSettings.lastLogin = new Date().toISOString();
                         saveDealerSettings();
                         setTimeout(function () {
                             showMainApp();
@@ -527,7 +447,6 @@
             }
         }
 
-        // Role comes from _currentDealer.role (merged from user object)
         var adminBtn = document.getElementById('admin-btn');
         if (adminBtn) {
             adminBtn.style.display = (_currentDealer.role === 'admin') ? 'inline-block' : 'none';
@@ -537,13 +456,6 @@
 
     // ----------------------------------------------------------
     // 5. TIER PRICING: Fetch and apply
-    // ----------------------------------------------------------
-    // v2.3: Guard every price assignment against undefined/null/NaN.
-    //       Only overwrite PRODUCTS[key].price if the server value
-    //       is a valid finite number. This prevents the $undefined
-    //       display bug caused by missing price fields in the
-    //       server response.
-    // v2.5: Exposed to window for admin panel pricing refresh.
     // ----------------------------------------------------------
     function isValidPrice(val) {
         if (val === undefined || val === null) return false;
@@ -575,7 +487,8 @@
                 window._currentTier = data.tier;
                 console.log('[Pricing] Tier: ' + data.tier.label + ' (x' + data.tier.multiplier + ')');
 
-                if (currentQuote.lineItems.length > 0) {
+                // v2.12: read window.currentQuote so we see the live let binding
+                if (window.currentQuote.lineItems.length > 0) {
                     render();
                     updateTotalAndFasteners();
                 }
@@ -585,29 +498,12 @@
             });
     }
 
-    // v2.5: Expose applyTierPricing to window for admin panel
     window.applyTierPricing = applyTierPricing;
 
 
     // ----------------------------------------------------------
     // 6a. SERVER-TO-FRONTEND MAPPING HELPERS (v2.9)
     // ----------------------------------------------------------
-    // syncQuoteToServer() (Section 6b) maps frontend -> server.
-    // These helpers do the REVERSE: server -> frontend format.
-    // Without this reverse mapping, loaded quotes have wrong field
-    // names and getItemSubtotal() / getItemPrice() / render() break.
-    // ----------------------------------------------------------
-
-    /**
-     * Normalize a server customer object into the frontend's
-     * expected shape: { name, email, zipCode, company, phone }
-     *
-     * Handles server field name variations defensively:
-     *   zipCode / zipcode / zip_code / zip
-     *   name / customerName / customer_name
-     *   company / companyName / company_name
-     *   phone / phoneNumber / phone_number
-     */
     function mapServerCustomerToFrontend(serverCustomer) {
         if (!serverCustomer) {
             return { name: '', email: '', zipCode: '', company: '', phone: '' };
@@ -622,30 +518,12 @@
         };
     }
 
-    /**
-     * Reverse-map a single server line item back to the frontend
-     * format that render(), getItemSubtotal(), getItemPrice(),
-     * and getItemLength() all expect.
-     *
-     * Server format (from syncQuoteToServer v2.8):
-     *   { productId, productName, basePrice, price, quantity,
-     *     length, customLength, total, type, color, color2 }
-     *
-     * Frontend format (used by inline script):
-     *   { type, qty, length, customLength, color, customDesc,
-     *     customUnitPrice, priceOverride, unitPrice }
-     */
     function mapServerLineItemToFrontend(serverItem) {
         if (!serverItem) return null;
         var li = serverItem;
 
-        // Resolve 'type': the frontend key that indexes into PRODUCTS.
-        // syncQuoteToServer sends both 'productId' and 'type', but
-        // the server may only persist/return 'productId'.
         var type = li.type || li.productId || 'custom';
 
-        // Validate that the type actually exists in PRODUCTS.
-        // If not, fall back to 'custom' so render() doesn't break.
         if (typeof PRODUCTS !== 'undefined' && !PRODUCTS[type]) {
             console.warn('[v2.9] Unknown product type "' + type + '", falling back to custom');
             type = 'custom';
@@ -654,11 +532,8 @@
         var prod = (typeof PRODUCTS !== 'undefined' && PRODUCTS[type])
             ? PRODUCTS[type] : null;
 
-        // Resolve quantity: frontend uses 'qty', server uses 'quantity'
         var qty = parseInt(li.qty, 10) || parseInt(li.quantity, 10) || 1;
 
-        // Resolve length: both formats use 'length', but verify it is
-        // set. Default based on product type if missing.
         var length = li.length;
         if (length === null || length === undefined) {
             if (type === 'dexerdry') {
@@ -670,29 +545,23 @@
             }
         }
 
-        // Resolve customLength for 'custom' length entries
         var customLength = li.customLength || null;
         if (customLength !== null) {
             customLength = parseFloat(customLength) || null;
         }
 
-        // Resolve color
         var color = li.color || li.color1 || '';
         if (!color && prod && prod.hasColor) {
-            color = (typeof selectedColor1 !== 'undefined') ? selectedColor1 : 'Driftwood';
+            color = window.selectedColor1 || 'Driftwood';
         }
 
-        // Resolve custom item fields
         var customDesc = li.customDesc || li.productName || '';
         var customUnitPrice = parseFloat(li.customUnitPrice) || 0;
 
-        // If this is a custom item and we have a basePrice from server
-        // but no customUnitPrice, use basePrice as the unit price
         if (type === 'custom' && customUnitPrice === 0 && li.basePrice) {
             customUnitPrice = parseFloat(li.basePrice) || 0;
         }
 
-        // Resolve price override (dealer-adjusted price)
         var priceOverride = li.priceOverride || null;
         var unitPrice = li.unitPrice || null;
 
@@ -714,31 +583,26 @@
     // ----------------------------------------------------------
     // 6b. QUOTE SYNC: Server with localStorage fallback
     // ----------------------------------------------------------
-    // v2.9 FIX: loadServerQuotes() now reverse-maps server data
-    // back to frontend format using mapServerCustomerToFrontend()
-    // and mapServerLineItemToFrontend(). Without this, loaded
-    // quotes had wrong field names causing:
-    //   - Customer info fields appearing empty (zipCode vs zipcode)
-    //   - getItemSubtotal() returning raw basePrice instead of
-    //     basePrice * length * qty (because PRODUCTS[undefined]
-    //     fell back to PRODUCTS.custom where isFt=false)
+    // v2.12: All savedQuotes reads/writes use window.savedQuotes
+    // so they operate on the proxied let binding, not a stale
+    // closed-over IIFE var.
     // ----------------------------------------------------------
     function loadServerQuotes() {
         return api('GET', '/api/quotes')
             .then(function (serverQuotes) {
-                var localOnly = savedQuotes.filter(function (lq) {
+                // v2.12: read window.savedQuotes for the live binding
+                var localOnly = window.savedQuotes.filter(function (lq) {
                     return !lq._serverId && lq.lineItems.length > 0;
                 });
 
-                savedQuotes = serverQuotes.map(function (sq) {
-                    // v2.9: Reverse-map line items from server format
-                    // back to frontend format
+                // v2.12: write to window.savedQuotes so the let binding
+                // and all other scripts see the updated array
+                window.savedQuotes = serverQuotes.map(function (sq) {
                     var mappedLineItems = (sq.lineItems || []).map(function (serverLI) {
                         var mapped = mapServerLineItemToFrontend(serverLI);
                         return mapped || serverLI;
                     }).filter(function (li) { return li !== null; });
 
-                    // v2.9: Normalize customer object field names
                     var mappedCustomer = mapServerCustomerToFrontend(sq.customer);
 
                     return {
@@ -759,28 +623,23 @@
                 });
 
                 localOnly.forEach(function (lq) {
-                    savedQuotes.push(lq);
+                    window.savedQuotes.push(lq);
                     syncQuoteToServer(lq);
                 });
 
                 saveToStorage();
-                console.log('[Quotes v2.9] Loaded ' + savedQuotes.length + ' quotes with reverse-mapped line items');
-                return savedQuotes;
+                console.log('[Quotes v2.9] Loaded ' + window.savedQuotes.length + ' quotes with reverse-mapped line items');
+                return window.savedQuotes;
             })
             .catch(function () {
                 console.warn('[Quotes] Using localStorage quotes (offline)');
-                return savedQuotes;
+                return window.savedQuotes;
             });
     }
 
     function syncQuoteToServer(quote) {
         if (!_authToken) return Promise.resolve(null);
 
-        // v2.8 FIX: Transform frontend line items into the backend's
-        // expected format. The frontend uses { type, qty, length, ... }
-        // but the backend expects { productId, quantity, basePrice, ... }.
-        // Without this mapping, basePrice resolves to undefined (-> 0)
-        // and quantity resolves to undefined (-> 1), causing $0.00 totals.
         var mappedLineItems = quote.lineItems.map(function (li) {
             var price = (typeof getItemPrice === 'function') ? getItemPrice(li) : 0;
             var subtotal = (typeof getItemSubtotal === 'function') ? getItemSubtotal(li) : 0;
@@ -813,7 +672,8 @@
             internalNotes: quote.internalNotes,
             shippingAddress: quote.shippingAddress,
             deliveryDate: quote.deliveryDate,
-            totalAmount: quote.lineItems.reduce(function (sum, li) {
+            // v2.12: read window.currentQuote for the live let binding
+            totalAmount: window.currentQuote.lineItems.reduce(function (sum, li) {
                 return sum + ((typeof getItemSubtotal === 'function') ? getItemSubtotal(li) : 0);
             }, 0)
         };
@@ -847,25 +707,9 @@
     // ----------------------------------------------------------
     // 7. OVERRIDE: saveCurrentQuote (server + local)
     // ----------------------------------------------------------
-    // v2.11 FIX: Match by _serverId first before falling back to
-    // quoteId string comparison. When a quote is opened via
-    // ?quoteId=, currentQuote._serverId is set immediately by
-    // loadQuoteFromUrlParam() (Section 18), but savedQuotes[] is
-    // populated asynchronously by loadServerQuotes(). If the user
-    // saved before that async call resolved, savedQuotes[] was
-    // still empty, findIndex() returned -1, and the else-branch
-    // pushed a brand new quote instead of updating the existing
-    // one. syncQuoteToServer() then fired POST instead of PUT,
-    // creating a duplicate on the server.
-    //
-    // String() coercion on both sides of the _serverId comparison
-    // handles cases where the server returns a numeric ID but
-    // currentQuote._serverId was stored as a string (or vice versa).
-    //
-    // _serverId is also back-filled from the matched savedQuotes
-    // entry onto quoteData so syncQuoteToServer() always fires PUT
-    // for any server-backed quote, even if currentQuote._serverId
-    // was somehow not set before this function ran.
+    // v2.12: All currentQuote and savedQuotes reads/writes use
+    // window.* so they hit the proxied let binding and stay in
+    // sync with the inline script, render(), and patch scripts.
     // ----------------------------------------------------------
     var _origSaveCurrentQuote = window.saveCurrentQuote;
     window.saveCurrentQuote = function () {
@@ -873,50 +717,44 @@
             window.syncQuoteFromDOM();
         }
 
-        if (!currentQuote.quoteId) {
-            currentQuote.quoteId = generateQuoteNumber();
+        if (!window.currentQuote.quoteId) {
+            window.currentQuote.quoteId = generateQuoteNumber();
         }
 
-        // v2.11: Match by _serverId first, then fall back to quoteId.
-        var existingIdx = savedQuotes.findIndex(function (q) {
-            return (currentQuote._serverId && q._serverId &&
-                    String(q._serverId) === String(currentQuote._serverId))
-                || q.quoteId === currentQuote.quoteId;
+        // v2.11 + v2.12: Match by _serverId first, then quoteId.
+        // Use window.savedQuotes and window.currentQuote.
+        var existingIdx = window.savedQuotes.findIndex(function (q) {
+            return (window.currentQuote._serverId && q._serverId &&
+                    String(q._serverId) === String(window.currentQuote._serverId))
+                || q.quoteId === window.currentQuote.quoteId;
         });
 
-        var quoteData = JSON.parse(JSON.stringify(currentQuote));
+        var quoteData = JSON.parse(JSON.stringify(window.currentQuote));
         quoteData.updatedAt = new Date().toISOString();
 
         if (existingIdx >= 0) {
-            // v2.11: Back-fill _serverId from matched record in case
-            // currentQuote didn't carry it (e.g. loaded from localStorage
-            // fallback path). This ensures syncQuoteToServer() fires PUT.
-            if (!quoteData._serverId && savedQuotes[existingIdx]._serverId) {
-                quoteData._serverId = savedQuotes[existingIdx]._serverId;
+            if (!quoteData._serverId && window.savedQuotes[existingIdx]._serverId) {
+                quoteData._serverId = window.savedQuotes[existingIdx]._serverId;
             }
-            savedQuotes[existingIdx] = quoteData;
+            window.savedQuotes[existingIdx] = quoteData;
         } else {
             quoteData.createdAt = new Date().toISOString();
-            savedQuotes.push(quoteData);
-            existingIdx = savedQuotes.length - 1;
+            window.savedQuotes.push(quoteData);
+            existingIdx = window.savedQuotes.length - 1;
         }
 
         saveToStorage();
         updateCustomerHistory();
 
-        // v2.6: Guard against missing DOM elements.
-        // The saved-quotes-section may have been removed by
-        // ameridex-patches.js v1.6. Only call renderSavedQuotes
-        // if the target container still exists in the DOM.
         try {
             renderSavedQuotes();
         } catch (e) {
             console.warn('[API v2.6] renderSavedQuotes() skipped (DOM elements removed):', e.message);
         }
 
-        syncQuoteToServer(savedQuotes[existingIdx]);
+        syncQuoteToServer(window.savedQuotes[existingIdx]);
 
-        return currentQuote.quoteId;
+        return window.currentQuote.quoteId;
     };
 
 
@@ -949,7 +787,8 @@
     // ----------------------------------------------------------
     var _origHandleLogout = window.handleLogout;
     window.handleLogout = function () {
-        if (currentQuote.lineItems.length > 0 || document.getElementById('cust-name').value.trim()) {
+        // v2.12: read window.currentQuote for the live let binding
+        if (window.currentQuote.lineItems.length > 0 || document.getElementById('cust-name').value.trim()) {
             if (!confirm('Are you sure you want to log out? Any unsaved changes will be lost.')) {
                 return;
             }
@@ -964,14 +803,13 @@
         _currentDealer = null;
         sessionStorage.removeItem('ameridex-token');
 
-        clearTimeout(idleTimer);
-        clearTimeout(warningTimer);
-        clearInterval(countdownInterval);
+        clearTimeout(window.idleTimer);
+        clearTimeout(window.warningTimer);
+        clearInterval(window.countdownInterval);
 
-        dealerSettings.dealerCode = '';
-        // v2.7: Clear role on logout so it doesn't persist
-        // if a different user with a different role logs in next.
-        dealerSettings.role = '';
+        // v2.12: write through window.dealerSettings proxy
+        window.dealerSettings.dealerCode = '';
+        window.dealerSettings.role = '';
         saveDealerSettings();
 
         resetFormOnly();
@@ -988,8 +826,6 @@
         var tierBadge = document.getElementById('header-tier-badge');
         if (tierBadge) tierBadge.style.display = 'none';
 
-        // Remove role-injected buttons on logout so they don't
-        // persist if a different user logs in next.
         document.querySelectorAll('.role-injected').forEach(function (el) { el.remove(); });
 
         document.getElementById('main-app').classList.add('app-hidden');
@@ -1018,7 +854,8 @@
     window.sendFormalRequest = function () {
         var quoteId = saveCurrentQuote();
 
-        var quote = savedQuotes.find(function (q) {
+        // v2.12: read window.savedQuotes for the live let binding
+        var quote = window.savedQuotes.find(function (q) {
             return q.quoteId === quoteId;
         });
 
@@ -1057,9 +894,10 @@
         var newContact = document.getElementById('settings-dealer-contact').value.trim();
         var newPhone = document.getElementById('settings-dealer-phone').value.trim();
 
-        dealerSettings.dealerName = newName;
-        dealerSettings.dealerContact = newContact;
-        dealerSettings.dealerPhone = newPhone;
+        // v2.12: write through window.dealerSettings proxy
+        window.dealerSettings.dealerName = newName;
+        window.dealerSettings.dealerContact = newContact;
+        window.dealerSettings.dealerPhone = newPhone;
         saveDealerSettings();
 
         if (_authToken) {
@@ -1079,7 +917,6 @@
             });
         }
 
-        // Handle password change using /api/auth/change-password
         var currentPw = document.getElementById('settings-current-pw');
         var newPw = document.getElementById('settings-new-pw');
         var confirmPw = document.getElementById('settings-confirm-pw');
@@ -1135,13 +972,14 @@
     // ----------------------------------------------------------
     window.saveAndClose = function () {
         document.getElementById('timeout-warning').classList.remove('visible');
-        clearInterval(countdownInterval);
+        clearInterval(window.countdownInterval);
 
         if (typeof window.syncQuoteFromDOM === 'function') {
             window.syncQuoteFromDOM();
         }
 
-        if (currentQuote.lineItems.length > 0 || document.getElementById('cust-name').value.trim()) {
+        // v2.12: read window.currentQuote for the live let binding
+        if (window.currentQuote.lineItems.length > 0 || document.getElementById('cust-name').value.trim()) {
             var quoteId = saveCurrentQuote();
             alert('Quote saved! ID: ' + quoteId);
         }
@@ -1153,28 +991,20 @@
     // ----------------------------------------------------------
     // 14. OVERRIDE: renderSavedQuotes (status badges + duplicate)
     // ----------------------------------------------------------
-    // v2.6: Added null guards for #quote-search and
-    // #saved-quotes-list. These elements are removed from the DOM
-    // by ameridex-patches.js v1.6 which deletes the entire
-    // saved-quotes-section. Without guards, every call path that
-    // invokes renderSavedQuotes() would throw a TypeError.
-    // ----------------------------------------------------------
     window.renderSavedQuotes = function () {
         var list = document.getElementById('saved-quotes-list');
 
-        // v2.6: If the saved-quotes UI has been removed from the DOM
-        // (by ameridex-patches.js v1.6), there is nothing to render.
-        // Exit silently to prevent TypeError on null elements.
         if (!list) {
             return;
         }
 
         var searchEl = document.getElementById('quote-search');
         var searchQuery = (searchEl ? searchEl.value : '').toLowerCase();
-        var filtered = savedQuotes;
+        // v2.12: read window.savedQuotes for the live let binding
+        var filtered = window.savedQuotes;
 
         if (searchQuery) {
-            filtered = savedQuotes.filter(function (q) {
+            filtered = window.savedQuotes.filter(function (q) {
                 return (q.customer.name && q.customer.name.toLowerCase().includes(searchQuery))
                     || (q.customer.company && q.customer.company.toLowerCase().includes(searchQuery))
                     || (q.quoteId && q.quoteId.toLowerCase().includes(searchQuery));
@@ -1255,7 +1085,8 @@
                     duplicateQuote(filtered[i]);
                 } else {
                     if (typeof window.loadQuote === 'function') {
-                        var realIdx = savedQuotes.indexOf(filtered[i]);
+                        // v2.12: use window.savedQuotes for the live binding
+                        var realIdx = window.savedQuotes.indexOf(filtered[i]);
                         if (realIdx > -1) window.loadQuote(realIdx);
                     }
                 }
@@ -1268,8 +1099,9 @@
                 if (confirm('Delete this quote?')) {
                     var quote = filtered[i];
                     deleteQuoteFromServer(quote);
-                    var qIdx = savedQuotes.indexOf(quote);
-                    if (qIdx > -1) savedQuotes.splice(qIdx, 1);
+                    // v2.12: use window.savedQuotes for the live binding
+                    var qIdx = window.savedQuotes.indexOf(quote);
+                    if (qIdx > -1) window.savedQuotes.splice(qIdx, 1);
                     saveToStorage();
                     renderSavedQuotes();
                 }
@@ -1282,11 +1114,14 @@
     // 15. QUOTE DUPLICATION
     // ----------------------------------------------------------
     function duplicateQuote(original) {
-        if (currentQuote.lineItems.length > 0) {
+        // v2.12: read window.currentQuote for the live let binding
+        if (window.currentQuote.lineItems.length > 0) {
             if (!confirm('This will replace your current work with a copy. Continue?')) return;
         }
 
-        currentQuote = {
+        // v2.12: write to window.currentQuote so the proxy setter
+        // updates the let binding and render() sees the new object
+        window.currentQuote = {
             quoteId: null,
             status: 'draft',
             customer: { name: '', email: '', zipCode: '', company: '', phone: '' },
@@ -1304,12 +1139,12 @@
         document.getElementById('cust-company').value = '';
         document.getElementById('cust-phone').value = '';
 
-        document.getElementById('pic-frame').checked = currentQuote.options.pictureFrame;
-        document.getElementById('stairs').checked = currentQuote.options.stairs;
-        document.getElementById('pic-frame-note').style.display = currentQuote.options.pictureFrame ? 'block' : 'none';
-        document.getElementById('stairs-note').style.display = currentQuote.options.stairs ? 'block' : 'none';
+        document.getElementById('pic-frame').checked = window.currentQuote.options.pictureFrame;
+        document.getElementById('stairs').checked = window.currentQuote.options.stairs;
+        document.getElementById('pic-frame-note').style.display = window.currentQuote.options.pictureFrame ? 'block' : 'none';
+        document.getElementById('stairs-note').style.display = window.currentQuote.options.stairs ? 'block' : 'none';
 
-        document.getElementById('special-instr').value = currentQuote.specialInstructions;
+        document.getElementById('special-instr').value = window.currentQuote.specialInstructions;
         document.getElementById('internal-notes').value = '';
         document.getElementById('ship-addr').value = '';
         document.getElementById('del-date').value = '';
@@ -1323,7 +1158,7 @@
         if (original._serverId && _authToken) {
             api('POST', '/api/quotes/' + original._serverId + '/duplicate')
                 .then(function (dup) {
-                    currentQuote._serverId = dup.id;
+                    window.currentQuote._serverId = dup.id;
                     console.log('[Duplicate] Server copy created:', dup.id);
                 })
                 .catch(function () {
@@ -1336,30 +1171,21 @@
     // ----------------------------------------------------------
     // 16. AUTO-RESUME SESSION ON PAGE LOAD
     // ----------------------------------------------------------
-    // v2.3: tryResumeSession now uses skipAuthRedirect so that a
-    //       stale token does NOT flash "Session expired" before
-    //       the login screen appears. It just silently clears
-    //       the token and shows the login form.
-    // v2.4: Dispatches ameridex-login event on successful resume.
-    // v2.7: Persists role to dealerSettings for quotes page.
-    // ----------------------------------------------------------
     function tryResumeSession() {
         if (!_authToken) return;
 
         api('GET', '/api/auth/me', null, { skipAuthRedirect: true })
             .then(function (data) {
-                // Backend returns { user: {...}, dealer: {...} }
                 _currentUser = data.user;
                 _currentDealer = data.dealer;
                 _currentDealer.role = data.user.role;
 
-                dealerSettings.dealerCode = data.dealer.dealerCode;
-                dealerSettings.dealerName = data.dealer.dealerName || '';
-                dealerSettings.dealerContact = data.dealer.contactPerson || '';
-                dealerSettings.dealerPhone = data.dealer.phone || '';
-                // v2.7: Persist role so quotes-customers page can
-                // read it from localStorage and show dealer scope bar
-                dealerSettings.role = data.user.role;
+                // v2.12: write through window.dealerSettings proxy
+                window.dealerSettings.dealerCode = data.dealer.dealerCode;
+                window.dealerSettings.dealerName = data.dealer.dealerName || '';
+                window.dealerSettings.dealerContact = data.dealer.contactPerson || '';
+                window.dealerSettings.dealerPhone = data.dealer.phone || '';
+                window.dealerSettings.role = data.user.role;
                 saveDealerSettings();
 
                 return applyTierPricing().then(function () {
@@ -1371,13 +1197,9 @@
                 updateHeaderForDealer();
                 renderSavedQuotes();
                 console.log('[Session] Resumed as ' + _currentUser.username + ' (' + _currentUser.role + ')');
-
-                // v2.4: Dispatch login event so role-based modules
-                // can inject their UI after session resume completes.
                 dispatchLoginEvent();
             })
             .catch(function () {
-                // v2.3: Silently clear stale session, no error flash
                 sessionStorage.removeItem('ameridex-token');
                 _authToken = null;
                 _currentUser = null;
@@ -1393,7 +1215,8 @@
     window.addEventListener('online', function () {
         _serverOnline = true;
         console.log('[Network] Back online, syncing...');
-        savedQuotes.forEach(function (q) {
+        // v2.12: read window.savedQuotes for the live let binding
+        window.savedQuotes.forEach(function (q) {
             if (!q._serverId && q.lineItems.length > 0) {
                 syncQuoteToServer(q);
             }
@@ -1404,85 +1227,64 @@
     // ----------------------------------------------------------
     // 18. LOAD QUOTE FROM URL PARAM (?quoteId=) (v2.10)
     // ----------------------------------------------------------
-    // The My Quotes page (quotes-customers.html) opens a quote
-    // by navigating to dealer-portal.html?quoteId=<serverId>.
-    //
-    // Previous behavior (broken): relied on loadQuote(index)
-    // looking up savedQuotes[], but savedQuotes[] was still empty
-    // when the inline script ran because loadServerQuotes() is
-    // async. Result: lookup returned -1, line items never rendered.
-    //
-    // Fix: fetch GET /api/quotes/:id directly by server ID,
-    // reverse-map via v2.9 helpers, populate DOM, call render().
-    // If auth is not yet ready (e.g. session resume still in
-    // flight), defer via the 'ameridex-login' event.
-    // Falls back to savedQuotes[] lookup on server fetch failure.
-    // ----------------------------------------------------------
     function loadQuoteFromUrlParam() {
         var urlParams = new URLSearchParams(window.location.search);
         var serverId = urlParams.get('quoteId');
         if (!serverId) return;
 
         function applyQuoteToDOM(sq) {
-            // Reverse-map line items and customer
             var mappedLineItems = (sq.lineItems || []).map(function (serverLI) {
                 return mapServerLineItemToFrontend(serverLI) || serverLI;
             }).filter(Boolean);
 
             var mappedCustomer = mapServerCustomerToFrontend(sq.customer);
 
-            // Populate currentQuote
-            currentQuote.quoteId             = sq.quoteNumber || sq.quoteId || null;
-            currentQuote._serverId           = sq.id || sq._serverId || null;
-            currentQuote.status              = sq.status || 'draft';
-            currentQuote.customer            = mappedCustomer;
-            currentQuote.lineItems           = mappedLineItems;
-            currentQuote.options             = sq.options || { pictureFrame: false, stairs: false };
-            currentQuote.specialInstructions = sq.specialInstructions || '';
-            currentQuote.internalNotes       = sq.internalNotes || '';
-            currentQuote.shippingAddress     = sq.shippingAddress || '';
-            currentQuote.deliveryDate        = sq.deliveryDate || '';
+            // v2.12: write to window.currentQuote so the proxy setter
+            // updates the let binding and all render fns see the data
+            window.currentQuote.quoteId             = sq.quoteNumber || sq.quoteId || null;
+            window.currentQuote._serverId           = sq.id || sq._serverId || null;
+            window.currentQuote.status              = sq.status || 'draft';
+            window.currentQuote.customer            = mappedCustomer;
+            window.currentQuote.lineItems           = mappedLineItems;
+            window.currentQuote.options             = sq.options || { pictureFrame: false, stairs: false };
+            window.currentQuote.specialInstructions = sq.specialInstructions || '';
+            window.currentQuote.internalNotes       = sq.internalNotes || '';
+            window.currentQuote.shippingAddress     = sq.shippingAddress || '';
+            window.currentQuote.deliveryDate        = sq.deliveryDate || '';
 
-            // Populate DOM customer fields
             document.getElementById('cust-name').value    = mappedCustomer.name    || '';
             document.getElementById('cust-email').value   = mappedCustomer.email   || '';
             document.getElementById('cust-zip').value     = mappedCustomer.zipCode || '';
             document.getElementById('cust-company').value = mappedCustomer.company || '';
             document.getElementById('cust-phone').value   = mappedCustomer.phone   || '';
 
-            // Populate order details fields
-            document.getElementById('special-instr').value  = currentQuote.specialInstructions;
-            document.getElementById('internal-notes').value = currentQuote.internalNotes;
-            document.getElementById('ship-addr').value      = currentQuote.shippingAddress;
-            document.getElementById('del-date').value       = currentQuote.deliveryDate;
+            document.getElementById('special-instr').value  = window.currentQuote.specialInstructions;
+            document.getElementById('internal-notes').value = window.currentQuote.internalNotes;
+            document.getElementById('ship-addr').value      = window.currentQuote.shippingAddress;
+            document.getElementById('del-date').value       = window.currentQuote.deliveryDate;
 
-            // Populate option checkboxes
-            document.getElementById('pic-frame').checked = currentQuote.options.pictureFrame;
-            document.getElementById('stairs').checked    = currentQuote.options.stairs;
+            document.getElementById('pic-frame').checked = window.currentQuote.options.pictureFrame;
+            document.getElementById('stairs').checked    = window.currentQuote.options.stairs;
             var picFrameNote = document.getElementById('pic-frame-note');
             var stairsNote   = document.getElementById('stairs-note');
-            if (picFrameNote) picFrameNote.style.display = currentQuote.options.pictureFrame ? 'block' : 'none';
-            if (stairsNote)   stairsNote.style.display   = currentQuote.options.stairs       ? 'block' : 'none';
+            if (picFrameNote) picFrameNote.style.display = window.currentQuote.options.pictureFrame ? 'block' : 'none';
+            if (stairsNote)   stairsNote.style.display   = window.currentQuote.options.stairs       ? 'block' : 'none';
 
-            // Render line items table and update totals
             render();
             updateTotalAndFasteners();
             if (typeof updateCustomerProgress === 'function') updateCustomerProgress();
 
             console.log('[v2.10] Loaded quote from URL param: '
-                + (currentQuote.quoteId || serverId)
+                + (window.currentQuote.quoteId || serverId)
                 + ' | ' + mappedLineItems.length + ' line items');
 
-            // Clean the URL param so a page refresh doesn't re-load
-            // (avoids confusion if the user edits and saves a new quote)
             try {
                 var cleanUrl = window.location.pathname;
                 window.history.replaceState(null, '', cleanUrl);
-            } catch (e) { /* ignore in environments that block history API */ }
+            } catch (e) { /* ignore */ }
         }
 
         function doLoad() {
-            // Prefer fetching directly from server for freshest data
             api('GET', '/api/quotes/' + serverId)
                 .then(function (sq) {
                     applyQuoteToDOM(sq);
@@ -1490,8 +1292,8 @@
                 .catch(function (err) {
                     console.warn('[v2.10] Server fetch failed for quoteId=' + serverId + ', falling back to savedQuotes[]:', err.message);
 
-                    // Fallback: search savedQuotes[] by _serverId or quoteId
-                    var found = savedQuotes.find(function (q) {
+                    // v2.12: read window.savedQuotes for the live let binding
+                    var found = window.savedQuotes.find(function (q) {
                         return String(q._serverId) === String(serverId)
                             || String(q.quoteId)   === String(serverId);
                     });
@@ -1504,9 +1306,6 @@
                 });
         }
 
-        // If the auth token is already present, we can fetch immediately.
-        // Otherwise wait for the ameridex-login event which fires after
-        // tryResumeSession() or handleServerLogin() completes.
         if (_authToken) {
             doLoad();
         } else {
@@ -1529,9 +1328,7 @@
         tryResumeSession();
     }
 
-    // v2.10: Check for ?quoteId= URL param and load that quote
-    // once auth is established.
     loadQuoteFromUrlParam();
 
-    console.log('[AmeriDex API] v2.11 loaded: Auth + API integration active.');
+    console.log('[AmeriDex API] v2.12 loaded: Auth + API integration active.');
 })();
