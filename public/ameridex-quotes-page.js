@@ -1,21 +1,25 @@
 // ============================================================
-// AmeriDex Dealer Portal - Quotes & Customers Page v1.2
+// AmeriDex Dealer Portal - Quotes & Customers Page v2.0
 // Date: 2026-02-27
 // ============================================================
-// Handles all logic for quotes-customers.html:
-//   - Auth check (redirects to dealer-portal.html if not logged in)
-//   - Paginated fetch from GET /api/quotes and GET /api/customers
-//   - Card rendering for quotes and customers
-//   - Filter, search, sort, and date range controls
-//   - Pagination controls
-//   - Navigation to dealer-portal.html for loading quotes
+// v2.0 Changes:
+//   - Customers tab: switched from card grid to table/list layout
+//     so no data is cut off. Columns: Name, Company, Contact,
+//     Quotes, Total Value, Last Quote, Dealers (GM/Admin only),
+//     Actions.
+//   - GM/Admin dealer scope: added a scope toggle bar that lets
+//     GM and Admin users switch between "My Dealer" (default,
+//     filtered to their dealer code) and "Global" (all dealers).
+//     The dealer code input lets them type a specific code to
+//     filter. Customer rows show dealer tags so you can see
+//     which locations a customer belongs to.
+//   - "View Quotes" on a customer now links to that customer's
+//     quotes at the currently-scoped dealer location.
+//   - Clear filters resets dealer scope back to local/my dealer.
+//   - Stats bar shows "At This Dealer" count when scope is not
+//     global.
 //
-// AUTH STRATEGY:
-//   ameridex-api.js stores the JWT in sessionStorage under key
-//   'ameridex-token'. It also exposes window.getAuthToken(),
-//   window.getCurrentUser(), and window.getCurrentDealer().
-//   Since quotes-customers.html is a SEPARATE page, those window
-//   globals do NOT persist. We must read sessionStorage directly.
+// v1.x: original card-based layout, no dealer scope switching
 // ============================================================
 
 (function () {
@@ -24,6 +28,7 @@
     var API_BASE = window.AMERIDEX_API_BASE || '';
     var authToken = null;
     var dealerCode = null;
+    var userRole = null;
 
     // --- State ---
     var quotesState = {
@@ -47,16 +52,20 @@
         allData: null
     };
 
+    // Dealer scope state (GM/Admin feature)
+    var dealerScope = {
+        mode: 'local',       // 'local' = my dealer code, 'global' = all dealers, 'specific' = typed code
+        filterCode: ''       // when mode is 'specific', this holds the typed dealer code
+    };
+
     var activeTab = 'quotes';
 
     // ============================================================
-    // AUTH - matches ameridex-api.js storage
+    // AUTH
     // ============================================================
     function checkAuth() {
-        // Primary: JWT token stored by ameridex-api.js
         authToken = sessionStorage.getItem('ameridex-token') || null;
 
-        // Secondary: dealer settings in localStorage (offline fallback)
         var settings = null;
         try {
             var raw = localStorage.getItem('ameridex_dealer_settings');
@@ -64,19 +73,19 @@
         } catch (e) {}
 
         dealerCode = (settings && settings.dealerCode) ? settings.dealerCode : null;
+        userRole = (settings && settings.role) ? settings.role : null;
 
-        // Must have EITHER a valid token OR a dealer code
         if (!authToken && !dealerCode) {
             window.location.href = 'dealer-portal.html';
             return false;
         }
 
-        // Update header with dealer info
         var dealerInfo = document.getElementById('header-dealer-code');
         if (dealerInfo && settings) {
             var parts = [];
             if (settings.dealerCode) parts.push('Dealer: ' + settings.dealerCode);
             if (settings.dealerName) parts.push(settings.dealerName);
+            if (settings.role) parts.push(settings.role.toUpperCase());
             dealerInfo.textContent = parts.join(' | ') || '';
         }
 
@@ -85,10 +94,7 @@
 
     function handleLogout() {
         try {
-            // Clear token (matches ameridex-api.js logout)
             sessionStorage.removeItem('ameridex-token');
-
-            // Clear dealer code from settings
             var raw = localStorage.getItem('ameridex_dealer_settings');
             if (raw) {
                 var settings = JSON.parse(raw);
@@ -97,6 +103,10 @@
             }
         } catch (e) {}
         window.location.href = 'dealer-portal.html';
+    }
+
+    function isElevatedRole() {
+        return userRole === 'gm' || userRole === 'admin';
     }
 
     // ============================================================
@@ -165,6 +175,116 @@
             return now.toISOString();
         }
         return '';
+    }
+
+    // ============================================================
+    // DEALER SCOPE BAR (GM/Admin only)
+    // ============================================================
+    function renderDealerScopeBar(containerId) {
+        var container = document.getElementById(containerId);
+        if (!container) return;
+
+        if (!isElevatedRole()) {
+            container.innerHTML = '';
+            return;
+        }
+
+        var isLocal = dealerScope.mode === 'local';
+        var isGlobal = dealerScope.mode === 'global';
+
+        var modeLabel = 'Viewing: My Location (' + escapeHTML(dealerCode) + ')';
+        var dotClass = 'scope-dot-local';
+        if (isGlobal) {
+            modeLabel = 'Viewing: All Dealers (Global)';
+            dotClass = 'scope-dot-global';
+        } else if (dealerScope.mode === 'specific' && dealerScope.filterCode) {
+            modeLabel = 'Viewing: Dealer ' + escapeHTML(dealerScope.filterCode.toUpperCase());
+            dotClass = 'scope-dot-global';
+        }
+
+        var html = '<div class="dealer-scope-bar">';
+        html += '<label>Dealer Scope:</label>';
+        html += '<div class="scope-toggle">';
+        html += '<button class="scope-toggle-btn' + (isLocal ? ' active' : '') + '" data-scope="local">My Dealer</button>';
+        html += '<button class="scope-toggle-btn' + (isGlobal ? ' active' : '') + '" data-scope="global">Global</button>';
+        html += '</div>';
+        html += '<input type="text" id="' + containerId + '-code-input" placeholder="Dealer code..." value="' + escapeHTML(dealerScope.filterCode || dealerCode || '') + '" title="Type a dealer code and press Enter to filter">';
+        html += '<div class="scope-indicator"><span class="scope-dot ' + dotClass + '"></span>' + modeLabel + '</div>';
+        html += '</div>';
+
+        container.innerHTML = html;
+
+        // Wire up toggle buttons
+        container.querySelectorAll('.scope-toggle-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var scope = btn.getAttribute('data-scope');
+                if (scope === 'local') {
+                    dealerScope.mode = 'local';
+                    dealerScope.filterCode = '';
+                    var codeInput = document.getElementById(containerId + '-code-input');
+                    if (codeInput) codeInput.value = dealerCode || '';
+                } else {
+                    dealerScope.mode = 'global';
+                    dealerScope.filterCode = '';
+                    var codeInput = document.getElementById(containerId + '-code-input');
+                    if (codeInput) codeInput.value = '';
+                }
+                resetAndRefresh();
+            });
+        });
+
+        // Wire up dealer code input
+        var codeInput = document.getElementById(containerId + '-code-input');
+        if (codeInput) {
+            codeInput.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') {
+                    var val = codeInput.value.trim().toUpperCase();
+                    if (val && val !== dealerCode) {
+                        dealerScope.mode = 'specific';
+                        dealerScope.filterCode = val;
+                    } else if (val === dealerCode || !val) {
+                        dealerScope.mode = val ? 'local' : 'global';
+                        dealerScope.filterCode = '';
+                    }
+                    resetAndRefresh();
+                }
+            });
+        }
+    }
+
+    function resetAndRefresh() {
+        // Reset pagination and caches
+        quotesState.page = 1;
+        quotesState.allData = null;
+        customersState.page = 1;
+        customersState.allData = null;
+
+        // Re-render scope bars on both tabs
+        renderDealerScopeBar('quotes-dealer-scope');
+        renderDealerScopeBar('customers-dealer-scope');
+
+        // Refresh current tab
+        if (activeTab === 'quotes') {
+            fetchQuotes();
+        } else {
+            fetchCustomers();
+        }
+    }
+
+    // Client-side filter: given an array of items with a dealers[] array,
+    // filter based on current dealer scope
+    function filterByDealerScope(items, getDealers) {
+        if (!isElevatedRole()) return items; // non-elevated users are already server-filtered
+        if (dealerScope.mode === 'global') return items; // show everything
+
+        var code = dealerScope.mode === 'specific' ? dealerScope.filterCode : dealerCode;
+        if (!code) return items;
+
+        return items.filter(function (item) {
+            var dealers = getDealers(item);
+            if (!dealers || !Array.isArray(dealers)) return true; // no dealer info, include it
+            return dealers.includes(code);
+        });
     }
 
     // ============================================================
@@ -320,7 +440,16 @@
         apiFetch(buildCustomersUrl())
             .then(function (data) {
                 customersState.data = data;
-                renderCustomerCards(data);
+
+                // Apply client-side dealer scope filtering
+                var customers = data.customers || [];
+                var scopedCustomers = filterByDealerScope(customers, function (c) { return c.dealers; });
+                var scopedData = {
+                    customers: scopedCustomers,
+                    pagination: data.pagination
+                };
+
+                renderCustomerTable(scopedData);
                 renderPagination('customers-pagination', data.pagination, function (page) {
                     customersState.page = page;
                     fetchCustomers();
@@ -329,11 +458,11 @@
                     apiFetch('/api/customers?page=1&limit=1')
                         .then(function (statsData) {
                             customersState.allData = statsData;
-                            renderCustomersStats(statsData.pagination, data.pagination);
+                            renderCustomersStats(statsData.pagination, data.pagination, scopedCustomers.length);
                         })
                         .catch(function () {});
                 } else {
-                    renderCustomersStats(customersState.allData.pagination, data.pagination);
+                    renderCustomersStats(customersState.allData.pagination, data.pagination, scopedCustomers.length);
                 }
             })
             .catch(function (err) {
@@ -342,53 +471,111 @@
             });
     }
 
-    function renderCustomersStats(allPag, filteredPag) {
+    function renderCustomersStats(allPag, filteredPag, scopedCount) {
         var container = document.getElementById('customers-stats');
         var totalAll = allPag ? allPag.totalCount : 0;
         var totalFiltered = filteredPag ? filteredPag.totalCount : 0;
 
-        container.innerHTML =
+        var html =
             '<div class="stat-card"><div class="stat-value">' + totalAll + '</div><div class="stat-label">Total Customers</div></div>' +
-            '<div class="stat-card"><div class="stat-value">' + totalFiltered + '</div><div class="stat-label">Showing</div></div>';
+            '<div class="stat-card"><div class="stat-value">' + totalFiltered + '</div><div class="stat-label">Matching Filters</div></div>';
+
+        // Show scoped count if different from filtered (GM/Admin with local scope)
+        if (isElevatedRole() && dealerScope.mode !== 'global' && scopedCount !== undefined) {
+            html += '<div class="stat-card"><div class="stat-value">' + scopedCount + '</div><div class="stat-label">At This Dealer</div></div>';
+        }
+
+        container.innerHTML = html;
     }
 
-    function renderCustomerCards(data) {
+    // ============================================================
+    // CUSTOMER TABLE (List layout, replaces cards)
+    // ============================================================
+    function renderCustomerTable(data) {
         var contentEl = document.getElementById('customers-content');
         var customers = data.customers || [];
 
         if (customers.length === 0) {
-            contentEl.innerHTML = '<div class="empty-state"><div class="empty-state-icon">\ud83d\udc65</div><h3>No customers found</h3><p>Customers are automatically created when you save quotes.</p></div>';
+            var emptyMsg = 'No customers found';
+            var emptyHint = 'Customers are automatically created when you save quotes.';
+            if (isElevatedRole() && dealerScope.mode === 'local') {
+                emptyHint = 'No customers at this dealer location. Try switching to Global to search across all dealers.';
+            }
+            contentEl.innerHTML = '<div class="empty-state"><div class="empty-state-icon">\ud83d\udc65</div><h3>' + emptyMsg + '</h3><p>' + emptyHint + '</p></div>';
             return;
         }
 
-        var html = '<div class="cards-grid">';
+        var showDealerCol = isElevatedRole();
+
+        var html = '<div class="customer-table-wrap">';
+        html += '<table class="customer-table">';
+        html += '<thead><tr>';
+        html += '<th>Name</th>';
+        html += '<th>Company</th>';
+        html += '<th>Contact</th>';
+        html += '<th>Quotes</th>';
+        html += '<th>Total Value</th>';
+        html += '<th>Last Quote</th>';
+        if (showDealerCol) html += '<th>Dealers</th>';
+        html += '<th>Actions</th>';
+        html += '</tr></thead>';
+        html += '<tbody>';
+
         customers.forEach(function (c) {
-            html += '<div class="customer-card">';
-            html += '<div class="customer-card-name">' + escapeHTML(c.name || 'Unknown') + '</div>';
-            if (c.company) html += '<div class="customer-card-company">' + escapeHTML(c.company) + '</div>';
-            html += '<div class="customer-card-contact">';
-            if (c.email) html += '<span>\u2709 ' + escapeHTML(c.email) + '</span>';
-            if (c.phone) html += '<span>\u260e ' + escapeHTML(c.phone) + '</span>';
-            html += '</div>';
-            html += '<div class="customer-card-stats">';
-            html += '<div class="customer-card-stat"><span class="stat-num">' + (c.quoteCount || 0) + '</span><span class="stat-lbl">Quotes</span></div>';
-            html += '<div class="customer-card-stat"><span class="stat-num">' + formatCurrency(c.totalValue || 0) + '</span><span class="stat-lbl">Value</span></div>';
-            if (c.lastQuoteDate) {
-                html += '<div class="customer-card-stat"><span class="stat-num">' + formatDateShort(c.lastQuoteDate) + '</span><span class="stat-lbl">Last Quote</span></div>';
+            html += '<tr>';
+
+            // Name
+            html += '<td class="ct-name">' + escapeHTML(c.name || 'Unknown') + '</td>';
+
+            // Company
+            html += '<td class="ct-company">' + escapeHTML(c.company || '') + '</td>';
+
+            // Contact (email + phone stacked)
+            html += '<td class="ct-contact">';
+            if (c.email) html += '<a href="mailto:' + escapeHTML(c.email) + '">' + escapeHTML(c.email) + '</a><br>';
+            if (c.phone) html += '<span>' + escapeHTML(c.phone) + '</span>';
+            if (!c.email && !c.phone) html += '<span style="color:#d1d5db;">No contact</span>';
+            html += '</td>';
+
+            // Quotes count
+            html += '<td class="ct-stat">' + (c.quoteCount || 0) + '</td>';
+
+            // Total Value
+            html += '<td class="ct-stat">' + formatCurrency(c.totalValue || 0) + '</td>';
+
+            // Last Quote Date
+            html += '<td class="ct-date">' + (c.lastQuoteDate ? formatDate(c.lastQuoteDate) : (c.lastContact ? formatDate(c.lastContact) : 'N/A')) + '</td>';
+
+            // Dealers column (GM/Admin only)
+            if (showDealerCol) {
+                html += '<td><div class="ct-dealers">';
+                if (c.dealers && c.dealers.length > 0) {
+                    c.dealers.forEach(function (d) {
+                        var tagClass = (d === dealerCode) ? 'dealer-tag dealer-tag-mine' : 'dealer-tag';
+                        html += '<span class="' + tagClass + '">' + escapeHTML(d) + '</span>';
+                    });
+                } else {
+                    html += '<span style="color:#d1d5db;font-size:0.78rem;">None</span>';
+                }
+                html += '</div></td>';
             }
-            html += '</div>';
-            html += '<div class="customer-card-actions">';
-            html += '<button class="btn btn-outline btn-sm" data-view-quotes="' + escapeHTML(c.id) + '" data-customer-name="' + escapeHTML(c.name) + '">View Quotes</button>';
-            html += '<a href="dealer-portal.html?newQuote=1&custName=' + encodeURIComponent(c.name || '') + '&custEmail=' + encodeURIComponent(c.email || '') + '&custCompany=' + encodeURIComponent(c.company || '') + '&custPhone=' + encodeURIComponent(c.phone || '') + '" class="btn btn-primary btn-sm">+ New Quote</a>';
-            html += '</div>';
-            html += '</div>';
+
+            // Actions
+            html += '<td class="ct-actions">';
+            html += '<button class="btn btn-outline btn-xs" data-view-quotes="' + escapeHTML(c.id) + '" data-customer-name="' + escapeHTML(c.name) + '">View Quotes</button> ';
+            html += '<a href="dealer-portal.html?newQuote=1&custName=' + encodeURIComponent(c.name || '') + '&custEmail=' + encodeURIComponent(c.email || '') + '&custCompany=' + encodeURIComponent(c.company || '') + '&custPhone=' + encodeURIComponent(c.phone || '') + '" class="btn btn-primary btn-xs">+ Quote</a>';
+            html += '</td>';
+
+            html += '</tr>';
         });
+
+        html += '</tbody></table>';
         html += '</div>';
         contentEl.innerHTML = html;
 
+        // Wire up "View Quotes" buttons
         contentEl.querySelectorAll('[data-view-quotes]').forEach(function (btn) {
             btn.addEventListener('click', function () {
-                var customerId = btn.getAttribute('data-view-quotes');
                 var customerName = btn.getAttribute('data-customer-name');
                 switchTab('quotes');
                 document.getElementById('quotes-search').value = customerName || '';
@@ -454,10 +641,12 @@
         if (tab === 'quotes') {
             document.getElementById('view-quotes').classList.remove('app-hidden');
             document.getElementById('view-customers').classList.add('app-hidden');
+            renderDealerScopeBar('quotes-dealer-scope');
             fetchQuotes();
         } else {
             document.getElementById('view-quotes').classList.add('app-hidden');
             document.getElementById('view-customers').classList.remove('app-hidden');
+            renderDealerScopeBar('customers-dealer-scope');
             fetchCustomers();
         }
     }
@@ -528,6 +717,10 @@
             quotesState.since = '';
             quotesState.sort = '-updatedAt';
             quotesState.page = 1;
+            // Reset dealer scope to local
+            dealerScope.mode = 'local';
+            dealerScope.filterCode = '';
+            renderDealerScopeBar('quotes-dealer-scope');
             fetchQuotes();
         });
 
@@ -564,8 +757,16 @@
             customersState.sort = '-lastContact';
             customersState.hasQuotes = false;
             customersState.page = 1;
+            // Reset dealer scope to local
+            dealerScope.mode = 'local';
+            dealerScope.filterCode = '';
+            renderDealerScopeBar('customers-dealer-scope');
             fetchCustomers();
         });
+
+        // --- Render dealer scope bars if elevated role ---
+        renderDealerScopeBar('quotes-dealer-scope');
+        renderDealerScopeBar('customers-dealer-scope');
 
         // --- Check URL params ---
         var urlParams = new URLSearchParams(window.location.search);
