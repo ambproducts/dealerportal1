@@ -1,7 +1,14 @@
 // ============================================================
-// AmeriDex Dealer Portal - Quotes & Customers Page v2.0
+// AmeriDex Dealer Portal - Quotes & Customers Page v2.1
 // Date: 2026-02-27
 // ============================================================
+// v2.1 Changes:
+//   - Customer table columns are now clickable to sort A-Z / Z-A
+//     Name, Company, Quotes, Total Value, Last Quote all sortable
+//   - Active sort column shows arrow indicator (up/down)
+//   - Table container capped at 600px with sticky headers
+//   - Sort via column header syncs with dropdown filter
+//
 // v2.0 Changes:
 //   - Customers tab: switched from card grid to table/list layout
 //     so no data is cut off. Columns: Name, Company, Contact,
@@ -59,6 +66,17 @@
     };
 
     var activeTab = 'quotes';
+
+    // Sortable column definitions for customer table
+    // key = API sort field, label = display text
+    var customerSortColumns = [
+        { key: 'name',       label: 'Name',        sortable: true },
+        { key: 'company',    label: 'Company',     sortable: true },
+        { key: null,         label: 'Contact',     sortable: false },
+        { key: 'quoteCount', label: 'Quotes',      sortable: true },
+        { key: 'totalValue', label: 'Total Value',  sortable: true },
+        { key: 'lastContact',label: 'Last Quote',   sortable: true }
+    ];
 
     // ============================================================
     // AUTH
@@ -175,6 +193,49 @@
             return now.toISOString();
         }
         return '';
+    }
+
+    // ============================================================
+    // SORT HELPERS
+    // ============================================================
+    // Parse current sort string (e.g. '-name' => { field: 'name', desc: true })
+    function parseSort(sortStr) {
+        if (!sortStr) return { field: '', desc: false };
+        if (sortStr.charAt(0) === '-') {
+            return { field: sortStr.slice(1), desc: true };
+        }
+        return { field: sortStr, desc: false };
+    }
+
+    // Given a column key and the current sort, return the next sort string
+    // If already sorting by this column ascending, flip to descending (and vice versa)
+    // If sorting by a different column, default to ascending for name/company, descending for numeric fields
+    function getNextCustomerSort(columnKey) {
+        var current = parseSort(customersState.sort);
+        if (current.field === columnKey) {
+            // Toggle direction
+            return current.desc ? columnKey : ('-' + columnKey);
+        }
+        // New column: name and company default A-Z (ascending), numbers default high-to-low (descending)
+        var defaultDescending = ['quoteCount', 'totalValue', 'lastContact'];
+        if (defaultDescending.indexOf(columnKey) !== -1) {
+            return '-' + columnKey;
+        }
+        return columnKey;
+    }
+
+    // Get the arrow character for a sort column
+    function getSortArrow(columnKey) {
+        var current = parseSort(customersState.sort);
+        if (current.field === columnKey) {
+            return current.desc ? '\u25BC' : '\u25B2'; // down or up triangle
+        }
+        return '\u25B4\u25BE'; // both arrows (subtle, indicates sortable)
+    }
+
+    function isSortActive(columnKey) {
+        var current = parseSort(customersState.sort);
+        return current.field === columnKey;
     }
 
     // ============================================================
@@ -489,7 +550,7 @@
     }
 
     // ============================================================
-    // CUSTOMER TABLE (List layout, replaces cards)
+    // CUSTOMER TABLE (List layout with sortable column headers)
     // ============================================================
     function renderCustomerTable(data) {
         var contentEl = document.getElementById('customers-content');
@@ -510,12 +571,21 @@
         var html = '<div class="customer-table-wrap">';
         html += '<table class="customer-table">';
         html += '<thead><tr>';
-        html += '<th>Name</th>';
-        html += '<th>Company</th>';
-        html += '<th>Contact</th>';
-        html += '<th>Quotes</th>';
-        html += '<th>Total Value</th>';
-        html += '<th>Last Quote</th>';
+
+        // Render sortable column headers
+        customerSortColumns.forEach(function (col) {
+            if (col.sortable && col.key) {
+                var active = isSortActive(col.key);
+                var arrow = getSortArrow(col.key);
+                html += '<th class="sortable-th' + (active ? ' sort-active' : '') + '" data-sort-col="' + col.key + '">';
+                html += col.label;
+                html += '<span class="sort-arrow">' + arrow + '</span>';
+                html += '</th>';
+            } else {
+                html += '<th>' + col.label + '</th>';
+            }
+        });
+
         if (showDealerCol) html += '<th>Dealers</th>';
         html += '<th>Actions</th>';
         html += '</tr></thead>';
@@ -573,6 +643,50 @@
         html += '</div>';
         contentEl.innerHTML = html;
 
+        // Wire up sortable column header clicks
+        contentEl.querySelectorAll('.sortable-th[data-sort-col]').forEach(function (th) {
+            th.addEventListener('click', function () {
+                var colKey = th.getAttribute('data-sort-col');
+                var nextSort = getNextCustomerSort(colKey);
+                customersState.sort = nextSort;
+                customersState.page = 1;
+
+                // Sync the dropdown filter to match
+                var dropdown = document.getElementById('customers-sort');
+                if (dropdown) {
+                    // Try to select matching option; if not found, that's ok
+                    var matchFound = false;
+                    for (var i = 0; i < dropdown.options.length; i++) {
+                        if (dropdown.options[i].value === nextSort) {
+                            dropdown.value = nextSort;
+                            matchFound = true;
+                            break;
+                        }
+                    }
+                    // If no exact match in dropdown (e.g. company sort), set to empty or leave as is
+                    if (!matchFound) {
+                        // Add a temporary option so the dropdown shows what's happening
+                        var current = parseSort(nextSort);
+                        var dirLabel = current.desc ? 'Z-A' : 'A-Z';
+                        if (['quoteCount', 'totalValue', 'lastContact'].indexOf(current.field) !== -1) {
+                            dirLabel = current.desc ? 'High-Low' : 'Low-High';
+                        }
+                        var label = colKey.charAt(0).toUpperCase() + colKey.slice(1) + ' (' + dirLabel + ')';
+                        var tempOpt = document.createElement('option');
+                        tempOpt.value = nextSort;
+                        tempOpt.textContent = label;
+                        tempOpt.setAttribute('data-temp-sort', 'true');
+                        // Remove any previous temp options
+                        dropdown.querySelectorAll('[data-temp-sort]').forEach(function (o) { o.remove(); });
+                        dropdown.appendChild(tempOpt);
+                        dropdown.value = nextSort;
+                    }
+                }
+
+                fetchCustomers();
+            });
+        });
+
         // Wire up "View Quotes" buttons
         contentEl.querySelectorAll('[data-view-quotes]').forEach(function (btn) {
             btn.addEventListener('click', function () {
@@ -624,6 +738,11 @@
                 var page = parseInt(btn.getAttribute('data-page'));
                 if (!isNaN(page) && page >= 1) {
                     onPageChange(page);
+                    // Scroll to top of the table container, not the page top
+                    var tableWrap = document.querySelector('.customer-table-wrap');
+                    if (activeTab === 'customers' && tableWrap) {
+                        tableWrap.scrollTop = 0; // reset table scroll to top
+                    }
                     window.scrollTo({ top: 200, behavior: 'smooth' });
                 }
             });
@@ -740,6 +859,8 @@
         customersSortSelect.addEventListener('change', function () {
             customersState.sort = customersSortSelect.value;
             customersState.page = 1;
+            // Remove any temp sort options since user picked from dropdown
+            customersSortSelect.querySelectorAll('[data-temp-sort]').forEach(function (o) { o.remove(); });
             fetchCustomers();
         });
 
@@ -757,6 +878,8 @@
             customersState.sort = '-lastContact';
             customersState.hasQuotes = false;
             customersState.page = 1;
+            // Remove any temp sort options
+            customersSortSelect.querySelectorAll('[data-temp-sort]').forEach(function (o) { o.remove(); });
             // Reset dealer scope to local
             dealerScope.mode = 'local';
             dealerScope.filterCode = '';
