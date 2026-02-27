@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - Global Scope Fix v1.1
+// AmeriDex Dealer Portal - Global Scope Fix v1.2
 // Date: 2026-02-27
 // ============================================================
 // PURPOSE:
@@ -31,6 +31,18 @@
 //   This makes `window.currentQuote` and `currentQuote` point to
 //   the same value, with writes in either direction staying in sync.
 //
+// v1.2 Changes (2026-02-27):
+//   - FIX: Added early function stubs for renderCustomersList,
+//     updateCustomerProgress, and showQuotesView. The inline
+//     script's DOMContentLoaded handler references
+//     renderCustomersList() as a bare name BEFORE any external
+//     scripts load. This threw an Uncaught ReferenceError that
+//     killed the entire DOMContentLoaded callback, preventing
+//     the add-row onclick handler (and all other event wiring)
+//     from ever being attached. The stub prevents the crash;
+//     ameridex-addrow-fix.js replaces it with the real
+//     implementation when it loads at position 1.
+//
 // v1.1 Changes (2026-02-27):
 //   - FIX: Replaced `new Function(name + ' = arguments[0]')` setter
 //     with indirect eval via `window.__scopeTransfer`. In V8
@@ -55,6 +67,52 @@
 
 (function () {
     'use strict';
+
+    // ----------------------------------------------------------
+    // EARLY FUNCTION STUBS (v1.2)
+    // ----------------------------------------------------------
+    // The inline script's DOMContentLoaded handler calls
+    // renderCustomersList() as a bare name at ~line 2643.
+    // This fires BEFORE script-loader.js loads any external
+    // scripts, so ameridex-addrow-fix.js (which defines the
+    // real function) hasn't loaded yet.
+    //
+    // A bare-name reference to an undeclared function throws
+    // an Uncaught ReferenceError that kills the ENTIRE
+    // DOMContentLoaded callback. Everything after that line
+    // never executes, including:
+    //   - add-row onclick handler
+    //   - color grid setup
+    //   - customer lookup wiring
+    //   - all other event handler setup
+    //
+    // We define no-op stubs here so the DOMContentLoaded
+    // handler completes. ameridex-addrow-fix.js will overwrite
+    // renderCustomersList with the real implementation.
+    // ----------------------------------------------------------
+
+    if (typeof window.renderCustomersList !== 'function') {
+        window.renderCustomersList = function renderCustomersList() {
+            // No-op stub. Replaced by ameridex-addrow-fix.js.
+        };
+        console.log('[GlobalScopeFix] Stubbed renderCustomersList() to prevent ReferenceError.');
+    }
+
+    if (typeof window.updateCustomerProgress !== 'function') {
+        window.updateCustomerProgress = function updateCustomerProgress() {
+            // No-op stub. May be replaced by a patch script.
+        };
+    }
+
+    if (typeof window.showQuotesView !== 'function') {
+        window.showQuotesView = function showQuotesView() {
+            // No-op stub. May be replaced by a patch script.
+        };
+    }
+
+    // ----------------------------------------------------------
+    // LET-TO-WINDOW BRIDGING
+    // ----------------------------------------------------------
 
     // List of global `let` variables that external scripts need
     // on `window`. Each entry is the variable name as a string.
@@ -163,7 +221,7 @@
         }
     });
 
-    console.log('[GlobalScopeFix] v1.1 | Exposed ' + exposed + '/' + GLOBALS.length +
+    console.log('[GlobalScopeFix] v1.2 | Exposed ' + exposed + '/' + GLOBALS.length +
         ' globals | Verified ' + verified + '/' + exposed + ' setters working.');
 
     if (verified < exposed) {
