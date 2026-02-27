@@ -1,9 +1,26 @@
+// ============================================================
+// routes/admin-quotes.js - Admin Quote Management Endpoints v2.0
+// Date: 2026-02-27
+// ============================================================
+// Provides admin/GM quote management including delete capability.
+// Only users with 'admin' or 'gm' role can access these endpoints.
+//
+// Mounted at /api/admin/quotes in server.js.
+//
+// Endpoints:
+//   GET    /api/admin/quotes              - List/filter all quotes
+//   GET    /api/admin/quotes/export       - Export quotes as CSV
+//   PUT    /api/admin/quotes/:id/status   - Update quote status
+//   DELETE /api/admin/quotes/:id          - Delete a quote (admin/gm only)
+// ============================================================
+
 const express = require('express');
 const router = express.Router();
 const { readJSON, writeJSON, QUOTES_FILE } = require('../lib/helpers');
-const { requireAuth, requireAdmin } = require('../middleware/auth');
+const { requireAuth, requireRole } = require('../middleware/auth');
 
-router.use(requireAuth, requireAdmin);
+// All routes require authenticated admin or gm
+router.use(requireAuth, requireRole('admin', 'gm'));
 
 // GET /api/admin/quotes
 router.get('/', (req, res) => {
@@ -43,6 +60,27 @@ router.put('/:id/status', (req, res) => {
     if (status === 'reviewed') quotes[idx].reviewedAt = new Date().toISOString();
     writeJSON(QUOTES_FILE, quotes);
     res.json(quotes[idx]);
+});
+
+// -----------------------------------------------------------
+// DELETE /api/admin/quotes/:id - Delete a quote (admin/gm only)
+// -----------------------------------------------------------
+router.delete('/:id', (req, res) => {
+    const quotes = readJSON(QUOTES_FILE);
+    const idx = quotes.findIndex(q => q.id === req.params.id);
+    if (idx === -1) {
+        return res.status(404).json({ error: 'Quote not found' });
+    }
+
+    const deleted = quotes.splice(idx, 1)[0];
+    writeJSON(QUOTES_FILE, quotes);
+
+    console.log('[Admin] Quote deleted: ' + (deleted.quoteNumber || deleted.id) + ' by ' + req.user.username + ' (' + req.user.role + ')');
+    res.json({
+        message: 'Quote deleted',
+        quoteNumber: deleted.quoteNumber || null,
+        id: deleted.id
+    });
 });
 
 // GET /api/admin/quotes/export
