@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - API Integration Patch v2.8
+// AmeriDex Dealer Portal - API Integration Patch v2.9
 // Date: 2026-02-27
 // ============================================================
 // REQUIRES: ameridex-patches.js (v1.0+) loaded first
@@ -7,6 +7,22 @@
 // Load order in dealer-portal.html (before </body>):
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
+//
+// v2.9 Changes (2026-02-27):
+//   - FIX: loadServerQuotes() now reverse-maps server line items
+//     back to frontend format using mapServerLineItemToFrontend().
+//     The v2.8 fix added frontend->server mapping in syncQuoteToServer()
+//     but never added the reverse server->frontend mapping. Without it:
+//       * item.type was undefined (server returns productId), causing
+//         PRODUCTS[undefined] to fall back to PRODUCTS.custom where
+//         isFt=false, so getItemSubtotal() skipped length multiplication
+//         and returned raw basePrice instead of basePrice * length * qty.
+//       * item.qty was undefined (server returns quantity), defaulting
+//         to 0 via (item.qty || 0), making subtotals $0.00.
+//   - FIX: loadServerQuotes() now normalizes customer objects via
+//     mapServerCustomerToFrontend(), handling field name variations
+//     (zipCode/zipcode/zip_code/zip, etc.) so customer info fields
+//     populate correctly when loading a saved quote.
 //
 // v2.8 Changes (2026-02-27):
 //   - FIX: syncQuoteToServer() now maps frontend line item fields
@@ -539,7 +555,138 @@
 
 
     // ----------------------------------------------------------
-    // 6. QUOTE SYNC: Server with localStorage fallback
+    // 6a. SERVER-TO-FRONTEND MAPPING HELPERS (v2.9)
+    // ----------------------------------------------------------
+    // syncQuoteToServer() (Section 6b) maps frontend -> server.
+    // These helpers do the REVERSE: server -> frontend format.
+    // Without this reverse mapping, loaded quotes have wrong field
+    // names and getItemSubtotal() / getItemPrice() / render() break.
+    // ----------------------------------------------------------
+
+    /**
+     * Normalize a server customer object into the frontend's
+     * expected shape: { name, email, zipCode, company, phone }
+     *
+     * Handles server field name variations defensively:
+     *   zipCode / zipcode / zip_code / zip
+     *   name / customerName / customer_name
+     *   company / companyName / company_name
+     *   phone / phoneNumber / phone_number
+     */
+    function mapServerCustomerToFrontend(serverCustomer) {
+        if (!serverCustomer) {
+            return { name: '', email: '', zipCode: '', company: '', phone: '' };
+        }
+        var c = serverCustomer;
+        return {
+            name:    c.name || c.customerName || c.customer_name || '',
+            email:   c.email || c.customerEmail || c.customer_email || '',
+            zipCode: c.zipCode || c.zipcode || c.zip_code || c.zip || '',
+            company: c.company || c.companyName || c.company_name || '',
+            phone:   c.phone || c.phoneNumber || c.phone_number || ''
+        };
+    }
+
+    /**
+     * Reverse-map a single server line item back to the frontend
+     * format that render(), getItemSubtotal(), getItemPrice(),
+     * and getItemLength() all expect.
+     *
+     * Server format (from syncQuoteToServer v2.8):
+     *   { productId, productName, basePrice, price, quantity,
+     *     length, customLength, total, type, color, color2 }
+     *
+     * Frontend format (used by inline script):
+     *   { type, qty, length, customLength, color, customDesc,
+     *     customUnitPrice, priceOverride, unitPrice }
+     */
+    function mapServerLineItemToFrontend(serverItem) {
+        if (!serverItem) return null;
+        var li = serverItem;
+
+        // Resolve 'type': the frontend key that indexes into PRODUCTS.
+        // syncQuoteToServer sends both 'productId' and 'type', but
+        // the server may only persist/return 'productId'.
+        var type = li.type || li.productId || 'custom';
+
+        // Validate that the type actually exists in PRODUCTS.
+        // If not, fall back to 'custom' so render() doesn't break.
+        if (typeof PRODUCTS !== 'undefined' && !PRODUCTS[type]) {
+            console.warn('[v2.9] Unknown product type "' + type + '", falling back to custom');
+            type = 'custom';
+        }
+
+        var prod = (typeof PRODUCTS !== 'undefined' && PRODUCTS[type])
+            ? PRODUCTS[type] : null;
+
+        // Resolve quantity: frontend uses 'qty', server uses 'quantity'
+        var qty = parseInt(li.qty, 10) || parseInt(li.quantity, 10) || 1;
+
+        // Resolve length: both formats use 'length', but verify it is
+        // set. Default based on product type if missing.
+        var length = li.length;
+        if (length === null || length === undefined) {
+            if (type === 'dexerdry') {
+                length = 240;
+            } else if (prod && prod.isFt) {
+                length = 16;
+            } else {
+                length = null;
+            }
+        }
+
+        // Resolve customLength for 'custom' length entries
+        var customLength = li.customLength || null;
+        if (customLength !== null) {
+            customLength = parseFloat(customLength) || null;
+        }
+
+        // Resolve color
+        var color = li.color || li.color1 || '';
+        if (!color && prod && prod.hasColor) {
+            color = (typeof selectedColor1 !== 'undefined') ? selectedColor1 : 'Driftwood';
+        }
+
+        // Resolve custom item fields
+        var customDesc = li.customDesc || li.productName || '';
+        var customUnitPrice = parseFloat(li.customUnitPrice) || 0;
+
+        // If this is a custom item and we have a basePrice from server
+        // but no customUnitPrice, use basePrice as the unit price
+        if (type === 'custom' && customUnitPrice === 0 && li.basePrice) {
+            customUnitPrice = parseFloat(li.basePrice) || 0;
+        }
+
+        // Resolve price override (dealer-adjusted price)
+        var priceOverride = li.priceOverride || null;
+        var unitPrice = li.unitPrice || null;
+
+        return {
+            type:            type,
+            qty:             qty,
+            length:          length,
+            customLength:    customLength,
+            color:           color,
+            color2:          li.color2 || '',
+            customDesc:      customDesc,
+            customUnitPrice: customUnitPrice,
+            priceOverride:   priceOverride,
+            unitPrice:       unitPrice
+        };
+    }
+
+
+    // ----------------------------------------------------------
+    // 6b. QUOTE SYNC: Server with localStorage fallback
+    // ----------------------------------------------------------
+    // v2.9 FIX: loadServerQuotes() now reverse-maps server data
+    // back to frontend format using mapServerCustomerToFrontend()
+    // and mapServerLineItemToFrontend(). Without this, loaded
+    // quotes had wrong field names causing:
+    //   - Customer info fields appearing empty (zipCode vs zipcode)
+    //   - getItemSubtotal() returning raw basePrice instead of
+    //     basePrice * length * qty (because PRODUCTS[undefined]
+    //     fell back to PRODUCTS.custom where isFt=false)
     // ----------------------------------------------------------
     function loadServerQuotes() {
         return api('GET', '/api/quotes')
@@ -549,20 +696,30 @@
                 });
 
                 savedQuotes = serverQuotes.map(function (sq) {
+                    // v2.9: Reverse-map line items from server format
+                    // back to frontend format
+                    var mappedLineItems = (sq.lineItems || []).map(function (serverLI) {
+                        var mapped = mapServerLineItemToFrontend(serverLI);
+                        return mapped || serverLI;
+                    }).filter(function (li) { return li !== null; });
+
+                    // v2.9: Normalize customer object field names
+                    var mappedCustomer = mapServerCustomerToFrontend(sq.customer);
+
                     return {
-                        _serverId: sq.id,
-                        quoteId: sq.quoteNumber,
-                        status: sq.status,
-                        customer: sq.customer || { name: '', email: '', zipCode: '', company: '', phone: '' },
-                        lineItems: sq.lineItems || [],
-                        options: sq.options || { pictureFrame: false, stairs: false },
+                        _serverId:           sq.id,
+                        quoteId:             sq.quoteNumber,
+                        status:              sq.status,
+                        customer:            mappedCustomer,
+                        lineItems:           mappedLineItems,
+                        options:             sq.options || { pictureFrame: false, stairs: false },
                         specialInstructions: sq.specialInstructions || '',
-                        internalNotes: sq.internalNotes || '',
-                        shippingAddress: sq.shippingAddress || '',
-                        deliveryDate: sq.deliveryDate || '',
-                        createdAt: sq.createdAt,
-                        updatedAt: sq.updatedAt,
-                        submittedAt: sq.submittedAt
+                        internalNotes:       sq.internalNotes || '',
+                        shippingAddress:     sq.shippingAddress || '',
+                        deliveryDate:        sq.deliveryDate || '',
+                        createdAt:           sq.createdAt,
+                        updatedAt:           sq.updatedAt,
+                        submittedAt:         sq.submittedAt
                     };
                 });
 
@@ -572,6 +729,7 @@
                 });
 
                 saveToStorage();
+                console.log('[Quotes v2.9] Loaded ' + savedQuotes.length + ' quotes with reverse-mapped line items');
                 return savedQuotes;
             })
             .catch(function () {
@@ -1191,5 +1349,5 @@
         tryResumeSession();
     }
 
-    console.log('[AmeriDex API] v2.8 loaded: Auth + API integration active.');
+    console.log('[AmeriDex API] v2.9 loaded: Auth + API integration active.');
 })();
