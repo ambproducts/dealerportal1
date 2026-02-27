@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - API Integration Patch v2.9
+// AmeriDex Dealer Portal - API Integration Patch v2.10
 // Date: 2026-02-27
 // ============================================================
 // REQUIRES: ameridex-patches.js (v1.0+) loaded first
@@ -7,6 +7,23 @@
 // Load order in dealer-portal.html (before </body>):
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
+//
+// v2.10 Changes (2026-02-27):
+//   - FIX: loadQuoteFromUrlParam() (Section 18) added to handle
+//     the ?quoteId= URL parameter set by the My Quotes page when
+//     the user clicks "Open" on a quote row.
+//     Root cause: the previous code called loadQuote() against
+//     savedQuotes[] before loadServerQuotes() had resolved,
+//     so savedQuotes[] was still empty, the lookup returned -1,
+//     and the line items table stayed blank.
+//     Fix: fetch GET /api/quotes/:id directly by server ID,
+//     reverse-map line items + customer via the v2.9 helpers,
+//     populate all DOM fields, then call render() +
+//     updateTotalAndFasteners() + updateCustomerProgress().
+//     If the session is not yet established when the script runs,
+//     execution is deferred via the 'ameridex-login' event so
+//     timing is correct regardless of the async resume chain.
+//     Falls back to savedQuotes[] lookup if server fetch fails.
 //
 // v2.9 Changes (2026-02-27):
 //   - FIX: loadServerQuotes() now reverse-maps server line items
@@ -1339,6 +1356,123 @@
 
 
     // ----------------------------------------------------------
+    // 18. LOAD QUOTE FROM URL PARAM (?quoteId=) (v2.10)
+    // ----------------------------------------------------------
+    // The My Quotes page (quotes-customers.html) opens a quote
+    // by navigating to dealer-portal.html?quoteId=<serverId>.
+    //
+    // Previous behavior (broken): relied on loadQuote(index)
+    // looking up savedQuotes[], but savedQuotes[] was still empty
+    // when the inline script ran because loadServerQuotes() is
+    // async. Result: lookup returned -1, line items never rendered.
+    //
+    // Fix: fetch GET /api/quotes/:id directly by server ID,
+    // reverse-map via v2.9 helpers, populate DOM, call render().
+    // If auth is not yet ready (e.g. session resume still in
+    // flight), defer via the 'ameridex-login' event.
+    // Falls back to savedQuotes[] lookup on server fetch failure.
+    // ----------------------------------------------------------
+    function loadQuoteFromUrlParam() {
+        var urlParams = new URLSearchParams(window.location.search);
+        var serverId = urlParams.get('quoteId');
+        if (!serverId) return;
+
+        function applyQuoteToDOM(sq) {
+            // Reverse-map line items and customer
+            var mappedLineItems = (sq.lineItems || []).map(function (serverLI) {
+                return mapServerLineItemToFrontend(serverLI) || serverLI;
+            }).filter(Boolean);
+
+            var mappedCustomer = mapServerCustomerToFrontend(sq.customer);
+
+            // Populate currentQuote
+            currentQuote.quoteId             = sq.quoteNumber || sq.quoteId || null;
+            currentQuote._serverId           = sq.id || sq._serverId || null;
+            currentQuote.status              = sq.status || 'draft';
+            currentQuote.customer            = mappedCustomer;
+            currentQuote.lineItems           = mappedLineItems;
+            currentQuote.options             = sq.options || { pictureFrame: false, stairs: false };
+            currentQuote.specialInstructions = sq.specialInstructions || '';
+            currentQuote.internalNotes       = sq.internalNotes || '';
+            currentQuote.shippingAddress     = sq.shippingAddress || '';
+            currentQuote.deliveryDate        = sq.deliveryDate || '';
+
+            // Populate DOM customer fields
+            document.getElementById('cust-name').value    = mappedCustomer.name    || '';
+            document.getElementById('cust-email').value   = mappedCustomer.email   || '';
+            document.getElementById('cust-zip').value     = mappedCustomer.zipCode || '';
+            document.getElementById('cust-company').value = mappedCustomer.company || '';
+            document.getElementById('cust-phone').value   = mappedCustomer.phone   || '';
+
+            // Populate order details fields
+            document.getElementById('special-instr').value  = currentQuote.specialInstructions;
+            document.getElementById('internal-notes').value = currentQuote.internalNotes;
+            document.getElementById('ship-addr').value      = currentQuote.shippingAddress;
+            document.getElementById('del-date').value       = currentQuote.deliveryDate;
+
+            // Populate option checkboxes
+            document.getElementById('pic-frame').checked = currentQuote.options.pictureFrame;
+            document.getElementById('stairs').checked    = currentQuote.options.stairs;
+            var picFrameNote = document.getElementById('pic-frame-note');
+            var stairsNote   = document.getElementById('stairs-note');
+            if (picFrameNote) picFrameNote.style.display = currentQuote.options.pictureFrame ? 'block' : 'none';
+            if (stairsNote)   stairsNote.style.display   = currentQuote.options.stairs       ? 'block' : 'none';
+
+            // Render line items table and update totals
+            render();
+            updateTotalAndFasteners();
+            if (typeof updateCustomerProgress === 'function') updateCustomerProgress();
+
+            console.log('[v2.10] Loaded quote from URL param: '
+                + (currentQuote.quoteId || serverId)
+                + ' | ' + mappedLineItems.length + ' line items');
+
+            // Clean the URL param so a page refresh doesn't re-load
+            // (avoids confusion if the user edits and saves a new quote)
+            try {
+                var cleanUrl = window.location.pathname;
+                window.history.replaceState(null, '', cleanUrl);
+            } catch (e) { /* ignore in environments that block history API */ }
+        }
+
+        function doLoad() {
+            // Prefer fetching directly from server for freshest data
+            api('GET', '/api/quotes/' + serverId)
+                .then(function (sq) {
+                    applyQuoteToDOM(sq);
+                })
+                .catch(function (err) {
+                    console.warn('[v2.10] Server fetch failed for quoteId=' + serverId + ', falling back to savedQuotes[]:', err.message);
+
+                    // Fallback: search savedQuotes[] by _serverId or quoteId
+                    var found = savedQuotes.find(function (q) {
+                        return String(q._serverId) === String(serverId)
+                            || String(q.quoteId)   === String(serverId);
+                    });
+
+                    if (found) {
+                        applyQuoteToDOM(found);
+                    } else {
+                        console.error('[v2.10] Quote not found in savedQuotes[] either. quoteId=' + serverId);
+                    }
+                });
+        }
+
+        // If the auth token is already present, we can fetch immediately.
+        // Otherwise wait for the ameridex-login event which fires after
+        // tryResumeSession() or handleServerLogin() completes.
+        if (_authToken) {
+            doLoad();
+        } else {
+            window.addEventListener('ameridex-login', function onLogin() {
+                window.removeEventListener('ameridex-login', onLogin);
+                doLoad();
+            });
+        }
+    }
+
+
+    // ----------------------------------------------------------
     // INIT
     // ----------------------------------------------------------
     injectLoginFields();
@@ -1349,5 +1483,9 @@
         tryResumeSession();
     }
 
-    console.log('[AmeriDex API] v2.9 loaded: Auth + API integration active.');
+    // v2.10: Check for ?quoteId= URL param and load that quote
+    // once auth is established.
+    loadQuoteFromUrlParam();
+
+    console.log('[AmeriDex API] v2.10 loaded: Auth + API integration active.');
 })();
