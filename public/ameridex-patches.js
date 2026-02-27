@@ -1,6 +1,6 @@
 // ============================================================
-// AmeriDex Dealer Portal - Patch File v1.4
-// Date: 2026-02-25
+// AmeriDex Dealer Portal - Patch File v1.5
+// Date: 2026-02-26
 // ============================================================
 // HOW TO USE:
 //   Add this <script> tag at the very bottom of dealer-portal.html,
@@ -10,10 +10,207 @@
 //
 //   This file monkey-patches the existing global functions
 //   in-place. No edits to the main file required.
+//
+// v1.5 Changes (2026-02-26):
+//   - CRITICAL FIX: Prepended DOM repair (PATCH 0) to fix unclosed
+//     <div> in saved-quotes card-header. This was causing calculator,
+//     colors, customer info, and order details sections to be nested
+//     inside the saved-quotes card, breaking ALL interactivity.
+//   - Added ameridex-addrow-fix.js to EXTRA_SCRIPTS loader for
+//     renderCustomersList() and render() safety wrapper.
 // ============================================================
 
 (function () {
     'use strict';
+
+    // ===========================================================
+    // PATCH 0 (CRITICAL): Repair Broken DOM Nesting
+    // ===========================================================
+    // The saved-quotes-section card-header has an unclosed <div>
+    // wrapper around the Customers + New Quote buttons. The browser
+    // swallows all subsequent <section> elements (calculator, colors,
+    // customer, order) inside the card-header div, which breaks:
+    //   - Add Line Item button
+    //   - Product/color/length dropdowns
+    //   - Quantity inputs
+    //   - Delete row buttons
+    //   - Settings modal
+    //   - Customer progress badge
+    //   - Calculator results
+    //
+    // This patch detects the corruption and physically moves the
+    // displaced sections back to their correct DOM positions.
+    // ===========================================================
+
+    function repairSavedQuotesDOM() {
+        var savedSection = document.getElementById('saved-quotes-section');
+        if (!savedSection) return;
+
+        var orderSection = document.getElementById('order');
+        if (!orderSection) return;
+
+        // If order section is a descendant of saved-quotes-section, DOM is broken
+        if (savedSection.contains(orderSection)) {
+            console.warn('[patches v1.5] PATCH 0: Detected corrupted DOM nesting. Repairing...');
+
+            var form = document.getElementById('order-form');
+            if (!form) return;
+
+            // Sections that should be direct children of the form, after saved-quotes-section
+            var sectionIds = ['customers-section', 'calculator', 'colors', 'customer', 'order'];
+            var sectionsToMove = [];
+
+            sectionIds.forEach(function(id) {
+                var el = document.getElementById(id);
+                if (el && savedSection.contains(el) && el !== savedSection) {
+                    sectionsToMove.push(el);
+                }
+            });
+
+            // Move each displaced section to be a direct child of the form
+            var insertAfter = savedSection;
+            sectionsToMove.forEach(function(section) {
+                section.parentNode.removeChild(section);
+                if (insertAfter.nextSibling) {
+                    form.insertBefore(section, insertAfter.nextSibling);
+                } else {
+                    form.appendChild(section);
+                }
+                insertAfter = section;
+            });
+
+            // Also move any remaining card sections (shipping, total bar, actions)
+            // that may have been trapped. These don't have IDs we can target by name,
+            // so walk all <section> children of savedSection and move them too.
+            var trappedSections = savedSection.querySelectorAll(':scope > section, :scope section.card');
+            trappedSections.forEach(function(section) {
+                // Skip sections we already moved or the saved-quotes section itself
+                if (sectionIds.indexOf(section.id) !== -1) return;
+                section.parentNode.removeChild(section);
+                form.appendChild(section);
+                console.log('[patches v1.5] PATCH 0: Also rescued unnamed section.');
+            });
+
+            console.log('[patches v1.5] PATCH 0: DOM repair complete. Moved ' + sectionsToMove.length + ' named sections.');
+
+            // Force a re-render if render() exists, since the DOM was restructured
+            if (typeof window.render === 'function') {
+                try { window.render(); } catch(e) { /* will retry later */ }
+            }
+            if (typeof window.updateTotalAndFasteners === 'function') {
+                try { window.updateTotalAndFasteners(); } catch(e) {}
+            }
+            if (typeof window.updateCustomerProgress === 'function') {
+                try { window.updateCustomerProgress(); } catch(e) {}
+            }
+        } else {
+            console.log('[patches v1.5] PATCH 0: DOM nesting OK, no repair needed.');
+        }
+    }
+
+    // Run DOM repair immediately if DOM is ready, or on DOMContentLoaded
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', repairSavedQuotesDOM);
+    } else {
+        repairSavedQuotesDOM();
+    }
+
+    // Also expose globally so other scripts can re-run if needed
+    window.repairSavedQuotesDOM = repairSavedQuotesDOM;
+
+
+    // ===========================================================
+    // PATCH 0b: Define missing renderCustomersList()
+    // ===========================================================
+    // This function is called by event handlers but was never defined
+    // in the inline script. A ReferenceError here silently kills the
+    // JS execution context and can block subsequent handlers.
+    // ===========================================================
+
+    if (typeof window.renderCustomersList !== 'function') {
+        window.renderCustomersList = function renderCustomersList() {
+            var list = document.getElementById('customers-list');
+            var searchInput = document.getElementById('customer-search');
+            var countEl = document.getElementById('customer-count');
+            if (!list) return;
+
+            var query = (searchInput ? searchInput.value : '').toLowerCase().trim();
+            var customers = (typeof customerHistory !== 'undefined') ? customerHistory : [];
+
+            if (query.length >= 2) {
+                customers = customers.filter(function(c) {
+                    return (c.name && c.name.toLowerCase().indexOf(query) !== -1) ||
+                           (c.email && c.email.toLowerCase().indexOf(query) !== -1) ||
+                           (c.company && c.company.toLowerCase().indexOf(query) !== -1);
+                });
+            }
+
+            if (countEl) {
+                countEl.textContent = customers.length + ' customer' + (customers.length !== 1 ? 's' : '');
+            }
+
+            if (customers.length === 0) {
+                list.innerHTML = '<div class="no-customers">' +
+                    (query ? 'No customers match your search.' : 'No customers yet. Create your first quote to add customers.') +
+                    '</div>';
+                return;
+            }
+
+            list.innerHTML = '';
+            customers.forEach(function(customer) {
+                var item = document.createElement('div');
+                item.className = 'customer-item';
+
+                var info = document.createElement('div');
+                info.className = 'customer-info';
+
+                var nameEl = document.createElement('div');
+                nameEl.className = 'customer-name';
+                nameEl.textContent = customer.name || 'Unknown';
+                info.appendChild(nameEl);
+
+                if (customer.email) {
+                    var emailEl = document.createElement('div');
+                    emailEl.className = 'customer-email';
+                    emailEl.textContent = customer.email;
+                    info.appendChild(emailEl);
+                }
+
+                if (customer.company) {
+                    var companyEl = document.createElement('div');
+                    companyEl.className = 'customer-company';
+                    companyEl.textContent = customer.company;
+                    info.appendChild(companyEl);
+                }
+
+                item.appendChild(info);
+
+                var actions = document.createElement('div');
+                actions.className = 'customer-actions';
+
+                var newQuoteBtn = document.createElement('button');
+                newQuoteBtn.type = 'button';
+                newQuoteBtn.className = 'btn btn-primary btn-sm';
+                newQuoteBtn.textContent = '+ New Quote';
+                newQuoteBtn.addEventListener('click', function() {
+                    document.getElementById('cust-name').value = customer.name || '';
+                    document.getElementById('cust-email').value = customer.email || '';
+                    document.getElementById('cust-company').value = customer.company || '';
+                    document.getElementById('cust-phone').value = customer.phone || '';
+                    if (typeof updateCustomerProgress === 'function') updateCustomerProgress();
+                    if (typeof showQuotesView === 'function') showQuotesView();
+                    var custSection = document.getElementById('customer');
+                    if (custSection) custSection.scrollIntoView({ behavior: 'smooth' });
+                });
+                actions.appendChild(newQuoteBtn);
+                item.appendChild(actions);
+
+                list.appendChild(item);
+            });
+        };
+        console.log('[patches v1.5] PATCH 0b: Registered missing renderCustomersList().');
+    }
+
 
     // ===========================================================
     // PATCH 1: XSS Protection Utility
@@ -204,30 +401,38 @@
     // defined above (e.g., generatePrintHTML gets replaced by the
     // branded version from ameridex-print-branding.js).
     //
-    // Load order matters: print-branding must load before ui-fixes.
+    // Load order matters: addrow-fix first, then print-branding,
+    // then ui-fixes.
     // ===========================================================
     var EXTRA_SCRIPTS = [
+        'ameridex-addrow-fix.js',
         'ameridex-print-branding.js',
-        'ameridex-ui-fixes.js'
+        'ameridex-ui-fixes.js',
+        'ameridex-admin-csv-fix.js'
     ];
 
     var scriptIndex = 0;
 
     function loadNextScript() {
         if (scriptIndex >= EXTRA_SCRIPTS.length) {
-            console.log('[ameridex-patches] PATCH 6: All extra scripts loaded.');
+            console.log('[patches v1.5] PATCH 6: All ' + EXTRA_SCRIPTS.length + ' extra scripts loaded.');
+            // Run DOM repair one more time after all scripts are loaded,
+            // in case any script re-rendered and broke the DOM again
+            setTimeout(function() {
+                repairSavedQuotesDOM();
+            }, 100);
             return;
         }
         var src = EXTRA_SCRIPTS[scriptIndex];
         var el = document.createElement('script');
         el.src = src;
         el.onload = function () {
-            console.log('[ameridex-patches] PATCH 6: Loaded ' + src);
+            console.log('[patches v1.5] PATCH 6: Loaded ' + src);
             scriptIndex++;
             loadNextScript();
         };
         el.onerror = function () {
-            console.error('[ameridex-patches] PATCH 6: FAILED to load ' + src);
+            console.error('[patches v1.5] PATCH 6: FAILED to load ' + src);
             scriptIndex++;
             loadNextScript();
         };
