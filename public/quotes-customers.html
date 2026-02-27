@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AmeriDex Dealer Portal - Quotes & Customers</title>
+<style>
+    :root {
+        --bg-page: #f5f7fa;
+        --bg-card: #ffffff;
+        --primary: #2563eb;
+        --primary-dark: #1d4ed8;
+        --primary-soft: #eff6ff;
+        --border-subtle: #e5e7eb;
+        --text-main: #111827;
+        --text-muted: #6b7280;
+        --danger: #dc2626;
+        --success: #16a34a;
+        --warning: #f59e0b;
+        --shadow-soft: 0 10px 25px rgba(15, 23, 42, 0.08);
+        --radius-card: 14px;
+        --radius-field: 8px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+        margin: 0;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background-color: var(--bg-page);
+        color: var(--text-main);
+        line-height: 1.5;
+    }
+
+    .page-shell { max-width: 1120px; margin: 0 auto; padding: 1.5rem 1.25rem 2.5rem; }
+    .app-hidden { display: none !important; }
+
+    header.app-header {
+        background: linear-gradient(135deg, #2563eb, #1e40af);
+        color: #fff;
+        padding: 1.5rem 1.75rem;
+        border-radius: 0 0 var(--radius-card) var(--radius-card);
+        box-shadow: var(--shadow-soft);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 1rem;
+    }
+
+    .header-brand { display: flex; align-items: center; gap: 1rem; }
+    header.app-header img { max-width: 160px; height: auto; }
+    .header-titles h1 { margin: 0; font-size: 1.4rem; letter-spacing: 0.02em; }
+    .header-titles .portal-badge {
+        display: inline-block;
+        background: rgba(255,255,255,0.2);
+        padding: 0.2rem 0.6rem;
+        border-radius: 999px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        margin-top: 0.25rem;
+    }
+    .header-actions { display: flex; gap: 0.5rem; align-items: center; }
+    .header-dealer-info { font-size: 0.8rem; opacity: 0.9; margin-right: 0.5rem; }
+    .header-btn {
+        background: rgba(255,255,255,0.15);
+        border: 1px solid rgba(255,255,255,0.3);
+        color: white;
+        padding: 0.5rem 1rem;
+        border-radius: 999px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.2s;
+        text-decoration: none;
+    }
+    .header-btn:hover { background: rgba(255,255,255,0.25); }
+    .header-btn.active-nav {
+        background: rgba(255,255,255,0.3);
+        border-color: rgba(255,255,255,0.6);
+    }
+
+    /* Tab Navigation */
+    .page-tabs {
+        display: flex;
+        background: var(--bg-card);
+        border-radius: var(--radius-card);
+        padding: 0.3rem;
+        margin-bottom: 1.25rem;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+        border: 1px solid rgba(148, 163, 184, 0.18);
+    }
+    .page-tab {
+        flex: 1;
+        padding: 0.75rem 1.25rem;
+        border: none;
+        background: transparent;
+        border-radius: calc(var(--radius-card) - 2px);
+        font-size: 0.95rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+        color: var(--text-muted);
+        text-align: center;
+    }
+    .page-tab.active {
+        background: var(--primary);
+        color: white;
+        box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
+    }
+    .page-tab:not(.active):hover {
+        background: var(--primary-soft);
+        color: var(--primary);
+    }
+
+    /* Stat Cards */
+    .stat-cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 0.75rem;
+        margin-bottom: 1.25rem;
+    }
+    .stat-card {
+        background: var(--bg-card);
+        border-radius: var(--radius-card);
+        padding: 1.15rem 1.25rem;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        text-align: center;
+    }
+    .stat-card .stat-value {
+        font-size: 1.6rem;
+        font-weight: 700;
+        color: var(--primary);
+        line-height: 1.2;
+    }
+    .stat-card .stat-label {
+        font-size: 0.78rem;
+        color: var(--text-muted);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-top: 0.25rem;
+    }
+
+    /* Filter Bar */
+    .filter-bar {
+        background: var(--bg-card);
+        border-radius: var(--radius-card);
+        padding: 1rem 1.25rem;
+        margin-bottom: 1.25rem;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+    .filter-bar input,
+    .filter-bar select {
+        padding: 0.6rem 0.85rem;
+        border-radius: var(--radius-field);
+        border: 1px solid var(--border-subtle);
+        font-size: 0.9rem;
+        color: var(--text-main);
+        background-color: #ffffff;
+        transition: border-color 0.12s ease;
+    }
+    .filter-bar input:focus,
+    .filter-bar select:focus {
+        outline: none;
+        border-color: var(--primary);
+        box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+    }
+    .filter-bar .search-input {
+        flex: 1;
+        min-width: 200px;
+    }
+    .filter-bar .filter-select {
+        min-width: 130px;
+    }
+    .filter-bar .filter-clear {
+        background: none;
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--radius-field);
+        padding: 0.6rem 1rem;
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        cursor: pointer;
+        font-weight: 600;
+        transition: all 0.15s;
+    }
+    .filter-bar .filter-clear:hover {
+        background: #f9fafb;
+        color: var(--text-main);
+    }
+
+    /* Quote Cards Grid */
+    .cards-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        gap: 1rem;
+        margin-bottom: 1.25rem;
+    }
+
+    .quote-card {
+        background: var(--bg-card);
+        border-radius: var(--radius-card);
+        padding: 1.25rem 1.5rem;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        transition: box-shadow 0.2s, transform 0.15s;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+    .quote-card:hover {
+        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12);
+        transform: translateY(-1px);
+    }
+    .quote-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 0.5rem;
+    }
+    .quote-card-id {
+        font-weight: 700;
+        font-size: 1rem;
+        color: var(--primary);
+    }
+    .quote-card-status {
+        display: inline-block;
+        padding: 0.2rem 0.65rem;
+        border-radius: 999px;
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        white-space: nowrap;
+    }
+    .status-draft { background: #f3f4f6; color: #6b7280; }
+    .status-submitted { background: #dbeafe; color: #1d4ed8; }
+    .status-approved { background: #dcfce7; color: #15803d; }
+    .status-rejected { background: #fee2e2; color: #b91c1c; }
+    .status-revision { background: #fef3c7; color: #92400e; }
+    .status-reviewed { background: #e0e7ff; color: #4338ca; }
+
+    .quote-card-customer {
+        font-weight: 600;
+        font-size: 0.95rem;
+        color: var(--text-main);
+    }
+    .quote-card-company {
+        font-size: 0.82rem;
+        color: var(--text-muted);
+    }
+    .quote-card-meta {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 0.82rem;
+        color: var(--text-muted);
+        padding-top: 0.5rem;
+        border-top: 1px solid var(--border-subtle);
+    }
+    .quote-card-total {
+        font-weight: 700;
+        font-size: 1.1rem;
+        color: var(--text-main);
+    }
+    .quote-card-items {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+    }
+    .quote-card-date {
+        font-size: 0.78rem;
+        color: var(--text-muted);
+    }
+    .quote-card-actions {
+        display: flex;
+        gap: 0.5rem;
+        padding-top: 0.5rem;
+    }
+    .quote-card-actions .btn {
+        flex: 1;
+    }
+
+    /* Customer Cards */
+    .customer-card {
+        background: var(--bg-card);
+        border-radius: var(--radius-card);
+        padding: 1.25rem 1.5rem;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        transition: box-shadow 0.2s, transform 0.15s;
+        display: flex;
+        flex-direction: column;
+        gap: 0.65rem;
+    }
+    .customer-card:hover {
+        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12);
+        transform: translateY(-1px);
+    }
+    .customer-card-name {
+        font-weight: 700;
+        font-size: 1.05rem;
+        color: var(--text-main);
+    }
+    .customer-card-company {
+        font-size: 0.85rem;
+        color: var(--primary);
+        font-weight: 600;
+    }
+    .customer-card-contact {
+        font-size: 0.82rem;
+        color: var(--text-muted);
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+    }
+    .customer-card-stats {
+        display: flex;
+        gap: 1.25rem;
+        padding-top: 0.5rem;
+        border-top: 1px solid var(--border-subtle);
+        font-size: 0.82rem;
+    }
+    .customer-card-stat {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    .customer-card-stat .stat-num {
+        font-weight: 700;
+        font-size: 1.1rem;
+        color: var(--primary);
+    }
+    .customer-card-stat .stat-lbl {
+        font-size: 0.72rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+    }
+    .customer-card-actions {
+        display: flex;
+        gap: 0.5rem;
+        padding-top: 0.5rem;
+    }
+    .customer-card-actions .btn {
+        flex: 1;
+    }
+
+    /* Buttons */
+    .btn {
+        border-radius: 999px;
+        padding: 0.55rem 1.15rem;
+        font-size: 0.85rem;
+        font-weight: 600;
+        cursor: pointer;
+        border: 1px solid transparent;
+        transition: all 0.15s ease;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.4rem;
+        text-decoration: none;
+    }
+    .btn-primary { background-color: var(--primary); color: #ffffff; }
+    .btn-primary:hover { background-color: var(--primary-dark); }
+    .btn-outline { background-color: #ffffff; color: var(--primary); border-color: var(--primary); }
+    .btn-outline:hover { background-color: var(--primary-soft); }
+    .btn-ghost { background-color: transparent; color: #374151; border-color: #d1d5db; }
+    .btn-ghost:hover { background-color: #f9fafb; }
+    .btn-sm { padding: 0.45rem 0.85rem; font-size: 0.8rem; }
+    .btn-success { background-color: var(--success); color: #ffffff; }
+    .btn-success:hover { background-color: #15803d; }
+
+    /* Pagination */
+    .pagination {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: var(--bg-card);
+        border-radius: var(--radius-card);
+        padding: 0.85rem 1.25rem;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+    .pagination-info {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        font-weight: 600;
+    }
+    .pagination-controls {
+        display: flex;
+        gap: 0.35rem;
+        align-items: center;
+    }
+    .pagination-btn {
+        padding: 0.45rem 0.85rem;
+        border: 1px solid var(--border-subtle);
+        background: white;
+        border-radius: var(--radius-field);
+        font-size: 0.85rem;
+        font-weight: 600;
+        cursor: pointer;
+        color: var(--text-main);
+        transition: all 0.15s;
+    }
+    .pagination-btn:hover:not(:disabled) {
+        background: var(--primary-soft);
+        border-color: var(--primary);
+        color: var(--primary);
+    }
+    .pagination-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+    }
+    .pagination-btn.active {
+        background: var(--primary);
+        color: white;
+        border-color: var(--primary);
+    }
+
+    /* Empty State */
+    .empty-state {
+        text-align: center;
+        padding: 3rem 2rem;
+        color: var(--text-muted);
+    }
+    .empty-state-icon {
+        font-size: 3rem;
+        margin-bottom: 1rem;
+        opacity: 0.5;
+    }
+    .empty-state h3 {
+        margin: 0 0 0.5rem;
+        color: var(--text-main);
+    }
+    .empty-state p {
+        margin: 0;
+        font-size: 0.9rem;
+    }
+
+    /* Loading State */
+    .loading-state {
+        text-align: center;
+        padding: 3rem 2rem;
+        color: var(--text-muted);
+    }
+    .loading-spinner {
+        width: 36px;
+        height: 36px;
+        border: 3px solid var(--border-subtle);
+        border-top-color: var(--primary);
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+        margin: 0 auto 1rem;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+        header.app-header {
+            border-radius: 0 0 10px 10px;
+            padding: 1.25rem;
+            flex-direction: column;
+            text-align: center;
+        }
+        .header-brand { flex-direction: column; }
+        .cards-grid {
+            grid-template-columns: 1fr;
+        }
+        .filter-bar {
+            flex-direction: column;
+        }
+        .filter-bar .search-input {
+            min-width: unset;
+            width: 100%;
+        }
+        .stat-cards {
+            grid-template-columns: repeat(2, 1fr);
+        }
+        .pagination {
+            flex-direction: column;
+            text-align: center;
+        }
+    }
+</style>
+<script>
+    window.AMERIDEX_API_BASE = 'https://ameridex-dealer-portal.onrender.com';
+</script>
+</head>
+<body>
+
+<!-- Main Application -->
+<div class="page-shell" id="main-app">
+    <header class="app-header">
+        <div class="header-brand">
+            <img src="/images/ameridex-logo.png" alt="AmeriDex Logo">
+            <div class="header-titles">
+                <h1>AmeriDex</h1>
+                <span class="portal-badge">Dealer Portal</span>
+            </div>
+        </div>
+        <div class="header-actions">
+            <span class="header-dealer-info" id="header-dealer-code"></span>
+            <a href="dealer-portal.html" class="header-btn">Quote Builder</a>
+            <span class="header-btn active-nav">My Quotes</span>
+            <button type="button" class="header-btn" id="logout-btn">Logout</button>
+        </div>
+    </header>
+
+    <main>
+        <!-- Tab Navigation -->
+        <div class="page-tabs" style="margin-top: 1.25rem;">
+            <button class="page-tab active" id="tab-quotes" data-tab="quotes">Quotes</button>
+            <button class="page-tab" id="tab-customers" data-tab="customers">Customers</button>
+        </div>
+
+        <!-- Quotes View -->
+        <div id="view-quotes">
+            <div class="stat-cards" id="quotes-stats"></div>
+            <div class="filter-bar" id="quotes-filters">
+                <input type="text" class="search-input" id="quotes-search" placeholder="Search by name, company, or quote #...">
+                <select class="filter-select" id="quotes-status-filter">
+                    <option value="">All Statuses</option>
+                    <option value="draft">Draft</option>
+                    <option value="submitted">Submitted</option>
+                    <option value="approved">Approved</option>
+                    <option value="rejected">Rejected</option>
+                    <option value="revision">Revision</option>
+                </select>
+                <select class="filter-select" id="quotes-date-filter">
+                    <option value="">All Time</option>
+                    <option value="today">Today</option>
+                    <option value="7">Last 7 Days</option>
+                    <option value="30">Last 30 Days</option>
+                    <option value="90">Last 90 Days</option>
+                    <option value="year">This Year</option>
+                </select>
+                <select class="filter-select" id="quotes-sort">
+                    <option value="-updatedAt">Newest First</option>
+                    <option value="updatedAt">Oldest First</option>
+                    <option value="-totalAmount">Highest Value</option>
+                    <option value="totalAmount">Lowest Value</option>
+                    <option value="-quoteNumber">Quote # (Z-A)</option>
+                    <option value="quoteNumber">Quote # (A-Z)</option>
+                </select>
+                <button class="filter-clear" id="quotes-clear-filters">Clear</button>
+            </div>
+            <div id="quotes-content">
+                <div class="loading-state"><div class="loading-spinner"></div><p>Loading quotes...</p></div>
+            </div>
+            <div id="quotes-pagination"></div>
+        </div>
+
+        <!-- Customers View -->
+        <div id="view-customers" class="app-hidden">
+            <div class="stat-cards" id="customers-stats"></div>
+            <div class="filter-bar" id="customers-filters">
+                <input type="text" class="search-input" id="customers-search" placeholder="Search by name, email, or company...">
+                <select class="filter-select" id="customers-sort">
+                    <option value="-lastContact">Most Recent</option>
+                    <option value="name">Name (A-Z)</option>
+                    <option value="-name">Name (Z-A)</option>
+                    <option value="-quoteCount">Most Quotes</option>
+                    <option value="-totalValue">Highest Value</option>
+                </select>
+                <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.85rem;font-weight:600;color:var(--text-muted);cursor:pointer;">
+                    <input type="checkbox" id="customers-has-quotes" style="width:16px;height:16px;"> With quotes only
+                </label>
+                <button class="filter-clear" id="customers-clear-filters">Clear</button>
+            </div>
+            <div id="customers-content">
+                <div class="loading-state"><div class="loading-spinner"></div><p>Loading customers...</p></div>
+            </div>
+            <div id="customers-pagination"></div>
+        </div>
+    </main>
+</div>
+
+<script src="ameridex-quotes-page.js"></script>
+</body>
+</html>
