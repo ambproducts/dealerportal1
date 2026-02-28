@@ -14,7 +14,7 @@ router.use(requireAuth);
 //   page       (int, default: none = legacy mode returns raw array)
 //   limit      (int, default 20, max 100)
 //   sort       (string, default '-lastContact', prefix '-' for desc)
-//   search     (string, fuzzy match on name/email/company/phone)
+//   search     (string, fuzzy match on name/email/company/phone/zip)
 //   hasQuotes  ('true' to only return customers with quoteCount >= 1)
 //
 // Backward compatible: If 'page' is NOT provided, returns the
@@ -51,7 +51,8 @@ router.get('/', (req, res) => {
                 c.name || '',
                 c.email || '',
                 c.company || '',
-                c.phone || ''
+                c.phone || '',
+                c.zipCode || ''
             ].join(' ').toLowerCase();
             return hay.includes(search);
         });
@@ -175,13 +176,14 @@ router.get('/search', (req, res) => {
             return (c.name || '').toLowerCase().includes(q)
                 || (c.email || '').toLowerCase().includes(q)
                 || (c.company || '').toLowerCase().includes(q)
-                || (c.phone || '').includes(q);
+                || (c.phone || '').includes(q)
+                || (c.zipCode || '').includes(q);
         })
         .slice(0, 15)
         .map(c => ({
             id: c.id,
             name: c.name,
-            email: c.email,
+            email: c.email || '',
             company: c.company,
             phone: c.phone,
             zipCode: c.zipCode,
@@ -194,25 +196,44 @@ router.get('/search', (req, res) => {
 
 // =============================================================
 // POST /api/customers
+// Required fields: name, zipCode
+// Optional fields: email, company, phone
 // =============================================================
 router.post('/', (req, res) => {
     const { name, email, company, phone, zipCode } = req.body;
 
-    if (!email || !name) {
-        return res.status(400).json({ error: 'Name and email are required' });
+    if (!name || !zipCode) {
+        return res.status(400).json({ error: 'Name and zip code are required' });
     }
 
     const customers = readJSON(CUSTOMERS_FILE);
     const dealerCode = req.user.dealerCode;
-    const normalizedEmail = email.toLowerCase().trim();
+    const normalizedEmail = (email || '').toLowerCase().trim();
+    const trimmedZip = zipCode.trim();
 
-    let existing = customers.find(c => c.email.toLowerCase() === normalizedEmail);
+    // Dedup strategy:
+    // 1. If email is provided, match by email + dealer (primary)
+    // 2. If no email, match by name + zipCode + dealer (fallback)
+    let existing = null;
+    if (normalizedEmail) {
+        existing = customers.find(c =>
+            c.email && c.email.toLowerCase() === normalizedEmail
+            && c.dealers && c.dealers.includes(dealerCode)
+        );
+    } else {
+        existing = customers.find(c =>
+            (c.name || '').toLowerCase() === name.toLowerCase().trim()
+            && (c.zipCode || '') === trimmedZip
+            && c.dealers && c.dealers.includes(dealerCode)
+        );
+    }
 
     if (existing) {
         if (name) existing.name = name;
+        if (normalizedEmail) existing.email = normalizedEmail;
         if (company !== undefined) existing.company = company;
         if (phone !== undefined) existing.phone = phone;
-        if (zipCode !== undefined) existing.zipCode = zipCode;
+        if (zipCode !== undefined) existing.zipCode = trimmedZip;
         if (!existing.dealers) existing.dealers = [];
         if (!existing.dealers.includes(dealerCode)) {
             existing.dealers.push(dealerCode);
@@ -226,11 +247,11 @@ router.post('/', (req, res) => {
 
     const newCustomer = {
         id: crypto.randomUUID(),
-        name: name,
+        name: name.trim(),
         email: normalizedEmail,
         company: company || '',
         phone: phone || '',
-        zipCode: zipCode || '',
+        zipCode: trimmedZip,
         dealers: [dealerCode],
         quoteCount: 0,
         totalValue: 0,
@@ -244,7 +265,8 @@ router.post('/', (req, res) => {
     customers.push(newCustomer);
     writeJSON(CUSTOMERS_FILE, customers);
 
-    console.log('[CustomerDB] New customer: ' + name + ' (' + normalizedEmail + ') by ' + dealerCode);
+    const logEmail = normalizedEmail || '(no email)';
+    console.log('[CustomerDB] New customer: ' + name + ' ' + logEmail + ' zip:' + trimmedZip + ' by ' + dealerCode);
     res.status(201).json(newCustomer);
 });
 
@@ -258,11 +280,19 @@ router.put('/:id', (req, res) => {
         return res.status(404).json({ error: 'Customer not found' });
     }
 
+    // Validate: name and zipCode cannot be set to empty
+    if (req.body.name !== undefined && !req.body.name.trim()) {
+        return res.status(400).json({ error: 'Customer name cannot be empty' });
+    }
+    if (req.body.zipCode !== undefined && !req.body.zipCode.trim()) {
+        return res.status(400).json({ error: 'Customer zip code cannot be empty' });
+    }
+
     const allowed = ['name', 'email', 'company', 'phone', 'zipCode'];
     allowed.forEach(field => {
         if (req.body[field] !== undefined) {
             customers[idx][field] = field === 'email'
-                ? req.body[field].toLowerCase().trim()
+                ? (req.body[field] || '').toLowerCase().trim()
                 : req.body[field];
         }
     });

@@ -2,6 +2,10 @@
 // routes/quotes.js - Quote CRUD with per-dealer pricing
 // Date: 2026-02-28
 // ============================================================
+// v3.1: Customer email is now optional. Name + zip are required.
+// upsertCustomer dedup uses email+dealer when email is provided,
+// falls back to name+zip+dealer when email is absent.
+//
 // v3.0: Replaced tier-based pricing with per-dealer pricing.
 // Line items now get their price from dealer.pricing[productId]
 // instead of basePrice * tierMultiplier.
@@ -96,33 +100,53 @@ function buildLineItem(item, dealer) {
 
 // =============================================================
 // upsertCustomer
+// Required: name, zipCode.  Optional: email, company, phone.
+// Dedup strategy:
+//   - If email provided: match by email + dealer
+//   - If no email: match by name + zipCode + dealer
 // =============================================================
 function upsertCustomer(customerData, dealerCode, existingCustomerId) {
-    if (!customerData || !customerData.email || !customerData.name) {
+    if (!customerData || !customerData.name || !customerData.zipCode) {
         return customerData || {};
     }
 
     const customers = readJSON(CUSTOMERS_FILE);
-    const normalizedEmail = customerData.email.toLowerCase().trim();
+    const normalizedEmail = (customerData.email || '').toLowerCase().trim();
+    const trimmedName = customerData.name.trim();
+    const trimmedZip = customerData.zipCode.trim();
     const now = new Date().toISOString();
 
+    // Try to find existing customer
     let existing = null;
+
+    // First: try by explicit ID if provided
     if (existingCustomerId) {
         existing = customers.find(c => c.id === existingCustomerId);
     }
-    if (!existing) {
+
+    // Second: try by email + dealer (only when email is non-empty)
+    if (!existing && normalizedEmail) {
         existing = customers.find(c =>
             c.email && c.email.toLowerCase() === normalizedEmail
             && c.dealers && c.dealers.includes(dealerCode)
         );
     }
 
+    // Third: try by name + zip + dealer (fallback when no email)
+    if (!existing && !normalizedEmail) {
+        existing = customers.find(c =>
+            (c.name || '').toLowerCase() === trimmedName.toLowerCase()
+            && (c.zipCode || '') === trimmedZip
+            && c.dealers && c.dealers.includes(dealerCode)
+        );
+    }
+
     if (existing) {
-        existing.name = customerData.name;
+        existing.name = trimmedName;
+        if (normalizedEmail) existing.email = normalizedEmail;
         if (customerData.company !== undefined) existing.company = customerData.company;
         if (customerData.phone !== undefined) existing.phone = customerData.phone;
-        if (customerData.zipCode !== undefined) existing.zipCode = customerData.zipCode;
-        existing.email = normalizedEmail;
+        existing.zipCode = trimmedZip;
         if (!existing.dealers) existing.dealers = [];
         if (!existing.dealers.includes(dealerCode)) {
             existing.dealers.push(dealerCode);
@@ -130,17 +154,18 @@ function upsertCustomer(customerData, dealerCode, existingCustomerId) {
         existing.lastContact = now;
         existing.updatedAt = now;
         writeJSON(CUSTOMERS_FILE, customers);
-        console.log('[CustomerDB] Updated via quote: ' + existing.name + ' (' + normalizedEmail + ') dealer: ' + dealerCode);
+        const logEmail = normalizedEmail || '(no email)';
+        console.log('[CustomerDB] Updated via quote: ' + existing.name + ' ' + logEmail + ' zip:' + trimmedZip + ' dealer: ' + dealerCode);
         return existing;
     }
 
     const newCustomer = {
         id: crypto.randomUUID(),
-        name: customerData.name,
+        name: trimmedName,
         email: normalizedEmail,
         company: customerData.company || '',
         phone: customerData.phone || '',
-        zipCode: customerData.zipCode || '',
+        zipCode: trimmedZip,
         dealers: [dealerCode],
         quoteCount: 0,
         totalValue: 0,
@@ -152,7 +177,8 @@ function upsertCustomer(customerData, dealerCode, existingCustomerId) {
     };
     customers.push(newCustomer);
     writeJSON(CUSTOMERS_FILE, customers);
-    console.log('[CustomerDB] Created via quote: ' + newCustomer.name + ' (' + normalizedEmail + ') dealer: ' + dealerCode);
+    const logEmail = normalizedEmail || '(no email)';
+    console.log('[CustomerDB] Created via quote: ' + newCustomer.name + ' ' + logEmail + ' zip:' + trimmedZip + ' dealer: ' + dealerCode);
     return newCustomer;
 }
 
@@ -243,6 +269,7 @@ router.get('/', (req, res) => {
                 q.customer ? (q.customer.name || '') : '',
                 q.customer ? (q.customer.company || '') : '',
                 q.customer ? (q.customer.email || '') : '',
+                q.customer ? (q.customer.zipCode || '') : '',
                 q.notes || ''
             ].join(' ').toLowerCase();
             return hay.includes(search);
