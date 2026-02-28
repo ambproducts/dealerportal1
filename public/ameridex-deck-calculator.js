@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - Advanced Deck Calculator v1.3
+// AmeriDex Dealer Portal - Advanced Deck Calculator v1.4
 // File: ameridex-deck-calculator.js
 // Date: 2026-02-28
 // ============================================================
@@ -13,6 +13,7 @@
 //
 // Key features:
 //   - Inline color picker with full-screen preview on click
+//   - Standalone "Select Colors" section removed (redundant)
 //   - Multi-option comparison (12', 16', 20', custom)
 //   - Custom length rounding: whole foot preferred, .5' when
 //     it saves significant waste
@@ -191,21 +192,12 @@
         calcSelectedColor = colorName;
         window.selectedColor1 = colorName;
 
-        // Sync the main color grid
-        document.querySelectorAll('#color-grid .color-card').forEach(function (card) {
-            card.classList.toggle('selected', card.getAttribute('data-color') === colorName);
-        });
-        if (typeof window.updateColorComparison === 'function') {
-            window.updateColorComparison();
-        }
-
-        // Update all inline swatch states (class-driven, no inline style mutation)
+        // Update all inline swatch states (class-driven)
         var swatches = document.querySelectorAll('#calc-color-swatches .calc-color-swatch');
         swatches.forEach(function (s) {
             var isThis = (s.getAttribute('data-color') === colorName);
             s.classList.toggle('active', isThis);
 
-            // Update the label color
             var label = s.querySelector('.calc-swatch-label');
             if (label) {
                 label.style.color = isThis ? '#2563eb' : '#6b7280';
@@ -227,6 +219,18 @@
         var colorChip = document.getElementById('calc-result-color-chip');
         if (colorChip) {
             colorChip.textContent = colorName;
+        }
+    }
+
+    // === REMOVE STANDALONE COLOR SECTION ===
+    // The color picker is now inside the calculator. The old standalone
+    // "Select Colors" card (#colors) is redundant and removed from the DOM.
+    // The #colorModal is NOT inside #colors, so it remains available.
+    function removeStandaloneColorSection() {
+        var colorsSection = document.getElementById('colors');
+        if (colorsSection) {
+            colorsSection.parentNode.removeChild(colorsSection);
+            console.log('[DeckCalc] Removed standalone #colors section (now integrated in calculator)');
         }
     }
 
@@ -264,7 +268,7 @@
             swatchesHtml +=
                 '<div class="calc-color-swatch' + (isActive ? ' active' : '') + '" data-color="' + c + '" ' +
                     'style="cursor:pointer;text-align:center;width:72px;transition:transform 0.15s" ' +
-                    'title="Click to select, double-click for full preview">' +
+                    'title="Click to select ' + c + '">' +
                     '<div class="calc-swatch-img" style="position:relative;width:64px;height:44px;border-radius:8px;overflow:hidden;' +
                         'border:3px solid transparent;box-shadow:0 1px 3px rgba(0,0,0,0.1);transition:border-color 0.15s,box-shadow 0.15s">' +
                         '<img src="' + imgSrc + '" alt="' + c + '" ' +
@@ -312,13 +316,10 @@
 
         // --- Click handlers for swatches ---
         colorRow.querySelectorAll('.calc-color-swatch').forEach(function (swatch) {
-            // Single click: select color
-            swatch.addEventListener('click', function (e) {
-                var colorName = this.getAttribute('data-color');
-                updateCalcColorSelection(colorName);
+            swatch.addEventListener('click', function () {
+                updateCalcColorSelection(this.getAttribute('data-color'));
             });
 
-            // Double click: open full-screen preview
             swatch.addEventListener('dblclick', function (e) {
                 e.preventDefault();
                 var colorName = this.getAttribute('data-color');
@@ -392,31 +393,21 @@
 
     // === INJECT STYLES ===
     function injectCalcColorStyles() {
+        if (document.getElementById('calc-color-styles')) return;
         var style = document.createElement('style');
         style.id = 'calc-color-styles';
         style.textContent =
-            // Swatch hover lift
             '.calc-color-swatch:hover { transform: translateY(-2px); }' +
-
-            // Show expand icon on hover
             '.calc-color-swatch:hover .calc-swatch-expand { opacity: 1 !important; }' +
-
-            // Active swatch: blue ring on the image wrapper
             '.calc-color-swatch.active .calc-swatch-img {' +
                 'border-color: #2563eb !important;' +
                 'box-shadow: 0 0 0 2px rgba(37,99,235,0.25) !important;' +
             '}' +
-
-            // Inactive swatch: guarantee transparent border
             '.calc-color-swatch:not(.active) .calc-swatch-img {' +
                 'border-color: transparent !important;' +
                 'box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;' +
             '}' +
-
-            // Preview panel hover
             '#calc-color-preview:hover { background: #f9fafb !important; border-color: #2563eb !important; }' +
-
-            // Mobile tweaks
             '@media (max-width: 768px) {' +
                 '#calc-color-swatches { gap: 0.35rem !important; }' +
                 '.calc-color-swatch { width: 56px !important; }' +
@@ -759,7 +750,10 @@
 
     // === INITIALIZATION ===
     function init() {
-        console.log('[DeckCalc] Initializing advanced deck calculator v1.3');
+        console.log('[DeckCalc] Initializing advanced deck calculator v1.4');
+
+        // Remove the standalone Select Colors section (now integrated here)
+        removeStandaloneColorSection();
 
         injectCalculatorUI();
         injectCalcColorStyles();
@@ -802,21 +796,6 @@
                         : 'Boards will run along the house wall';
                 }
             });
-        }
-
-        // Listen for changes from the main color grid so the calc stays in sync
-        var mainColorGrid = document.getElementById('color-grid');
-        if (mainColorGrid) {
-            var observer = new MutationObserver(function () {
-                var activeCard = mainColorGrid.querySelector('.color-card.selected');
-                if (activeCard) {
-                    var newColor = activeCard.getAttribute('data-color');
-                    if (newColor && newColor !== calcSelectedColor) {
-                        updateCalcColorSelection(newColor);
-                    }
-                }
-            });
-            observer.observe(mainColorGrid, { subtree: true, attributes: true, attributeFilter: ['class'] });
         }
 
         console.log('[DeckCalc] Ready. Board width: ' + BOARD_WIDTH_INCH + '"  Gap: ' + GAP_INCH + '"  Effective: ' + EFFECTIVE_FT.toFixed(6) + ' ft/board');
