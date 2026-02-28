@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - API Integration Patch v2.15
+// AmeriDex Dealer Portal - API Integration Patch v2.16
 // Date: 2026-02-27
 // ============================================================
 // REQUIRES: ameridex-patches.js (v1.0+) loaded first
@@ -7,6 +7,13 @@
 // Load order in dealer-portal.html (before </body>):
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
+//
+// v2.16 Changes (2026-02-27):
+//   - FIX: applyQuoteToDOM() in loadQuoteFromUrlParam() (Section 18)
+//     now maps server line items through mapServerLineItemToFrontend()
+//     before assigning to currentQuote.lineItems. This was removed in
+//     v2.14 causing line items to not render when opening quotes from
+//     the My Quotes page (server field names not converted to frontend).
 //
 // v2.15 Changes (2026-02-27):
 //   - FIX: Override window.loadQuote() (new Section 14b) to restore
@@ -1259,7 +1266,7 @@
 
 
     // ----------------------------------------------------------
-    // 18. LOAD QUOTE FROM URL PARAM (?quoteId=) (v2.14)
+    // 18. LOAD QUOTE FROM URL PARAM (?quoteId=) (v2.16)
     // ----------------------------------------------------------
     function loadQuoteFromUrlParam() {
         var urlParams = new URLSearchParams(window.location.search);
@@ -1267,7 +1274,14 @@
         if (!serverId) return;
 
         function applyQuoteToDOM(sq) {
-            var frontendLineItems = sq.lineItems || [];
+            // v2.16: Restore mapServerLineItemToFrontend() mapping
+            // that was removed in v2.14. Server field names (quantity,
+            // productName, basePrice) must be converted to frontend
+            // format (qty, customDesc, customUnitPrice) for render().
+            var frontendLineItems = (sq.lineItems || []).map(function (serverLI) {
+                return mapServerLineItemToFrontend(serverLI) || serverLI;
+            }).filter(function (li) { return li !== null; });
+
             var mappedCustomer = mapServerCustomerToFrontend(sq.customer);
 
             // Write all fields to currentQuote
@@ -1285,9 +1299,9 @@
             // v2.15: Use shared helper for full DOM restoration
             restoreQuoteToDOM(window.currentQuote);
 
-            console.log('[v2.15] Loaded quote from URL param: '
+            console.log('[v2.16] Loaded quote from URL param: '
                 + (window.currentQuote.quoteId || serverId)
-                + ' | ' + frontendLineItems.length + ' line items (all fields restored)');
+                + ' | ' + frontendLineItems.length + ' line items (mapped and restored)');
 
             try {
                 var cleanUrl = window.location.pathname;
@@ -1301,7 +1315,7 @@
                     applyQuoteToDOM(sq);
                 })
                 .catch(function (err) {
-                    console.warn('[v2.15] Server fetch failed for quoteId=' + serverId + ', falling back to savedQuotes[]:', err.message);
+                    console.warn('[v2.16] Server fetch failed for quoteId=' + serverId + ', falling back to savedQuotes[]:', err.message);
 
                     var found = window.savedQuotes.find(function (q) {
                         return String(q._serverId) === String(serverId)
@@ -1311,7 +1325,7 @@
                     if (found) {
                         applyQuoteToDOM(found);
                     } else {
-                        console.error('[v2.15] Quote not found in savedQuotes[] either. quoteId=' + serverId);
+                        console.error('[v2.16] Quote not found in savedQuotes[] either. quoteId=' + serverId);
                     }
                 });
         }
@@ -1340,5 +1354,5 @@
 
     loadQuoteFromUrlParam();
 
-    console.log('[AmeriDex API] v2.15 loaded: Auth + API integration active.');
+    console.log('[AmeriDex API] v2.16 loaded: Auth + API integration active.');
 })();
