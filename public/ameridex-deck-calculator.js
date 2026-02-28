@@ -1,13 +1,8 @@
 // ============================================================
-// AmeriDex Dealer Portal - Advanced Deck Calculator v1.1
+// AmeriDex Dealer Portal - Advanced Deck Calculator v1.2
 // File: ameridex-deck-calculator.js
 // Date: 2026-02-28
 // ============================================================
-// Replaces the basic deck calculator with a full optimization
-// engine that recommends standard AND custom board lengths,
-// auto-calculates screws and plugs, and pushes all line items
-// to the order on Accept.
-//
 // The AmeriDex System = Grooved deck boards + Dexerdry seal
 // integrated at $8/ft. The calculator defaults to System boards.
 // No separate Dexerdry seal line item is needed for System.
@@ -17,13 +12,13 @@
 // calculated. Dealers add it manually when needed.
 //
 // Key features:
+//   - Inline color picker integrated into the calculator
 //   - Multi-option comparison (12', 16', 20', custom)
 //   - Custom length rounding: whole foot preferred, .5' when
 //     it saves significant waste
 //   - Screw calculation: boardRows x joists x 2 per crossing
 //   - Plug calculation: 1 plug per screw (375/box each)
 //   - Pushes boards + screws + plugs + picture frame (if on)
-//   - Fixes waste percentage bug (ternary was inverted)
 // ============================================================
 
 (function () {
@@ -41,19 +36,15 @@
     // === STATE ===
     var currentCalcResult = null;
     var selectedOptionIndex = null;
+    var calcSelectedColor = null; // color selected inside the calculator
 
     // === CUSTOM LENGTH ROUNDING ===
-    // Whole foot by default. Uses .5' only when rounding to the
-    // next whole foot would waste more than 0.5' per board.
     function getCustomLength(spanFt) {
         if (spanFt <= 0) return 0;
-        // Already on a 0.5 boundary
         if (spanFt % 0.5 === 0) return spanFt;
         var ceilWhole = Math.ceil(spanFt);
         var wasteWhole = ceilWhole - spanFt;
-        // If rounding up to whole foot wastes <= 6" per board, use whole
         if (wasteWhole <= 0.5) return ceilWhole;
-        // Otherwise use .5' increment to reduce waste
         return Math.floor(spanFt) + 0.5;
     }
 
@@ -66,7 +57,6 @@
         var wasteMultiplier = 1 + (wastePct / 100);
         var options = [];
 
-        // --- Standard length options ---
         STD_LENGTHS.forEach(function (stdLen) {
             var boardsPerRow, totalBoardsRaw, wastePerRow, buttJoints, note;
 
@@ -106,7 +96,6 @@
             });
         });
 
-        // --- Custom length option ---
         var customLen = getCustomLength(span);
         var isCustomSameAsStandard = (STD_LENGTHS.indexOf(customLen) !== -1);
 
@@ -136,16 +125,13 @@
             });
         }
 
-        // --- Sort by waste (least waste first) ---
         options.sort(function (a, b) {
             if (a.wasteLinearFt !== b.wasteLinearFt) return a.wasteLinearFt - b.wasteLinearFt;
             return a.totalLinearFt - b.totalLinearFt;
         });
 
-        // Mark top option as recommended
         if (options.length > 0) options[0].recommended = true;
 
-        // Joist count for fastener math
         var joistCount = Math.floor(alongHouse * 12 / joistSpacingIn) + 1;
 
         return {
@@ -168,7 +154,7 @@
         var screwsPerBoard = joistCount * SCREWS_PER_CROSSING;
         var totalScrews = boardRows * screwsPerBoard;
         var screwBoxes = Math.ceil(totalScrews / SCREWS_PER_BOX);
-        var totalPlugs = totalScrews; // 1 plug per screw
+        var totalPlugs = totalScrews;
         var plugBoxes = Math.ceil(totalPlugs / PLUGS_PER_BOX);
         return {
             screwsPerBoard: screwsPerBoard,
@@ -179,6 +165,51 @@
         };
     }
 
+    // === GET ACTIVE COLOR ===
+    // Returns the color selected inside the calculator, falling back
+    // to the global selectedColor1 set by the main color grid.
+    function getActiveColor() {
+        return calcSelectedColor || window.selectedColor1 || 'Driftwood';
+    }
+
+    // === COLOR PICKER: UPDATE SELECTION STATE ===
+    function updateCalcColorSelection(colorName) {
+        calcSelectedColor = colorName;
+        // Sync to global so line items also pick it up
+        window.selectedColor1 = colorName;
+
+        // Update the main color grid selection to stay in sync
+        document.querySelectorAll('#color-grid .color-card').forEach(function (card) {
+            card.classList.toggle('selected', card.getAttribute('data-color') === colorName);
+        });
+        if (typeof window.updateColorComparison === 'function') {
+            window.updateColorComparison();
+        }
+
+        // Update inline swatches
+        var swatches = document.querySelectorAll('#calc-color-swatches .calc-color-swatch');
+        swatches.forEach(function (s) {
+            s.classList.toggle('active', s.getAttribute('data-color') === colorName);
+        });
+
+        // Update inline preview
+        var previewImg = document.getElementById('calc-color-preview-img');
+        var previewLabel = document.getElementById('calc-color-preview-label');
+        if (previewImg && window.COLORIMAGES) {
+            previewImg.src = 'colors/' + (window.COLORIMAGES[colorName] || colorName + '.png');
+            previewImg.alt = colorName;
+        }
+        if (previewLabel) {
+            previewLabel.textContent = colorName;
+        }
+
+        // Update the result summary color chip if results are visible
+        var colorChip = document.getElementById('calc-result-color-chip');
+        if (colorChip) {
+            colorChip.textContent = colorName;
+        }
+    }
+
     // === UI: INJECT ADVANCED FIELDS ===
     function injectCalculatorUI() {
         var calcSection = document.getElementById('calculator');
@@ -187,19 +218,81 @@
         var formGrid = calcSection.querySelector('.form-grid');
         if (!formGrid) return;
 
-        // Find the second .field-row-2 (orientation + waste row)
         var fieldRows = formGrid.querySelectorAll('.field-row-2');
         var orientationRow = fieldRows.length >= 2 ? fieldRows[1] : null;
         if (!orientationRow) return;
 
         // Don't inject twice
-        if (document.getElementById('calc-advanced-row')) return;
+        if (document.getElementById('calc-color-row')) return;
 
-        // Insert Board Type + Joist Spacing row after orientation row
-        var newRow = document.createElement('div');
-        newRow.className = 'field-row-2';
-        newRow.id = 'calc-advanced-row';
-        newRow.innerHTML =
+        // Initialize calcSelectedColor from global
+        calcSelectedColor = window.selectedColor1 || 'Driftwood';
+
+        // --- Color Picker Row (injected after orientation row) ---
+        var colorRow = document.createElement('div');
+        colorRow.id = 'calc-color-row';
+        colorRow.style.cssText = 'margin-top:0.5rem;padding:1rem;background:#f9fafb;border-radius:10px;border:1px solid #e5e7eb';
+
+        var colorLabel = '<label style="font-size:0.9rem;font-weight:600;color:#374151;margin-bottom:0.5rem;display:block">Board Color</label>';
+
+        // Build swatches from the global COLORS array
+        var swatchesHtml = '<div id="calc-color-swatches" style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:flex-start">';
+        var colors = window.COLORS || ['Driftwood', 'Khaki', 'Slate', 'Beachwood', 'Chestnut', 'Redwood', 'Hazelnut'];
+        var colorImages = window.COLORIMAGES || {};
+
+        colors.forEach(function (c) {
+            var isActive = (c === calcSelectedColor);
+            var imgSrc = 'colors/' + (colorImages[c] || c + '.png');
+            swatchesHtml +=
+                '<div class="calc-color-swatch' + (isActive ? ' active' : '') + '" data-color="' + c + '" ' +
+                    'style="cursor:pointer;text-align:center;width:72px;transition:transform 0.15s" ' +
+                    'title="' + c + '">' +
+                    '<div style="width:64px;height:44px;border-radius:8px;overflow:hidden;border:3px solid ' +
+                        (isActive ? '#2563eb' : 'transparent') +
+                        ';box-shadow:' + (isActive ? '0 0 0 2px rgba(37,99,235,0.25)' : '0 1px 3px rgba(0,0,0,0.1)') +
+                        ';transition:border-color 0.15s,box-shadow 0.15s">' +
+                        '<img src="' + imgSrc + '" alt="' + c + '" ' +
+                            'style="width:100%;height:100%;object-fit:cover" ' +
+                            'onerror="this.style.background=\'#d4a574\';this.style.display=\'block\'">' +
+                    '</div>' +
+                    '<div style="font-size:0.7rem;font-weight:600;margin-top:0.25rem;color:' +
+                        (isActive ? '#2563eb' : '#6b7280') + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' +
+                        c +
+                    '</div>' +
+                '</div>';
+        });
+        swatchesHtml += '</div>';
+
+        // Preview panel beside swatches
+        var previewImgSrc = 'colors/' + (colorImages[calcSelectedColor] || calcSelectedColor + '.png');
+        var previewHtml =
+            '<div id="calc-color-preview" style="display:flex;align-items:center;gap:0.75rem;margin-top:0.75rem;' +
+                'padding:0.6rem 0.85rem;background:white;border-radius:8px;border:1px solid #e5e7eb">' +
+                '<img id="calc-color-preview-img" src="' + previewImgSrc + '" alt="' + calcSelectedColor + '" ' +
+                    'style="width:56px;height:56px;border-radius:8px;object-fit:cover;border:1px solid #e5e7eb">' +
+                '<div>' +
+                    '<div style="font-size:0.78rem;color:#6b7280">Selected Color</div>' +
+                    '<div id="calc-color-preview-label" style="font-size:1rem;font-weight:700;color:#111827">' +
+                        calcSelectedColor +
+                    '</div>' +
+                '</div>' +
+            '</div>';
+
+        colorRow.innerHTML = colorLabel + swatchesHtml + previewHtml;
+        orientationRow.parentNode.insertBefore(colorRow, orientationRow.nextSibling);
+
+        // Attach click handlers to swatches
+        colorRow.querySelectorAll('.calc-color-swatch').forEach(function (swatch) {
+            swatch.addEventListener('click', function () {
+                updateCalcColorSelection(this.getAttribute('data-color'));
+            });
+        });
+
+        // --- Board Type + Joist Spacing row (after color row) ---
+        var advancedRow = document.createElement('div');
+        advancedRow.className = 'field-row-2';
+        advancedRow.id = 'calc-advanced-row';
+        advancedRow.innerHTML =
             '<div class="field">' +
                 '<label for="calc-board-type">Board Type</label>' +
                 '<select id="calc-board-type">' +
@@ -217,9 +310,9 @@
                 '</select>' +
                 '<div class="help-text">Determines screw and plug quantities</div>' +
             '</div>';
-        orientationRow.parentNode.insertBefore(newRow, orientationRow.nextSibling);
+        colorRow.parentNode.insertBefore(advancedRow, colorRow.nextSibling);
 
-        // Replace result container with upgraded version
+        // --- Replace result container ---
         var oldResult = document.getElementById('calc-result-container');
         if (oldResult) {
             var newResult = document.createElement('div');
@@ -231,6 +324,11 @@
                         '<span>Board Options</span>' +
                         '<span id="calc-deck-summary" style="font-size:0.82rem;font-weight:500;color:#6b7280"></span>' +
                     '</h3>' +
+                    '<div id="calc-result-color-bar" style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;' +
+                        'padding:0.45rem 0.7rem;background:#fff;border-radius:6px;border:1px solid #e5e7eb;font-size:0.85rem">' +
+                        '<span style="color:#6b7280">Color:</span> ' +
+                        '<span id="calc-result-color-chip" style="font-weight:700;color:#111827">' + calcSelectedColor + '</span>' +
+                    '</div>' +
                     '<p style="font-size:0.85rem;color:#6b7280;margin:0 0 0.75rem">' +
                         'Select the best option for this project. Custom lengths minimize waste.' +
                     '</p>' +
@@ -245,12 +343,33 @@
         }
     }
 
+    // === INJECT RESPONSIVE STYLES FOR INLINE COLOR PICKER ===
+    function injectCalcColorStyles() {
+        var style = document.createElement('style');
+        style.textContent =
+            '.calc-color-swatch:hover { transform: translateY(-2px); }' +
+            '.calc-color-swatch.active div:first-child { border-color: #2563eb !important; box-shadow: 0 0 0 2px rgba(37,99,235,0.25) !important; }' +
+            '.calc-color-swatch.active div:last-child { color: #2563eb !important; }' +
+            '@media (max-width: 768px) {' +
+                '#calc-color-swatches { gap: 0.35rem !important; }' +
+                '.calc-color-swatch { width: 56px !important; }' +
+                '.calc-color-swatch div:first-child { width: 48px !important; height: 36px !important; }' +
+                '#calc-color-preview { margin-top: 0.5rem !important; }' +
+                '#calc-options-desktop { display: none !important; }' +
+                '#calc-options-mobile { display: block !important; }' +
+                '#calc-advanced-row { grid-template-columns: 1fr !important; }' +
+            '}' +
+            '@media (min-width: 769px) {' +
+                '#calc-options-mobile { display: none !important; }' +
+            '}';
+        document.head.appendChild(style);
+    }
+
     // === UI: RENDER OPTIONS TABLE ===
     function renderOptionsTable(result) {
         var container = document.getElementById('calc-options-table');
         if (!container) return;
 
-        // Summary line
         var summaryEl = document.getElementById('calc-deck-summary');
         if (summaryEl) {
             summaryEl.textContent =
@@ -259,6 +378,10 @@
                 result.boardRows + ' board rows | ' +
                 result.joistCount + ' joists @ ' + result.joistSpacingIn + '" OC';
         }
+
+        // Update color chip in results
+        var colorChip = document.getElementById('calc-result-color-chip');
+        if (colorChip) colorChip.textContent = getActiveColor();
 
         var html = '';
 
@@ -303,7 +426,7 @@
 
         html += '</tbody></table></div>';
 
-        // Mobile cards (hidden on desktop via media query)
+        // Mobile cards
         html += '<div id="calc-options-mobile" style="display:none">';
         result.options.forEach(function (opt, idx) {
             var isRec = opt.recommended;
@@ -330,15 +453,14 @@
 
         container.innerHTML = html;
 
-        // Auto-select recommended
         selectedOptionIndex = result.options.findIndex(function (o) { return o.recommended; });
         if (selectedOptionIndex === -1) selectedOptionIndex = 0;
         enableAcceptButton();
         renderFastenerSummary(result);
 
-        // Attach row click handlers (desktop)
+        // Row click handlers (desktop)
         container.querySelectorAll('tr[data-opt-idx]').forEach(function (row) {
-            row.addEventListener('click', function (e) {
+            row.addEventListener('click', function () {
                 selectedOptionIndex = parseInt(this.getAttribute('data-opt-idx'));
                 var radio = this.querySelector('input[type="radio"]');
                 if (radio) radio.checked = true;
@@ -348,9 +470,9 @@
             });
         });
 
-        // Attach card click handlers (mobile)
+        // Card click handlers (mobile)
         container.querySelectorAll('div[data-opt-idx]').forEach(function (card) {
-            card.addEventListener('click', function (e) {
+            card.addEventListener('click', function () {
                 selectedOptionIndex = parseInt(this.getAttribute('data-opt-idx'));
                 var radio = this.querySelector('input[type="radio"]');
                 if (radio) radio.checked = true;
@@ -368,13 +490,10 @@
             var idx = parseInt(row.getAttribute('data-opt-idx'));
             var opt = currentCalcResult.options[idx];
             if (!opt) return;
-            if (idx === selectedOptionIndex) {
-                row.style.background = opt.recommended ? '#f0fdf4' : '#eff6ff';
-            } else {
-                row.style.background = opt.recommended ? '#f0fdf4' : '#ffffff';
-            }
+            row.style.background = (idx === selectedOptionIndex)
+                ? (opt.recommended ? '#f0fdf4' : '#eff6ff')
+                : (opt.recommended ? '#f0fdf4' : '#ffffff');
         });
-        // Mobile cards
         var cards = document.querySelectorAll('#calc-options-mobile div[data-opt-idx]');
         cards.forEach(function (card) {
             var idx = parseInt(card.getAttribute('data-opt-idx'));
@@ -428,27 +547,21 @@
             return;
         }
 
-        // Store globally for backward compat with fastener hint
         window.deckLengthFt = alongHouse;
         window.deckWidthFt = fromHouse;
 
         var orientation = document.getElementById('orientation').value;
-
-        // BUG FIX: original had inverted ternary that always returned 0
         var wastePctInput = document.getElementById('waste-pct').value.trim();
         var wastePct = wastePctInput ? (parseFloat(wastePctInput) || 0) : 0;
 
         var joistSpacingEl = document.getElementById('calc-joist-spacing');
         var joistSpacing = joistSpacingEl ? (parseInt(joistSpacingEl.value) || 16) : 16;
 
-        // Run optimizer
         currentCalcResult = optimizeBoards(alongHouse, fromHouse, orientation, wastePct, joistSpacing);
 
-        // Auto-select recommended option
         selectedOptionIndex = currentCalcResult.options.findIndex(function (o) { return o.recommended; });
         if (selectedOptionIndex === -1) selectedOptionIndex = 0;
 
-        // Backward compat: set lastCalculation for any code that reads it
         var recOpt = currentCalcResult.options[selectedOptionIndex];
         window.lastCalculation = {
             boardsNeeded: recOpt ? recOpt.totalBoards : 0,
@@ -456,24 +569,18 @@
             wastePct: wastePct
         };
 
-        // Render results
         renderOptionsTable(currentCalcResult);
         document.getElementById('calc-result-container').style.display = 'block';
         enableAcceptButton();
 
-        // Update diagram
         var preview = document.getElementById('board-lines-preview');
         if (preview) preview.className = 'board-lines ' + orientation;
 
-        // Scroll result into view
         var resultBox = document.getElementById('calc-result-container');
         if (resultBox) resultBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     };
 
     // === OVERRIDE: addSuggestionToOrder ===
-    // Pushes: decking boards + screws + plugs + picture frame (if checked)
-    // System boards include Dexerdry seal (no separate seal line item)
-    // BlueClaw is a manual-add tool, not auto-calculated
     window.addSuggestionToOrder = function () {
         if (!currentCalcResult || selectedOptionIndex === null) {
             alert('Please calculate and select an option first.');
@@ -485,11 +592,10 @@
 
         var boardTypeEl = document.getElementById('calc-board-type');
         var boardType = boardTypeEl ? boardTypeEl.value : 'system';
-        var color = window.selectedColor1 || 'Driftwood';
+        var color = getActiveColor();
         var fasteners = calculateFasteners(opt.boardRows, currentCalcResult.joistCount);
         var itemsAdded = [];
 
-        // Determine length for line item
         var lengthVal, customLengthVal;
         if (opt.isCustom) {
             lengthVal = 'custom';
@@ -499,12 +605,11 @@
             customLengthVal = null;
         }
 
-        // Board type label for confirmation message
         var boardTypeLabel = boardType === 'system' ? 'AmeriDex System'
                            : boardType === 'grooved' ? 'Grooved'
                            : 'Solid Edge';
 
-        // 1. Decking boards (System = board + Dexerdry seal integrated)
+        // 1. Decking boards
         window.currentQuote.lineItems.push({
             type: boardType,
             color: color,
@@ -518,7 +623,7 @@
         });
         itemsAdded.push(opt.totalBoards + ' ' + boardTypeLabel + ' boards (' + opt.label + ', ' + color + ')');
 
-        // 2. Screws (always added)
+        // 2. Screws
         if (fasteners.screwBoxes > 0) {
             window.currentQuote.lineItems.push({
                 type: 'screws',
@@ -534,7 +639,7 @@
             itemsAdded.push(fasteners.screwBoxes + ' box(es) screws (' + fasteners.totalScrews.toLocaleString() + ' total)');
         }
 
-        // 3. Plugs (1 plug per screw, always added)
+        // 3. Plugs
         if (fasteners.plugBoxes > 0) {
             window.currentQuote.lineItems.push({
                 type: 'plugs',
@@ -550,7 +655,7 @@
             itemsAdded.push(fasteners.plugBoxes + ' box(es) plugs (' + fasteners.totalPlugs.toLocaleString() + ' total)');
         }
 
-        // 4. Picture frame solid edge boards (only if checkbox is checked)
+        // 4. Picture frame solid edge boards (only if checked)
         if (window.currentQuote.options && window.currentQuote.options.pictureFrame) {
             var perimeterFt = 2 * (currentCalcResult.coverageFt + currentCalcResult.spanFt);
             var pfBoardLen = currentCalcResult.spanFt <= 12 ? 12 :
@@ -577,12 +682,10 @@
         if (typeof window.updateTotalAndFasteners === 'function') window.updateTotalAndFasteners();
         if (typeof window.updateUndoButton === 'function') window.updateUndoButton();
 
-        // Reset calculator state
         document.getElementById('calc-result-container').style.display = 'none';
         currentCalcResult = null;
         selectedOptionIndex = null;
 
-        // Show confirmation
         var msg = itemsAdded.length + ' line items added to your order:\n';
         itemsAdded.forEach(function (item) {
             msg += '\u2022 ' + item + '\n';
@@ -590,30 +693,13 @@
         alert(msg);
     };
 
-    // === MOBILE RESPONSIVE SUPPORT ===
-    function setupMobileResponsive() {
-        var style = document.createElement('style');
-        style.textContent =
-            '@media (max-width: 768px) {' +
-                '#calc-options-desktop { display: none !important; }' +
-                '#calc-options-mobile { display: block !important; }' +
-                '#calc-advanced-row { grid-template-columns: 1fr !important; }' +
-            '}' +
-            '@media (min-width: 769px) {' +
-                '#calc-options-mobile { display: none !important; }' +
-            '}';
-        document.head.appendChild(style);
-    }
-
     // === INITIALIZATION ===
     function init() {
-        console.log('[DeckCalc] Initializing advanced deck calculator v1.1');
+        console.log('[DeckCalc] Initializing advanced deck calculator v1.2');
 
-        // Inject new UI fields
         injectCalculatorUI();
-        setupMobileResponsive();
+        injectCalcColorStyles();
 
-        // Clone-replace the Calculate button to remove old listeners
         var oldCalcBtn = document.getElementById('calc-btn');
         if (oldCalcBtn) {
             var newCalcBtn = oldCalcBtn.cloneNode(true);
@@ -623,8 +709,6 @@
             });
         }
 
-        // Attach listeners for new result buttons
-        // (These are new DOM elements from injectCalculatorUI, no old listeners)
         var addBtn = document.getElementById('add-suggestion-btn');
         if (addBtn) {
             addBtn.addEventListener('click', function () {
@@ -642,7 +726,6 @@
             });
         }
 
-        // Keep orientation preview working
         var orientSel = document.getElementById('orientation');
         if (orientSel) {
             orientSel.addEventListener('change', function () {
@@ -657,10 +740,24 @@
             });
         }
 
+        // Listen for changes from the main color grid so the calc stays in sync
+        var mainColorGrid = document.getElementById('color-grid');
+        if (mainColorGrid) {
+            var observer = new MutationObserver(function () {
+                var activeCard = mainColorGrid.querySelector('.color-card.selected');
+                if (activeCard) {
+                    var newColor = activeCard.getAttribute('data-color');
+                    if (newColor && newColor !== calcSelectedColor) {
+                        updateCalcColorSelection(newColor);
+                    }
+                }
+            });
+            observer.observe(mainColorGrid, { subtree: true, attributes: true, attributeFilter: ['class'] });
+        }
+
         console.log('[DeckCalc] Ready. Board width: ' + BOARD_WIDTH_INCH + '"  Gap: ' + GAP_INCH + '"  Effective: ' + EFFECTIVE_FT.toFixed(6) + ' ft/board');
     }
 
-    // Run after a short delay to ensure main HTML script has finished
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', function () {
             setTimeout(init, 50);
