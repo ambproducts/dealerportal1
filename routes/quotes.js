@@ -732,32 +732,33 @@ router.post('/:id/submit', (req, res) => {
 
 // =============================================================
 // DELETE /api/quotes/:id
-// Recalculates customer stats after deletion
+// GM + Admin only. Soft-deletes any quote (all statuses).
+// Records audit trail: deletedBy, deletedByRole, deletedAt.
+// Recalculates customer stats after deletion.
 // =============================================================
-router.delete('/:id', (req, res) => {
+router.delete('/:id', requireRole('admin', 'gm'), (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
-    const idx = quotes.findIndex(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
+    const idx = req.user.role === 'admin'
+        ? quotes.findIndex(q => q.id === req.params.id && !q.deleted)
+        : quotes.findIndex(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
     if (idx === -1) return res.status(404).json({ error: 'Quote not found' });
 
-    // Frontdesk can only delete their own quotes
-    if (req.user.role === 'frontdesk' && quotes[idx].createdBy !== req.user.username) {
-        return res.status(403).json({ error: 'Access denied' });
-    }
-
-    if (quotes[idx].status !== 'draft') {
-        return res.status(400).json({ error: 'Only draft quotes can be deleted' });
-    }
-
-    const removed = quotes.splice(idx, 1)[0];
+    // Soft delete with audit trail
+    quotes[idx].deleted = true;
+    quotes[idx].deletedBy = req.user.username;
+    quotes[idx].deletedByRole = req.user.role;
+    quotes[idx].deletedAt = new Date().toISOString();
+    quotes[idx].updatedAt = new Date().toISOString();
     writeJSON(QUOTES_FILE, quotes);
 
-    // Recalculate customer stats since a quote was removed
-    const custId = removed.customer ? removed.customer.customerId : null;
+    // Recalculate customer stats since a quote was soft-deleted
+    const custId = quotes[idx].customer ? quotes[idx].customer.customerId : null;
     if (custId) {
         recalcCustomerStats(custId);
     }
 
-    res.json({ message: 'Quote ' + removed.quoteNumber + ' deleted' });
+    console.log('[Quotes] Soft-deleted: ' + quotes[idx].quoteNumber + ' by ' + req.user.username + ' (' + req.user.role + ')');
+    res.json({ message: 'Quote ' + quotes[idx].quoteNumber + ' deleted' });
 });
 
 // =============================================================

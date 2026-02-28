@@ -1,7 +1,16 @@
 // ============================================================
-// AmeriDex Dealer Portal - Quotes & Customers Page v2.4
+// AmeriDex Dealer Portal - Quotes & Customers Page v2.5
 // Date: 2026-02-28
 // ============================================================
+// v2.5 Changes:
+//   - FEAT: Delete button now only visible to GM and Admin roles.
+//     Frontdesk users see no delete button at all.
+//   - FEAT: Added softDeleteQuote() function with confirmation
+//     dialog that calls DELETE /api/quotes/:id.
+//   - Backend now soft-deletes (sets deleted:true) instead of
+//     hard-removing the quote, preserving audit trail.
+//   - GM/Admin can delete quotes in any status (not just draft).
+//
 // v2.4 Changes:
 //   - FIX: Hide dealer scope bar on Quotes tab for GM role.
 //     GM quotes are always scoped to own dealer; the Global
@@ -501,6 +510,46 @@
     }
 
     // ============================================================
+    // SOFT DELETE QUOTE (GM/Admin only)
+    // ============================================================
+    function softDeleteQuote(quoteId) {
+        var headers = { 'Content-Type': 'application/json' };
+        if (authToken) {
+            headers['Authorization'] = 'Bearer ' + authToken;
+        } else if (dealerCode) {
+            headers['X-Dealer-Code'] = dealerCode;
+        }
+
+        fetch(API_BASE + '/api/quotes/' + quoteId, {
+            method: 'DELETE',
+            headers: headers
+        })
+        .then(function (res) {
+            if (res.status === 403) {
+                alert('Access denied. Only GM and Admin roles can delete quotes.');
+                throw new Error('Forbidden');
+            }
+            if (!res.ok) {
+                return res.json().then(function (errData) {
+                    throw new Error(errData.error || 'Delete failed');
+                });
+            }
+            return res.json();
+        })
+        .then(function (result) {
+            alert(result.message || 'Quote deleted successfully.');
+            quotesState.allData = null;
+            fetchQuotes();
+        })
+        .catch(function (err) {
+            if (err.message !== 'Forbidden') {
+                alert('Failed to delete quote: ' + err.message);
+            }
+            console.error('[QuotesPage] Delete error:', err);
+        });
+    }
+
+    // ============================================================
     // QUOTES TABLE (replaces card grid)
     // ============================================================
     function renderQuotesTable(data) {
@@ -513,6 +562,7 @@
         }
 
         var showDealerCol = showQuotesDealerColumn();
+        var canDelete = isElevatedRole();
 
         var html = '<div class="data-table-wrap">';
         html += '<table class="data-table">';
@@ -569,10 +619,13 @@
                 html += '<td><span class="' + dealerTagClass + '">' + escapeHTML(qDealer) + '</span></td>';
             }
 
-            // Actions (v2.3: pass quoteNumber instead of server _id)
+            // Actions
             html += '<td class="dt-actions">';
             html += '<a href="dealer-portal.html?quoteId=' + encodeURIComponent(openParam) + '" class="btn btn-primary btn-xs">Open</a> ';
             html += '<button class="btn btn-outline btn-xs" data-duplicate="' + escapeHTML(q.id) + '">Duplicate</button>';
+            if (canDelete) {
+                html += ' <button class="btn btn-danger btn-xs" data-delete="' + escapeHTML(q.id) + '" data-quote-num="' + escapeHTML(quoteNum) + '">Delete</button>';
+            }
             html += '</td>';
 
             html += '</tr>';
@@ -591,6 +644,16 @@
                 var quoteId = btn.getAttribute('data-duplicate');
                 if (!confirm('Duplicate this quote?')) return;
                 duplicateQuote(quoteId);
+            });
+        });
+
+        // Wire up delete buttons (GM/Admin only)
+        contentEl.querySelectorAll('[data-delete]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var quoteId = btn.getAttribute('data-delete');
+                var quoteNum = btn.getAttribute('data-quote-num');
+                if (!confirm('Are you sure you want to delete quote ' + quoteNum + '?\n\nThis will soft-delete the quote. It will no longer appear in listings.')) return;
+                softDeleteQuote(quoteId);
             });
         });
     }
