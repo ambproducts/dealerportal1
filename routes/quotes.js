@@ -167,6 +167,8 @@ router.get('/pending-overrides', requireRole('admin', 'gm'), (req, res) => {
 //   search     (string, fuzzy match on customer name/company/email/quoteNumber/notes)
 //   since      (ISO date string, quotes updated on or after this date)
 //   customerId (string, filter by customer ID)
+//   scope      (string, 'global' = admin sees all dealers)
+//   dealerCode (string, admin filter to specific dealer)
 //
 // Backward compatible: If 'page' is NOT provided, returns the
 // raw array exactly as before so existing dealer-portal.html
@@ -180,8 +182,19 @@ router.get('/pending-overrides', requireRole('admin', 'gm'), (req, res) => {
 // =============================================================
 router.get('/', (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
-    // Filter to this dealer's non-deleted quotes
-    let mine = quotes.filter(q => q.dealerCode === req.user.dealerCode && !q.deleted);
+
+    // --- DEALER SCOPE (Admin can view globally) ---
+    const scopeParam = (req.query.scope || '').trim().toLowerCase();
+    const scopeDealerCode = (req.query.dealerCode || '').trim().toUpperCase();
+    let mine;
+
+    if (req.user.role === 'admin' && scopeParam === 'global') {
+        mine = quotes.filter(q => !q.deleted);
+    } else if (req.user.role === 'admin' && scopeDealerCode) {
+        mine = quotes.filter(q => q.dealerCode === scopeDealerCode && !q.deleted);
+    } else {
+        mine = quotes.filter(q => q.dealerCode === req.user.dealerCode && !q.deleted);
+    }
 
     // Frontdesk users only see their own quotes
     if (req.user.role === 'frontdesk') {
@@ -282,10 +295,14 @@ router.get('/', (req, res) => {
 
 // =============================================================
 // GET /api/quotes/:id
+// Admin can view any quote (for cross-dealer global view).
+// Other roles scoped to their own dealer code.
 // =============================================================
 router.get('/:id', (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
-    const quote = quotes.find(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
+    const quote = req.user.role === 'admin'
+        ? quotes.find(q => q.id === req.params.id && !q.deleted)
+        : quotes.find(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
     if (!quote) return res.status(404).json({ error: 'Quote not found' });
 
     // Frontdesk can only see their own quotes
@@ -745,10 +762,14 @@ router.delete('/:id', (req, res) => {
 
 // =============================================================
 // POST /api/quotes/:id/duplicate
+// Admin can duplicate cross-dealer quotes; the duplicate is
+// assigned to the admin's own dealer code.
 // =============================================================
 router.post('/:id/duplicate', (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
-    const original = quotes.find(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
+    const original = req.user.role === 'admin'
+        ? quotes.find(q => q.id === req.params.id && !q.deleted)
+        : quotes.find(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
     if (!original) return res.status(404).json({ error: 'Quote not found' });
 
     const dup = JSON.parse(JSON.stringify(original));
@@ -762,6 +783,11 @@ router.post('/:id/duplicate', (req, res) => {
     dup.submittedAt = null;
     dup.reviewedAt = null;
     dup.approvedAt = null;
+
+    // Admin cross-dealer duplicate: assign to admin's own dealer
+    if (req.user.role === 'admin' && dup.dealerCode !== req.user.dealerCode) {
+        dup.dealerCode = req.user.dealerCode;
+    }
 
     // Clear all overrides on duplicated quote (start fresh)
     dup.lineItems.forEach(item => {
@@ -781,7 +807,7 @@ router.post('/:id/duplicate', (req, res) => {
         recalcCustomerStats(custId);
     }
 
-    console.log('[Quotes] Duplicated: ' + original.quoteNumber + ' -> ' + dup.quoteNumber);
+    console.log('[Quotes] Duplicated: ' + original.quoteNumber + ' -> ' + dup.quoteNumber + (dup.dealerCode !== original.dealerCode ? ' (reassigned to ' + dup.dealerCode + ')' : ''));
     res.status(201).json(dup);
 });
 
