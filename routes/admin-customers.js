@@ -1,11 +1,18 @@
 // ============================================================
-// routes/admin-customers.js - Admin Customer Management v3.2
-// Date: 2026-02-27
+// routes/admin-customers.js - Admin Customer Management v3.3
+// Date: 2026-02-28
 // ============================================================
 // Soft delete with undo for customers. Only admin/gm can access.
 // GM is scoped to their own dealer code for delete/restore.
 // Admin has unrestricted access across all dealers.
 // Deleting a customer cascade-soft-deletes their quotes.
+//
+// v3.3 Changes (2026-02-28):
+//   - FIX: Null-safe email handling in PUT /:id endpoint.
+//     Email is now optional on the quote form. If a customer
+//     has no email (null or empty string), the previous
+//     .toLowerCase().trim() call would throw TypeError.
+//     Now guarded with (value || '') before string methods.
 //
 // v3.2 Changes (2026-02-27):
 //   - ADD: POST /api/admin/customers/recalc-all endpoint to
@@ -145,6 +152,7 @@ router.post('/recalc-all', requireAdmin, (req, res) => {
 
 // -----------------------------------------------------------
 // PUT /api/admin/customers/:id - Update a customer
+// Email can be null or empty string (email is optional).
 // -----------------------------------------------------------
 router.put('/:id', (req, res) => {
     const customers = readJSON(CUSTOMERS_FILE);
@@ -157,7 +165,7 @@ router.put('/:id', (req, res) => {
     allowed.forEach(field => {
         if (req.body[field] !== undefined) {
             customers[idx][field] = field === 'email'
-                ? req.body[field].toLowerCase().trim()
+                ? (req.body[field] || '').toLowerCase().trim()
                 : req.body[field];
         }
     });
