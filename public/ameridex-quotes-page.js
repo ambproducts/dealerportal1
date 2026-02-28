@@ -1,7 +1,19 @@
 // ============================================================
-// AmeriDex Dealer Portal - Quotes & Customers Page v2.3
-// Date: 2026-02-27
+// AmeriDex Dealer Portal - Quotes & Customers Page v2.4
+// Date: 2026-02-28
 // ============================================================
+// v2.4 Changes:
+//   - FIX: Hide dealer scope bar on Quotes tab for GM role.
+//     GM quotes are always scoped to own dealer; the Global
+//     toggle was misleading because the backend enforces it.
+//   - FEAT: Admin global scope wired to backend. buildQuotesUrl
+//     now sends scope=global or dealerCode=X query params so
+//     the backend returns cross-dealer results for admin.
+//   - FEAT: Stats URL in fetchQuotes also includes scope params
+//     so the "Total Quotes" stat card reflects the scoped count.
+//   - FEAT: Conditional "Dealer" column in quotes table when
+//     admin is viewing in global or specific-dealer mode.
+//
 // v2.3 Changes:
 //   - FIX: Open button now passes q.quoteNumber (e.g. Q260228-EGJI)
 //     instead of q.id (MongoDB ObjectId) as the ?quoteId= parameter.
@@ -304,6 +316,13 @@
             return;
         }
 
+        // GM quotes are always scoped to own dealer (no Global toggle).
+        // GM can still use Global on the Customers tab.
+        if (containerId === 'quotes-dealer-scope' && userRole === 'gm') {
+            container.innerHTML = '';
+            return;
+        }
+
         var isLocal = dealerScope.mode === 'local';
         var isGlobal = dealerScope.mode === 'global';
 
@@ -396,6 +415,27 @@
     }
 
     // ============================================================
+    // Helper: should we show the Dealer column in quotes table?
+    // Only when admin is viewing cross-dealer (global or specific).
+    // ============================================================
+    function showQuotesDealerColumn() {
+        return userRole === 'admin' && dealerScope.mode !== 'local';
+    }
+
+    // ============================================================
+    // Helper: build scope query string fragment for admin.
+    // Returns '' for non-admin or local mode.
+    // ============================================================
+    function buildAdminScopeParams() {
+        if (userRole !== 'admin') return '';
+        if (dealerScope.mode === 'global') return '&scope=global';
+        if (dealerScope.mode === 'specific' && dealerScope.filterCode) {
+            return '&dealerCode=' + encodeURIComponent(dealerScope.filterCode);
+        }
+        return '';
+    }
+
+    // ============================================================
     // QUOTES
     // ============================================================
     function buildQuotesUrl() {
@@ -404,6 +444,16 @@
             'limit=' + quotesState.limit,
             'sort=' + encodeURIComponent(quotesState.sort)
         ];
+
+        // Admin global scope: tell backend to return cross-dealer results
+        if (userRole === 'admin') {
+            if (dealerScope.mode === 'global') {
+                params.push('scope=global');
+            } else if (dealerScope.mode === 'specific' && dealerScope.filterCode) {
+                params.push('dealerCode=' + encodeURIComponent(dealerScope.filterCode));
+            }
+        }
+
         if (quotesState.status) params.push('status=' + encodeURIComponent(quotesState.status));
         if (quotesState.search) params.push('search=' + encodeURIComponent(quotesState.search));
         if (quotesState.since) params.push('since=' + encodeURIComponent(quotesState.since));
@@ -423,7 +473,8 @@
                     fetchQuotes();
                 });
                 if (!quotesState.allData) {
-                    apiFetch('/api/quotes?page=1&limit=1')
+                    var statsUrl = '/api/quotes?page=1&limit=1' + buildAdminScopeParams();
+                    apiFetch(statsUrl)
                         .then(function (statsData) {
                             quotesState.allData = statsData;
                             renderQuotesStats(statsData.pagination, data.pagination);
@@ -461,10 +512,13 @@
             return;
         }
 
+        var showDealerCol = showQuotesDealerColumn();
+
         var html = '<div class="data-table-wrap">';
         html += '<table class="data-table">';
         html += '<thead><tr>';
         html += buildSortableHeader(quoteSortColumns, quotesState.sort);
+        if (showDealerCol) html += '<th>Dealer</th>';
         html += '<th>Actions</th>';
         html += '</tr></thead>';
         html += '<tbody>';
@@ -506,6 +560,14 @@
 
             // Date
             html += '<td class="dt-date">' + escapeHTML(dateStr) + '</td>';
+
+            // Dealer (conditional, admin global/specific only)
+            if (showDealerCol) {
+                var qDealer = q.dealerCode || '';
+                var isMyDealer = qDealer === dealerCode;
+                var dealerTagClass = isMyDealer ? 'dealer-tag dealer-tag-mine' : 'dealer-tag';
+                html += '<td><span class="' + dealerTagClass + '">' + escapeHTML(qDealer) + '</span></td>';
+            }
 
             // Actions (v2.3: pass quoteNumber instead of server _id)
             html += '<td class="dt-actions">';
