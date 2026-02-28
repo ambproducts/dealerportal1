@@ -1,12 +1,25 @@
 // ============================================================
-// AmeriDex Dealer Portal - API Integration Patch v2.16
-// Date: 2026-02-27
+// AmeriDex Dealer Portal - API Integration Patch v2.17
+// Date: 2026-02-28
 // ============================================================
 // REQUIRES: ameridex-patches.js (v1.0+) loaded first
 //
 // Load order in dealer-portal.html (before </body>):
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
+//
+// v2.17 Changes (2026-02-28):
+//   - FIX: applyTierPricing() (Section 5) now stores
+//     PRODUCTS[key].basePrice from the server response. This is
+//     the true catalog price before any dealer-specific adjustment.
+//     Same for PRODUCT_CONFIG.categories entries.
+//   - FIX: syncQuoteToServer() (Section 6b) no longer divides by
+//     tier.multiplier to recover catalog base price. It reads
+//     prod.basePrice directly (set by applyTierPricing above).
+//     Since per-dealer pricing made multiplier always 1.0, the old
+//     division caused basePrice and price to be identical in saved
+//     quotes. Now basePrice = catalog, price = dealer-specific.
+//   - REMOVE: tierMultiplier variable from syncQuoteToServer().
 //
 // v2.16 Changes (2026-02-27):
 //   - FIX: applyQuoteToDOM() in loadQuoteFromUrlParam() (Section 18)
@@ -489,7 +502,11 @@
 
 
     // ----------------------------------------------------------
-    // 5. TIER PRICING: Fetch and apply
+    // 5. TIER PRICING: Fetch and apply (v2.17)
+    // ----------------------------------------------------------
+    // v2.17: Now stores both price (dealer-specific) and basePrice
+    // (catalog) on each PRODUCTS entry. syncQuoteToServer() reads
+    // basePrice to send the true catalog price in saved quotes.
     // ----------------------------------------------------------
     function isValidPrice(val) {
         if (val === undefined || val === null) return false;
@@ -508,12 +525,22 @@
                     } else if (PRODUCTS[key] && !isValidPrice(data.products[key].price)) {
                         console.warn('[Pricing] Server returned invalid price for "' + key + '": ' + data.products[key].price + '. Keeping default: $' + PRODUCTS[key].price);
                     }
+                    // v2.17: Store catalog base price separately for quote sync
+                    if (PRODUCTS[key] && data.products[key].basePrice !== undefined
+                        && isValidPrice(data.products[key].basePrice)) {
+                        PRODUCTS[key].basePrice = parseFloat(data.products[key].basePrice);
+                    }
                 });
 
                 Object.values(PRODUCT_CONFIG.categories).forEach(function (cat) {
                     Object.keys(cat.products).forEach(function (prodKey) {
                         if (data.products[prodKey] && isValidPrice(data.products[prodKey].price)) {
                             cat.products[prodKey].price = parseFloat(data.products[prodKey].price);
+                        }
+                        // v2.17: Store catalog base price
+                        if (data.products[prodKey] && data.products[prodKey].basePrice !== undefined
+                            && isValidPrice(data.products[prodKey].basePrice)) {
+                            cat.products[prodKey].basePrice = parseFloat(data.products[prodKey].basePrice);
                         }
                     });
                 });
@@ -614,7 +641,12 @@
 
 
     // ----------------------------------------------------------
-    // 6b. QUOTE SYNC: Server with localStorage fallback
+    // 6b. QUOTE SYNC: Server with localStorage fallback (v2.17)
+    // ----------------------------------------------------------
+    // v2.17: syncQuoteToServer() now reads prod.basePrice directly
+    // instead of dividing by tier multiplier. The multiplier is
+    // always 1.0 under per-dealer pricing, which caused basePrice
+    // and price to be identical in saved quotes.
     // ----------------------------------------------------------
     function loadServerQuotes() {
         return api('GET', '/api/quotes')
@@ -666,29 +698,29 @@
     function syncQuoteToServer(quote) {
         if (!_authToken) return Promise.resolve(null);
 
-        var tierMultiplier = (window._currentTier && window._currentTier.multiplier)
-            ? window._currentTier.multiplier : 1;
-
         var mappedLineItems = quote.lineItems.map(function (li) {
             var prod = (typeof PRODUCTS !== 'undefined' && PRODUCTS[li.type])
                 ? PRODUCTS[li.type] : null;
-            var tierAdjustedPrice = (typeof getItemPrice === 'function') ? getItemPrice(li) : 0;
+            var dealerPrice = (typeof getItemPrice === 'function') ? getItemPrice(li) : 0;
             var subtotal = (typeof getItemSubtotal === 'function') ? getItemSubtotal(li) : 0;
 
-            var originalBase;
+            // v2.17: Read catalog base price directly from PRODUCTS[].basePrice
+            // which is set by applyTierPricing() from the server's basePrice field.
+            // Previously this divided dealerPrice by tier.multiplier, but per-dealer
+            // pricing made multiplier always 1.0, causing basePrice === price.
+            var catalogBase;
             if (li.type === 'custom' || !prod) {
-                originalBase = parseFloat(li.customUnitPrice) || tierAdjustedPrice;
-            } else if (tierMultiplier && tierMultiplier !== 1) {
-                originalBase = Math.round((tierAdjustedPrice / tierMultiplier) * 100) / 100;
+                catalogBase = parseFloat(li.customUnitPrice) || dealerPrice;
             } else {
-                originalBase = tierAdjustedPrice;
+                catalogBase = (prod && prod.basePrice !== undefined)
+                    ? parseFloat(prod.basePrice) : dealerPrice;
             }
 
             return {
                 productId: li.productId || li.type || '',
                 productName: li.productName || (prod ? prod.name : '') || li.type || 'Custom Item',
-                basePrice: originalBase,
-                price: originalBase,
+                basePrice: Math.round(catalogBase * 100) / 100,
+                price: Math.round(dealerPrice * 100) / 100,
                 quantity: parseInt(li.qty, 10) || parseInt(li.quantity, 10) || 1,
                 length: li.length || null,
                 customLength: li.customLength || null,
@@ -1354,5 +1386,5 @@
 
     loadQuoteFromUrlParam();
 
-    console.log('[AmeriDex API] v2.16 loaded: Auth + API integration active.');
+    console.log('[AmeriDex API] v2.17 loaded: Auth + API integration active.');
 })();
