@@ -1,21 +1,24 @@
 // ============================================================
-// routes/admin-dealers.js - Admin Dealer Management v2.0
-// Date: 2026-02-27
+// routes/admin-dealers.js - Admin Dealer Management v3.0
+// Date: 2026-02-28
 // ============================================================
-// v2.0 Changes (2026-02-27):
-//   - CHANGE: DELETE /:id now soft-deletes (sets isDeleted, deletedAt, etc.)
-//     and cascade-disables all users under that dealer code
-//   - ADD: GET /deleted returns soft-deleted dealers
-//   - ADD: POST /:id/restore to undo soft-delete and re-enable users
-//   - ADD: DELETE /:id/permanent for hard delete
-//   - ADD: POST /purge-expired to auto-clean records older than 30 days
-//   - FIX: GET / now filters out soft-deleted dealers by default
+// v3.0 Changes (2026-02-28):
+//   - REMOVE: pricingTier field from dealers
+//   - ADD: per-dealer pricing map (pricing: { productId: price })
+//   - ADD: GET /:id/pricing - view dealer pricing with product info
+//   - ADD: PUT /:id/pricing - update dealer-specific prices
+//   - ADD: POST /:id/pricing/reset - reset to base prices
+//   - ADD: POST /:id/pricing/copy-from/:sourceId - copy pricing
 // ============================================================
 
 const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
-const { readJSON, writeJSON, DEALERS_FILE, USERS_FILE, generateId } = require('../lib/helpers');
+const {
+    readJSON, writeJSON,
+    DEALERS_FILE, USERS_FILE, PRODUCTS_FILE,
+    generateId, buildDefaultPricing, getDealerPrice
+} = require('../lib/helpers');
 const { hashPassword } = require('../lib/password');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 
@@ -23,6 +26,10 @@ router.use(requireAuth, requireAdmin);
 
 // Soft-delete expiry: 30 days in milliseconds
 const PURGE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
+
+// ===========================================================
+// DEALER CRUD
+// ===========================================================
 
 // GET /api/admin/dealers (excludes soft-deleted)
 router.get('/', (req, res) => {
@@ -69,13 +76,12 @@ router.post('/purge-expired', (req, res) => {
 
     writeJSON(DEALERS_FILE, kept);
 
-    // Also purge associated soft-deleted users whose dealer was purged
     const purgedCodes = purged.map(p => p.dealerCode);
     if (purgedCodes.length > 0) {
         const users = readJSON(USERS_FILE);
         const keptUsers = users.filter(u => {
             if (u.isDeleted && purgedCodes.includes(u.dealerCode)) {
-                return false; // remove these too
+                return false;
             }
             return true;
         });
@@ -92,7 +98,7 @@ router.post('/purge-expired', (req, res) => {
 
 // POST /api/admin/dealers
 router.post('/', (req, res) => {
-    const { dealerCode, password, dealerName, contactPerson, email, phone, pricingTier, role, username } = req.body;
+    const { dealerCode, password, dealerName, contactPerson, email, phone, role, username } = req.body;
     if (!dealerCode || !password) {
         return res.status(400).json({ error: 'Dealer code and password required' });
     }
@@ -108,12 +114,10 @@ router.post('/', (req, res) => {
         return res.status(409).json({ error: 'Dealer code already exists' });
     }
 
-    // Determine GM username: use provided username or fall back to dealer code
     const gmUsername = (username && username.trim().length > 0)
         ? username.trim().toLowerCase()
         : dealerCode.toLowerCase();
 
-    // Check for duplicate username among non-deleted users
     const users = readJSON(USERS_FILE);
     if (users.find(u => !u.isDeleted && u.username.toLowerCase() === gmUsername)) {
         return res.status(409).json({ error: 'Username "' + gmUsername + '" already exists. Choose a different username.' });
@@ -127,7 +131,7 @@ router.post('/', (req, res) => {
         contactPerson: contactPerson || '',
         email: email || '',
         phone: phone || '',
-        pricingTier: pricingTier || 'standard',
+        pricing: buildDefaultPricing(),
         role: role || 'dealer',
         isActive: true,
         isDeleted: false,
@@ -187,7 +191,7 @@ router.put('/:id', (req, res) => {
     const idx = dealers.findIndex(d => d.id === req.params.id && !d.isDeleted);
     if (idx === -1) return res.status(404).json({ error: 'Dealer not found' });
 
-    const allowed = ['dealerName', 'contactPerson', 'email', 'phone', 'pricingTier', 'role', 'isActive'];
+    const allowed = ['dealerName', 'contactPerson', 'email', 'phone', 'role', 'isActive'];
     allowed.forEach(field => {
         if (req.body[field] !== undefined) dealers[idx][field] = req.body[field];
     });
@@ -203,16 +207,9 @@ router.delete('/:id', (req, res) => {
     const idx = dealers.findIndex(d => d.id === req.params.id && !d.isDeleted);
     if (idx === -1) return res.status(404).json({ error: 'Dealer not found' });
 
-    // Prevent deleting your own dealer account if applicable
-    if (req.user.dealerCode === dealers[idx].dealerCode && req.user.role === 'admin') {
-        // Allow admin to delete other dealers, but warn if it is their own
-        // Actually admins typically have a separate dealer code, so this is fine
-    }
-
     const now = new Date().toISOString();
     const dealerCode = dealers[idx].dealerCode;
 
-    // Soft-delete the dealer
     dealers[idx].isDeleted = true;
     dealers[idx].isActive = false;
     dealers[idx].deletedAt = now;
@@ -221,12 +218,10 @@ router.delete('/:id', (req, res) => {
     dealers[idx].previouslyActive = dealers[idx].isActive;
     writeJSON(DEALERS_FILE, dealers);
 
-    // Cascade: soft-delete all users under this dealer code
     const users = readJSON(USERS_FILE);
     let usersAffected = 0;
     users.forEach(u => {
         if (u.dealerCode === dealerCode && !u.isDeleted) {
-            // Don't delete the admin performing the action
             if (u.id === req.user.id) return;
             u.isDeleted = true;
             u.deletedAt = now;
@@ -251,7 +246,7 @@ router.delete('/:id', (req, res) => {
     });
 });
 
-// POST /api/admin/dealers/:id/restore - Restore soft-deleted dealer + users
+// POST /api/admin/dealers/:id/restore
 router.post('/:id/restore', (req, res) => {
     const dealers = readJSON(DEALERS_FILE);
     const idx = dealers.findIndex(d => d.id === req.params.id && d.isDeleted === true);
@@ -260,7 +255,6 @@ router.post('/:id/restore', (req, res) => {
     const now = new Date().toISOString();
     const dealerCode = dealers[idx].dealerCode;
 
-    // Restore the dealer
     dealers[idx].isDeleted = false;
     dealers[idx].isActive = true;
     dealers[idx].deletedAt = null;
@@ -270,7 +264,6 @@ router.post('/:id/restore', (req, res) => {
     dealers[idx].restoredBy = req.user.username;
     writeJSON(DEALERS_FILE, dealers);
 
-    // Restore cascade-deleted users under this dealer code
     const users = readJSON(USERS_FILE);
     let usersRestored = 0;
     users.forEach(u => {
@@ -300,7 +293,7 @@ router.post('/:id/restore', (req, res) => {
     });
 });
 
-// DELETE /api/admin/dealers/:id/permanent - Hard-delete permanently
+// DELETE /api/admin/dealers/:id/permanent
 router.delete('/:id/permanent', (req, res) => {
     const dealers = readJSON(DEALERS_FILE);
     const idx = dealers.findIndex(d => d.id === req.params.id);
@@ -310,7 +303,6 @@ router.delete('/:id/permanent', (req, res) => {
     const deleted = dealers.splice(idx, 1)[0];
     writeJSON(DEALERS_FILE, dealers);
 
-    // Also permanently remove all soft-deleted users under this dealer code
     const users = readJSON(USERS_FILE);
     const keptUsers = users.filter(u => {
         if (u.dealerCode === dealerCode && u.isDeleted) return false;
@@ -356,6 +348,136 @@ router.post('/:id/change-password', (req, res) => {
     dealers[idx].passwordHash = hashPassword(newPassword);
     writeJSON(DEALERS_FILE, dealers);
     res.json({ ok: true, message: 'Password updated successfully' });
+});
+
+// ===========================================================
+// PER-DEALER PRICING ENDPOINTS
+// ===========================================================
+
+// GET /api/admin/dealers/:id/pricing
+// Returns the dealer's pricing merged with product catalog info
+router.get('/:id/pricing', (req, res) => {
+    const dealers = readJSON(DEALERS_FILE);
+    const dealer = dealers.find(d => d.id === req.params.id && !d.isDeleted);
+    if (!dealer) return res.status(404).json({ error: 'Dealer not found' });
+
+    const products = readJSON(PRODUCTS_FILE);
+    const dealerPricing = dealer.pricing || {};
+
+    const result = products
+        .filter(p => p.isActive)
+        .sort((a, b) => a.sortOrder - b.sortOrder)
+        .map(p => ({
+            productId: p.id,
+            name: p.name,
+            category: p.category,
+            unit: p.unit,
+            basePrice: p.basePrice,
+            dealerPrice: dealerPricing[p.id] !== undefined ? dealerPricing[p.id] : p.basePrice,
+            isCustomized: dealerPricing[p.id] !== undefined && dealerPricing[p.id] !== p.basePrice
+        }));
+
+    res.json({
+        dealerId: dealer.id,
+        dealerCode: dealer.dealerCode,
+        dealerName: dealer.dealerName,
+        products: result
+    });
+});
+
+// PUT /api/admin/dealers/:id/pricing
+// Update one or more product prices for this dealer
+// Body: { "pricing": { "system": 7.50, "grooved": 5.25 } }
+router.put('/:id/pricing', (req, res) => {
+    const dealers = readJSON(DEALERS_FILE);
+    const idx = dealers.findIndex(d => d.id === req.params.id && !d.isDeleted);
+    if (idx === -1) return res.status(404).json({ error: 'Dealer not found' });
+
+    const { pricing } = req.body;
+    if (!pricing || typeof pricing !== 'object') {
+        return res.status(400).json({ error: 'Request body must include a "pricing" object' });
+    }
+
+    const products = readJSON(PRODUCTS_FILE);
+    const validProductIds = products.filter(p => p.isActive).map(p => p.id);
+
+    if (!dealers[idx].pricing) {
+        dealers[idx].pricing = buildDefaultPricing();
+    }
+
+    const errors = [];
+    Object.entries(pricing).forEach(([productId, price]) => {
+        if (!validProductIds.includes(productId)) {
+            errors.push('Unknown product: ' + productId);
+            return;
+        }
+        const numPrice = parseFloat(price);
+        if (isNaN(numPrice) || numPrice < 0) {
+            errors.push('Invalid price for ' + productId + ': must be a number >= 0');
+            return;
+        }
+        dealers[idx].pricing[productId] = Math.round(numPrice * 100) / 100;
+    });
+
+    if (errors.length > 0) {
+        return res.status(400).json({ error: 'Some prices were invalid', details: errors });
+    }
+
+    dealers[idx].pricingUpdatedAt = new Date().toISOString();
+    dealers[idx].pricingUpdatedBy = req.user.username;
+    writeJSON(DEALERS_FILE, dealers);
+
+    const { passwordHash, ...safe } = dealers[idx];
+    res.json({
+        message: 'Pricing updated for ' + dealers[idx].dealerCode,
+        dealer: safe
+    });
+});
+
+// POST /api/admin/dealers/:id/pricing/reset
+// Reset all dealer prices back to product base prices
+router.post('/:id/pricing/reset', (req, res) => {
+    const dealers = readJSON(DEALERS_FILE);
+    const idx = dealers.findIndex(d => d.id === req.params.id && !d.isDeleted);
+    if (idx === -1) return res.status(404).json({ error: 'Dealer not found' });
+
+    dealers[idx].pricing = buildDefaultPricing();
+    dealers[idx].pricingUpdatedAt = new Date().toISOString();
+    dealers[idx].pricingUpdatedBy = req.user.username;
+    writeJSON(DEALERS_FILE, dealers);
+
+    const { passwordHash, ...safe } = dealers[idx];
+    res.json({
+        message: 'Pricing reset to base prices for ' + dealers[idx].dealerCode,
+        dealer: safe
+    });
+});
+
+// POST /api/admin/dealers/:id/pricing/copy-from/:sourceId
+// Copy pricing from another dealer
+router.post('/:id/pricing/copy-from/:sourceId', (req, res) => {
+    const dealers = readJSON(DEALERS_FILE);
+    const targetIdx = dealers.findIndex(d => d.id === req.params.id && !d.isDeleted);
+    if (targetIdx === -1) return res.status(404).json({ error: 'Target dealer not found' });
+
+    const source = dealers.find(d => d.id === req.params.sourceId && !d.isDeleted);
+    if (!source) return res.status(404).json({ error: 'Source dealer not found' });
+
+    if (!source.pricing || Object.keys(source.pricing).length === 0) {
+        return res.status(400).json({ error: 'Source dealer has no custom pricing to copy' });
+    }
+
+    dealers[targetIdx].pricing = JSON.parse(JSON.stringify(source.pricing));
+    dealers[targetIdx].pricingUpdatedAt = new Date().toISOString();
+    dealers[targetIdx].pricingUpdatedBy = req.user.username;
+    dealers[targetIdx].pricingCopiedFrom = source.dealerCode;
+    writeJSON(DEALERS_FILE, dealers);
+
+    const { passwordHash, ...safe } = dealers[targetIdx];
+    res.json({
+        message: 'Pricing copied from ' + source.dealerCode + ' to ' + dealers[targetIdx].dealerCode,
+        dealer: safe
+    });
 });
 
 module.exports = router;

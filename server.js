@@ -1,6 +1,6 @@
 // ============================================================
 // AmeriDex Dealer Portal - Server Entry Point
-// Date: 2026-02-16
+// Date: 2026-02-28
 // ============================================================
 
 const express = require('express');
@@ -24,7 +24,7 @@ app.use('/api/auth', authRoutes);
 const userRoutes = require('./routes/users');
 app.use('/api/users', userRoutes);
 
-// Products (tier-adjusted pricing for dealers)
+// Products (dealer-priced)
 const productRoutes = require('./routes/products');
 app.use('/api/products', productRoutes);
 
@@ -36,7 +36,7 @@ app.use('/api/quotes', quoteRoutes);
 const customerRoutes = require('./routes/customers');
 app.use('/api/customers', customerRoutes);
 
-// Admin - Dealers
+// Admin - Dealers (includes per-dealer pricing endpoints)
 const adminDealerRoutes = require('./routes/admin-dealers');
 app.use('/api/admin/dealers', adminDealerRoutes);
 
@@ -48,7 +48,7 @@ app.use('/api/admin/quotes', adminQuoteRoutes);
 const adminProductRoutes = require('./routes/admin-products');
 app.use('/api/admin/products', adminProductRoutes);
 
-// Admin - Pricing Tiers
+// Admin - Pricing (deprecated stub, kept for backward compat)
 const adminPricingRoutes = require('./routes/admin-pricing');
 app.use('/api/admin/pricing-tiers', adminPricingRoutes);
 
@@ -61,7 +61,7 @@ const adminCustomerRoutes = require('./routes/admin-customers');
 app.use('/api/admin/customers', adminCustomerRoutes);
 
 // ----------------------------------------------------------
-// Fallback: serve index.html for SPA-like behavior
+// Health check + SPA fallback
 // ----------------------------------------------------------
 app.get('/api/health', (req, res) => {
     res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
