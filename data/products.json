@@ -5,7 +5,6 @@
     "category": "decking",
     "basePrice": 8.00,
     "unit": "ft",
-    "tierOverrides": {},
     "isActive": true,
     "sortOrder": 1
   },
@@ -15,7 +14,6 @@
     "category": "decking",
     "basePrice": 6.00,
     "unit": "ft",
-    "tierOverrides": {},
     "isActive": true,
     "sortOrder": 2
   },
@@ -25,7 +23,6 @@
     "category": "decking",
     "basePrice": 6.00,
     "unit": "ft",
-    "tierOverrides": {},
     "isActive": true,
     "sortOrder": 3
   },
@@ -35,7 +32,6 @@
     "category": "sealing",
     "basePrice": 2.00,
     "unit": "ft",
-    "tierOverrides": {},
     "isActive": true,
     "sortOrder": 4
   },
@@ -45,7 +41,6 @@
     "category": "fasteners",
     "basePrice": 37.00,
     "unit": "box",
-    "tierOverrides": {},
     "isActive": true,
     "sortOrder": 5
   },
@@ -55,7 +50,6 @@
     "category": "fasteners",
     "basePrice": 33.79,
     "unit": "box",
-    "tierOverrides": {},
     "isActive": true,
     "sortOrder": 6
   },
@@ -65,10 +59,6 @@
     "category": "hardware",
     "basePrice": 150.00,
     "unit": "each",
-    "tierOverrides": {
-      "preferred": { "multiplier": 1.0 },
-      "vip": { "multiplier": 1.0 }
-    },
     "isActive": true,
     "sortOrder": 7
   },
@@ -78,7 +68,6 @@
     "category": "custom",
     "basePrice": 0.00,
     "unit": "each",
-    "tierOverrides": {},
     "isActive": true,
     "sortOrder": 99
   }
