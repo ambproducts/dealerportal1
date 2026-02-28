@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Admin Panel Patch v2.0 - Per-Dealer Pricing Migration
+// AmeriDex Admin Panel Patch v2.1 - Per-Dealer Pricing Migration
 // Date: 2026-02-28
 // ============================================================
 // REQUIRES: ameridex-admin.js (v1.8+) loaded first
@@ -7,6 +7,17 @@
 // Load order (via script-loader.js position 17):
 //   ... ameridex-admin.js (position 11) ...
 //   ... ameridex-admin-patch.js (position 17)
+//
+// v2.1 Changes (2026-02-28):
+//   - FIX: saveDealerPrices() sends { pricing: {...} } instead of
+//     { prices: {...} } to match backend PUT contract.
+//   - FIX: onDealerSelected() parses GET response data.products[]
+//     array into flat { productId: price } map. Backend returns
+//     array of objects, not a flat map.
+//   - FIX: copyDealerPrices() re-fetches dealer pricing after
+//     copy-from succeeds (backend returns { dealer }, not prices).
+//   - FIX: Fallback copy path also uses parsePricingResponse().
+//   - ADD: parsePricingResponse() helper for consistent parsing.
 //
 // v2.0 Phase 2 (2026-02-28):
 //   - REPLACE: Phase 1 placeholder with full per-dealer pricing editor
@@ -67,6 +78,26 @@
         return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
+    // v2.1: Parse GET /api/admin/dealers/:id/pricing response into
+    // a flat { productId: price } map containing only overrides.
+    // Backend returns: { products: [ { productId, dealerPrice, isCustomized, ... } ] }
+    function parsePricingResponse(data) {
+        var map = {};
+        if (data && data.products && Array.isArray(data.products)) {
+            data.products.forEach(function (p) {
+                if (p.isCustomized) {
+                    map[p.productId] = p.dealerPrice;
+                }
+            });
+        } else if (data && data.pricing && typeof data.pricing === 'object') {
+            // Fallback: if backend ever returns { pricing: { id: price } } directly
+            Object.keys(data.pricing).forEach(function (pid) {
+                map[pid] = Number(data.pricing[pid]);
+            });
+        }
+        return map;
+    }
+
 
     // ----------------------------------------------------------
     // PATCH CSS (Phase 2 additions)
@@ -112,7 +143,7 @@
     var _patchDealers = [];
     var _patchProducts = [];
     var _selectedDealerId = null;
-    var _dealerPrices = {};      // { productId: price } from backend
+    var _dealerPrices = {};      // { productId: price } overrides only
     var _editedPrices = {};      // { productId: price } local edits
     var _backendAvailable = null; // null=unknown, true/false after first call
 
@@ -506,19 +537,15 @@
             '<div style="font-size:0.82rem;color:#6b7280;">Contact: ' + esc(dealer.contactPerson || 'N/A') + ' | ' + esc(dealer.email || 'N/A') + '</div>';
         }
 
-        // Try to fetch dealer-specific pricing from backend
+        // Fetch dealer-specific pricing from backend
         if (tableDiv) tableDiv.innerHTML = '<div class="admin-loading">Loading dealer prices...</div>';
 
         _api('GET', '/api/admin/dealers/' + dealerId + '/pricing')
             .then(function (data) {
                 _backendAvailable = true;
-                // data expected: { prices: { productId: price, ... } }
-                if (data && data.prices) {
-                    _dealerPrices = data.prices;
-                } else if (data && typeof data === 'object' && !data.prices) {
-                    // Maybe backend returns flat { productId: price }
-                    _dealerPrices = data;
-                }
+                // v2.1: Backend returns { products: [ {productId, dealerPrice, isCustomized} ] }
+                // Convert to flat override map via parsePricingResponse()
+                _dealerPrices = parsePricingResponse(data);
                 renderPriceTable();
             })
             .catch(function (err) {
@@ -527,7 +554,6 @@
 
                 if (status === 404 || msg.indexOf('404') !== -1 || msg.indexOf('not found') !== -1) {
                     _backendAvailable = false;
-                    // Endpoint not implemented yet. Show table with base prices as editable defaults.
                     _dealerPrices = {};
                     renderPriceTable();
                     patchAlert('dp-pricing-alert',
@@ -725,7 +751,7 @@
 
 
     // ----------------------------------------------------------
-    // Save dealer prices
+    // Save dealer prices (v2.1: sends { pricing } not { prices })
     // ----------------------------------------------------------
     function saveDealerPrices() {
         if (!_selectedDealerId) {
@@ -741,7 +767,7 @@
 
         // Build merged prices object: existing overrides + local edits
         var mergedPrices = {};
-        // Start with existing backend prices
+        // Start with existing backend overrides
         Object.keys(_dealerPrices).forEach(function (pid) {
             mergedPrices[pid] = Number(_dealerPrices[pid]);
         });
@@ -760,7 +786,8 @@
         var saveBtn = document.getElementById('dp-save-btn');
         if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving...'; }
 
-        _api('PUT', '/api/admin/dealers/' + _selectedDealerId + '/pricing', { prices: mergedPrices })
+        // v2.1: Send { pricing: {...} } to match backend contract
+        _api('PUT', '/api/admin/dealers/' + _selectedDealerId + '/pricing', { pricing: mergedPrices })
             .then(function () {
                 _dealerPrices = mergedPrices;
                 _editedPrices = {};
@@ -814,7 +841,6 @@
                 var status = err.status || err.statusCode || 0;
                 var msg = (err.message || String(err)).toLowerCase();
                 if (status === 404 || msg.indexOf('404') !== -1) {
-                    // Fallback: just clear local state
                     _dealerPrices = {};
                     _editedPrices = {};
                     renderPriceTable();
@@ -830,7 +856,7 @@
 
 
     // ----------------------------------------------------------
-    // Copy pricing from another dealer
+    // Copy pricing from another dealer (v2.1: re-fetch after copy)
     // ----------------------------------------------------------
     function copyDealerPrices() {
         if (!_selectedDealerId) return;
@@ -854,8 +880,13 @@
 
         // Try backend endpoint first
         _api('POST', '/api/admin/dealers/' + _selectedDealerId + '/pricing/copy-from/' + sourceId)
+            .then(function () {
+                // v2.1: Backend returns { dealer } not prices.
+                // Re-fetch to get the updated pricing state.
+                return _api('GET', '/api/admin/dealers/' + _selectedDealerId + '/pricing');
+            })
             .then(function (data) {
-                if (data && data.prices) _dealerPrices = data.prices;
+                _dealerPrices = parsePricingResponse(data);
                 _editedPrices = {};
                 renderPriceTable();
                 patchAlert('dp-pricing-alert', 'Prices copied from ' + esc(sourceLabel) + ' to ' + esc(targetLabel) + '.', 'success');
@@ -867,9 +898,8 @@
                     // Fallback: fetch source dealer's pricing and apply locally
                     _api('GET', '/api/admin/dealers/' + sourceId + '/pricing')
                         .then(function (data) {
-                            var sourcePrices = {};
-                            if (data && data.prices) sourcePrices = data.prices;
-                            else if (data && typeof data === 'object') sourcePrices = data;
+                            // v2.1: Use parsePricingResponse for consistent parsing
+                            var sourcePrices = parsePricingResponse(data);
 
                             // Apply as local edits
                             Object.keys(sourcePrices).forEach(function (pid) {
@@ -894,5 +924,5 @@
     }
 
 
-    console.log('[AdminPatch] v2.0 loaded: Phase 1 (tier removal) + Phase 2 (per-dealer pricing editor).');
+    console.log('[AdminPatch] v2.1 loaded: Phase 1 (tier removal) + Phase 2 (per-dealer pricing editor).');
 })();
