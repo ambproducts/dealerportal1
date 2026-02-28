@@ -1279,8 +1279,8 @@ const WARNING_DURATION = 30 * 1000;
 // ============================================
 // STATE
 // ============================================
-let dealerSettings = { dealerCode: '', dealerName: '', dealerContact: '', dealerPhone: '', lastLogin: null };
-let currentQuote = {
+var dealerSettings = { dealerCode: '', dealerName: '', dealerContact: '', dealerPhone: '', lastLogin: null };
+var currentQuote = {
     quoteId: null,
     status: 'draft',
     customer: { name: '', email: '', zipCode: '', company: '', phone: '' },
@@ -1291,19 +1291,19 @@ let currentQuote = {
     shippingAddress: '',
     deliveryDate: ''
 };
-let savedQuotes = [];
-let customerHistory = [];
-let deletedItems = [];
-let selectedColor1 = "Driftwood";
-let selectedColor2 = "Khaki";
-let currentMode = "quick";
-let lastCalculation = null;
-let deckLengthFt = 0;
-let deckWidthFt = 0;
-let idleTimer = null;
-let warningTimer = null;
-let countdownInterval = null;
-let countdownSeconds = 30;
+var savedQuotes = [];
+var customerHistory = [];
+var deletedItems = [];
+var selectedColor1 = "Driftwood";
+var selectedColor2 = "Khaki";
+var currentMode = "quick";
+var lastCalculation = null;
+var deckLengthFt = 0;
+var deckWidthFt = 0;
+var idleTimer = null;
+var warningTimer = null;
+var countdownInterval = null;
+var countdownSeconds = 30;
 
 // ============================================
 // STORAGE FUNCTIONS
