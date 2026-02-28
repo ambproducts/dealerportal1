@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - API Integration Patch v2.13
+// AmeriDex Dealer Portal - API Integration Patch v2.14
 // Date: 2026-02-27
 // ============================================================
 // REQUIRES: ameridex-patches.js (v1.0+) loaded first
@@ -7,6 +7,20 @@
 // Load order in dealer-portal.html (before </body>):
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
+//
+// v2.14 Changes (2026-02-27):
+//   - FIX: loadQuoteFromUrlParam() Section 18 applyQuoteToDOM()
+//     no longer calls mapServerLineItemToFrontend() on line items.
+//     Root cause: loadServerQuotes() already maps server items to
+//     frontend format. When opening a quote via ?quoteId= from the
+//     My Quotes tab, applyQuoteToDOM() would re-map already-mapped
+//     items. The mapper saw frontend-format objects, treated them
+//     as unknown product types, and returned corrupted or empty
+//     line items. Result: line items disappeared from the UI, and
+//     saving created a duplicate quote with $0.00 total.
+//     Fix: Line items from both GET /api/quotes/:id and from
+//     window.savedQuotes are already in frontend format. Skip the
+//     redundant mapping entirely.
 //
 // v2.13 Changes (2026-02-27):
 //   - FIX: syncQuoteToServer() now sends the original catalog base
@@ -1258,7 +1272,7 @@
 
 
     // ----------------------------------------------------------
-    // 18. LOAD QUOTE FROM URL PARAM (?quoteId=) (v2.10)
+    // 18. LOAD QUOTE FROM URL PARAM (?quoteId=) (v2.14)
     // ----------------------------------------------------------
     function loadQuoteFromUrlParam() {
         var urlParams = new URLSearchParams(window.location.search);
@@ -1266,9 +1280,11 @@
         if (!serverId) return;
 
         function applyQuoteToDOM(sq) {
-            var mappedLineItems = (sq.lineItems || []).map(function (serverLI) {
-                return mapServerLineItemToFrontend(serverLI) || serverLI;
-            }).filter(Boolean);
+            // v2.14: Line items from both the server API response and
+            // window.savedQuotes are already in frontend format. They were
+            // mapped by loadServerQuotes() when the session started. Do NOT
+            // call mapServerLineItemToFrontend() again or it will corrupt them.
+            var frontendLineItems = sq.lineItems || [];
 
             var mappedCustomer = mapServerCustomerToFrontend(sq.customer);
 
@@ -1278,7 +1294,7 @@
             window.currentQuote._serverId           = sq.id || sq._serverId || null;
             window.currentQuote.status              = sq.status || 'draft';
             window.currentQuote.customer            = mappedCustomer;
-            window.currentQuote.lineItems           = mappedLineItems;
+            window.currentQuote.lineItems           = frontendLineItems;
             window.currentQuote.options             = sq.options || { pictureFrame: false, stairs: false };
             window.currentQuote.specialInstructions = sq.specialInstructions || '';
             window.currentQuote.internalNotes       = sq.internalNotes || '';
@@ -1307,9 +1323,9 @@
             updateTotalAndFasteners();
             if (typeof updateCustomerProgress === 'function') updateCustomerProgress();
 
-            console.log('[v2.10] Loaded quote from URL param: '
+            console.log('[v2.14] Loaded quote from URL param: '
                 + (window.currentQuote.quoteId || serverId)
-                + ' | ' + mappedLineItems.length + ' line items');
+                + ' | ' + frontendLineItems.length + ' line items');
 
             try {
                 var cleanUrl = window.location.pathname;
@@ -1323,7 +1339,7 @@
                     applyQuoteToDOM(sq);
                 })
                 .catch(function (err) {
-                    console.warn('[v2.10] Server fetch failed for quoteId=' + serverId + ', falling back to savedQuotes[]:', err.message);
+                    console.warn('[v2.14] Server fetch failed for quoteId=' + serverId + ', falling back to savedQuotes[]:', err.message);
 
                     // v2.12: read window.savedQuotes for the live let binding
                     var found = window.savedQuotes.find(function (q) {
@@ -1334,7 +1350,7 @@
                     if (found) {
                         applyQuoteToDOM(found);
                     } else {
-                        console.error('[v2.10] Quote not found in savedQuotes[] either. quoteId=' + serverId);
+                        console.error('[v2.14] Quote not found in savedQuotes[] either. quoteId=' + serverId);
                     }
                 });
         }
@@ -1363,5 +1379,5 @@
 
     loadQuoteFromUrlParam();
 
-    console.log('[AmeriDex API] v2.13 loaded: Auth + API integration active.');
+    console.log('[AmeriDex API] v2.14 loaded: Auth + API integration active.');
 })();
