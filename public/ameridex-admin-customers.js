@@ -1,9 +1,10 @@
 // ============================================================
-// AmeriDex Dealer Portal - Admin Panel Customers Tab v3.2
+// AmeriDex Dealer Portal - Admin Panel Customers Tab v3.3
 // File: ameridex-admin-customers.js
 // Date: 2026-02-28
 // ============================================================
 // REWRITE v3: Non-destructive tab switching.
+// v3.3 (2026-02-28): Quote-customer matching name+zip fallback.
 // v3.2 (2026-02-28): Email no longer required in edit form save.
 // v3.1 (2026-02-14): Fixed token storage mismatch.
 //
@@ -22,6 +23,12 @@
 //   3. Intercept clicks on ALL sibling tabs so we can hide the
 //      Customers wrapper and restore the original wrapper before
 //      the original handler runs.
+//
+// v3.3 Changes (2026-02-28):
+//   - FIX: Customer enrichment loop now has a 5th matching clause
+//     for email-less customers: name + zip fallback. Only fires
+//     when c.email is falsy to prevent false-matching customers
+//     who share a name but have different emails.
 //
 // v3.2 Changes (2026-02-28):
 //   - FIX: showEdit() save handler no longer requires email.
@@ -230,7 +237,7 @@
         });
 
         _injected = true;
-        console.log('[ameridex-admin-customers] v3.2 Customers tab injected (non-destructive)');
+        console.log('[ameridex-admin-customers] v3.3 Customers tab injected (non-destructive)');
         return true;
     }
 
@@ -315,12 +322,24 @@
 
         // Enrich customers with quote data
         customers.forEach(c => {
-            c._quotes = quotes.filter(q =>
-                q.customerId === c.id ||
-                q.customerId === c._id ||
-                (q.customerEmail && c.email && q.customerEmail.toLowerCase() === c.email.toLowerCase()) ||
-                (q.customer && q.customer.email && c.email && q.customer.email.toLowerCase() === c.email.toLowerCase())
-            );
+            c._quotes = quotes.filter(q => {
+                // Clause 1-2: Direct ID match (most reliable)
+                if (q.customerId === c.id || q.customerId === c._id) return true;
+                // Clause 3-4: Email match (both sides must have email)
+                if (q.customerEmail && c.email && q.customerEmail.toLowerCase() === c.email.toLowerCase()) return true;
+                if (q.customer && q.customer.email && c.email && q.customer.email.toLowerCase() === c.email.toLowerCase()) return true;
+                // Clause 5: Name+zip fallback for email-less customers
+                // Only fires when customer has no email to avoid false-matching
+                // customers who share a name but have different email addresses.
+                if (!c.email && c.name && q.customer && q.customer.name) {
+                    var cName = c.name.toLowerCase().trim();
+                    var qName = q.customer.name.toLowerCase().trim();
+                    var cZip = (c.zipCode || c.zip || '');
+                    var qZip = (q.customer.zipCode || q.customer.zip || '');
+                    if (cName === qName && cZip === qZip) return true;
+                }
+                return false;
+            });
             c._quoteCount = c._quotes.length || c.quoteCount || 0;
             c._totalValue = c._quotes.reduce((sum, q) => sum + (q.totalAmount || q.total || 0), 0) || c.totalValue || 0;
         });
