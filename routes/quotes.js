@@ -15,6 +15,21 @@ function generateQuoteNumber() {
     return 'Q' + y + m + d + '-' + r;
 }
 
+// =============================================================
+// calcItemTotal
+// Computes a single line item's total, accounting for per-foot
+// products where total = price * qty * length.
+// Non-length items (length is null/0) use a multiplier of 1.
+// =============================================================
+function calcItemTotal(item) {
+    const rawLength = item.length;
+    const customLength = parseFloat(item.customLength) || 0;
+    const parsedLength = parseFloat(rawLength) || 0;
+    const effectiveLength = parsedLength > 0 ? parsedLength : customLength;
+    const lengthMultiplier = effectiveLength > 0 ? effectiveLength : 1;
+    return Math.round(item.price * item.quantity * lengthMultiplier * 100) / 100;
+}
+
 function recalcQuoteTotal(quote) {
     quote.totalAmount = quote.lineItems.reduce((sum, i) => sum + (i.total || 0), 0);
     quote.totalAmount = Math.round(quote.totalAmount * 100) / 100;
@@ -295,14 +310,21 @@ router.post('/', (req, res) => {
         const basePrice = parseFloat(item.basePrice || item.price) || 0;
         const tierPrice = Math.round(basePrice * tier.multiplier * 100) / 100;
         const qty = parseInt(item.quantity) || 1;
+        const length = item.length != null ? item.length : null;
+        const customLength = item.customLength != null ? item.customLength : null;
         return {
             productId: item.productId || '',
             productName: item.productName || '',
             quantity: qty,
+            length: length,
+            customLength: customLength,
             basePrice: basePrice,
             tierPrice: tierPrice,
             price: tierPrice,
-            total: Math.round(tierPrice * qty * 100) / 100,
+            total: calcItemTotal({ price: tierPrice, quantity: qty, length: length, customLength: customLength }),
+            color: item.color || '',
+            color2: item.color2 || '',
+            type: item.type || '',
             priceOverride: null
         };
     });
@@ -402,6 +424,8 @@ router.put('/:id', (req, res) => {
             const basePrice = parseFloat(item.basePrice || item.price) || 0;
             const tierPrice = Math.round(basePrice * tier.multiplier * 100) / 100;
             const qty = parseInt(item.quantity) || 1;
+            const length = item.length != null ? item.length : null;
+            const customLength = item.customLength != null ? item.customLength : null;
 
             // Preserve existing override if item has one
             const existingOverride = item.priceOverride || null;
@@ -415,10 +439,15 @@ router.put('/:id', (req, res) => {
                 productId: item.productId || '',
                 productName: item.productName || '',
                 quantity: qty,
+                length: length,
+                customLength: customLength,
                 basePrice: basePrice,
                 tierPrice: tierPrice,
                 price: effectivePrice,
-                total: Math.round(effectivePrice * qty * 100) / 100,
+                total: calcItemTotal({ price: effectivePrice, quantity: qty, length: length, customLength: customLength }),
+                color: item.color || '',
+                color2: item.color2 || '',
+                type: item.type || '',
                 priceOverride: existingOverride
             };
         });
@@ -503,7 +532,7 @@ router.post('/:id/items/:itemIndex/request-override', (req, res) => {
     // If auto-approved (GM/Admin), apply the price immediately
     if (isAutoApprover) {
         item.price = item.priceOverride.requestedPrice;
-        item.total = Math.round(item.price * item.quantity * 100) / 100;
+        item.total = calcItemTotal(item);
         recalcQuoteTotal(quote);
     }
 
@@ -561,7 +590,7 @@ router.post('/:id/items/:itemIndex/approve-override', requireRole('admin', 'gm')
 
     // Apply the overridden price
     item.price = item.priceOverride.requestedPrice;
-    item.total = Math.round(item.price * item.quantity * 100) / 100;
+    item.total = calcItemTotal(item);
 
     recalcQuoteTotal(quote);
     quote.hasPendingOverrides = quote.lineItems.some(
@@ -619,7 +648,7 @@ router.post('/:id/items/:itemIndex/reject-override', requireRole('admin', 'gm'),
 
     // Revert price to tier price
     item.price = item.tierPrice;
-    item.total = Math.round(item.price * item.quantity * 100) / 100;
+    item.total = calcItemTotal(item);
 
     recalcQuoteTotal(quote);
     quote.hasPendingOverrides = quote.lineItems.some(
@@ -738,7 +767,7 @@ router.post('/:id/duplicate', (req, res) => {
     dup.lineItems.forEach(item => {
         item.priceOverride = null;
         item.price = item.tierPrice;
-        item.total = Math.round(item.price * item.quantity * 100) / 100;
+        item.total = calcItemTotal(item);
     });
     dup.hasPendingOverrides = false;
     recalcQuoteTotal(dup);
