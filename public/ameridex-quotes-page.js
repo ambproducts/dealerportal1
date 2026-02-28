@@ -1,7 +1,13 @@
 // ============================================================
-// AmeriDex Dealer Portal - Quotes & Customers Page v2.2
+// AmeriDex Dealer Portal - Quotes & Customers Page v2.3
 // Date: 2026-02-27
 // ============================================================
+// v2.3 Changes:
+//   - FIX: Open button now passes q.quoteNumber (e.g. Q260228-EGJI)
+//     instead of q.id (MongoDB ObjectId) as the ?quoteId= parameter.
+//     This matches the portal-nav.js handler which searches
+//     savedQuotes by quoteId (frontend quote number).
+//
 // v2.2 Changes:
 //   - Quotes tab converted from card grid to table layout
 //     matching the customer table style
@@ -473,6 +479,11 @@
             var quoteNum = q.quoteNumber || q.quoteId || 'Draft';
             var dateStr = formatDate(q.updatedAt || q.createdAt);
 
+            // v2.3: Use quoteNumber for the Open link so portal-nav.js can
+            // match it against savedQuotes[].quoteId. Fall back to server
+            // _id for quotes that somehow lack a quoteNumber.
+            var openParam = q.quoteNumber || q.id;
+
             html += '<tr>';
 
             // Quote #
@@ -496,9 +507,9 @@
             // Date
             html += '<td class="dt-date">' + escapeHTML(dateStr) + '</td>';
 
-            // Actions
+            // Actions (v2.3: pass quoteNumber instead of server _id)
             html += '<td class="dt-actions">';
-            html += '<a href="dealer-portal.html?quoteId=' + encodeURIComponent(q.id) + '" class="btn btn-primary btn-xs">Open</a> ';
+            html += '<a href="dealer-portal.html?quoteId=' + encodeURIComponent(openParam) + '" class="btn btn-primary btn-xs">Open</a> ';
             html += '<button class="btn btn-outline btn-xs" data-duplicate="' + escapeHTML(q.id) + '">Duplicate</button>';
             html += '</td>';
 

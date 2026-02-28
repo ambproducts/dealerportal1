@@ -11,13 +11,22 @@
  *   2. Trims the saved-quotes list to show only 5 most recent
  *   3. Appends a "View All Quotes" link below the trimmed list
  *   4. Reads URL parameters to support deep-linking from quotes-customers.html:
- *      - ?quoteId=XXX      -> loads that quote
+ *      - ?quoteId=XXX      -> loads that quote (matches by quoteNumber or server _id)
  *      - ?newQuote=1        -> resets form for a fresh quote
  *      - ?custName=...      -> pre-fills customer name
  *      - ?custEmail=...     -> pre-fills customer email
  *      - ?custCompany=...   -> pre-fills customer company
  *      - ?custPhone=...     -> pre-fills customer phone
  *      - ?tab=customers     -> opens the customers panel
+ *
+ * v1.1 Changes (2026-02-27):
+ *   - FIX: quoteId handler now searches savedQuotes by BOTH quoteId (quote number)
+ *     AND _serverId (MongoDB ID) so links from quotes-customers.html work correctly.
+ *   - FIX: cleanUrlParams() moved inside success path only. Previously it wiped
+ *     the URL immediately before the setTimeout fired, preventing all fallbacks.
+ *   - ADD: ameridex-login retry. If savedQuotes hasn't loaded by the initial 200ms
+ *     attempt, retries once the login event fires (guarantees savedQuotes populated).
+ *   - ADD: 6-second safety timeout cleans URL if all retries fail.
  */
 
 (function portalNavPatch() {
@@ -165,22 +174,76 @@
     }
 
     // ?quoteId=XXX -> load that quote
+    // Supports both quoteNumber (e.g. Q260228-EGJI) and server _id (MongoDB ObjectId)
     var quoteId = params.get('quoteId');
-    if (quoteId && typeof window.savedQuotes !== 'undefined') {
-      setTimeout(function () {
+    if (quoteId) {
+      var _quoteLoadDone = false;
+
+      function tryLoadQuoteFromParam() {
+        if (_quoteLoadDone) return true;
+        if (typeof window.savedQuotes === 'undefined' || !window.savedQuotes || !window.savedQuotes.length) {
+          return false;
+        }
+
+        // Try 1: match by quoteId (frontend quote number like Q260228-EGJI)
         var idx = window.savedQuotes.findIndex(function (q) {
           return q.quoteId === quoteId;
         });
+
+        // Try 2: match by _serverId (MongoDB ObjectId)
+        if (idx < 0) {
+          idx = window.savedQuotes.findIndex(function (q) {
+            return q._serverId === quoteId;
+          });
+        }
+
+        // Try 3: match by _serverQuoteNumber (in case quoteId is the server quote number)
+        if (idx < 0) {
+          idx = window.savedQuotes.findIndex(function (q) {
+            return q._serverQuoteNumber === quoteId;
+          });
+        }
+
         if (idx >= 0 && typeof window.loadQuote === 'function') {
+          _quoteLoadDone = true;
+          console.log('[portal-nav v1.1] Loading quote at savedQuotes[' + idx + '] for param: ' + quoteId);
           window.loadQuote(idx);
-          // Scroll to customer section
+          cleanUrlParams();
           var custSection = document.getElementById('customer');
           if (custSection) {
             custSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
           }
+          return true;
+        }
+
+        return false;
+      }
+
+      // Attempt 1: try after short delay (savedQuotes may already be populated)
+      setTimeout(function () {
+        if (!tryLoadQuoteFromParam()) {
+          console.log('[portal-nav v1.1] Attempt 1 missed, waiting for ameridex-login...');
         }
       }, 200);
-      cleanUrlParams();
+
+      // Attempt 2: retry when ameridex-login fires (savedQuotes guaranteed loaded by then)
+      window.addEventListener('ameridex-login', function _onLoginNav() {
+        window.removeEventListener('ameridex-login', _onLoginNav);
+        setTimeout(function () {
+          if (!tryLoadQuoteFromParam()) {
+            console.warn('[portal-nav v1.1] Attempt 2 (post-login) also failed for: ' + quoteId);
+          }
+        }, 100);
+      });
+
+      // Safety net: clean URL after 6 seconds even if we could not find the quote
+      setTimeout(function () {
+        if (!_quoteLoadDone) {
+          console.warn('[portal-nav v1.1] Could not load quote for param: ' + quoteId + ' after all retries. Cleaning URL.');
+          cleanUrlParams();
+        }
+      }, 6000);
+
       return;
     }
 
