@@ -1,9 +1,10 @@
 // ============================================================
-// AmeriDex Dealer Portal - Admin Panel Customers Tab v3.1
+// AmeriDex Dealer Portal - Admin Panel Customers Tab v3.2
 // File: ameridex-admin-customers.js
-// Date: 2026-02-14
+// Date: 2026-02-28
 // ============================================================
 // REWRITE v3: Non-destructive tab switching.
+// v3.2 (2026-02-28): Email no longer required in edit form save.
 // v3.1 (2026-02-14): Fixed token storage mismatch.
 //
 // Root cause of v2 bug:
@@ -21,6 +22,12 @@
 //   3. Intercept clicks on ALL sibling tabs so we can hide the
 //      Customers wrapper and restore the original wrapper before
 //      the original handler runs.
+//
+// v3.2 Changes (2026-02-28):
+//   - FIX: showEdit() save handler no longer requires email.
+//     Old: if (!updates.name || !updates.email)
+//     New: if (!updates.name)
+//     Email is optional across the portal since 2026-02-28.
 //
 // v3.1 Fix:
 //   Token storage mismatch: replaced localStorage.getItem with
@@ -223,7 +230,7 @@
         });
 
         _injected = true;
-        console.log('[ameridex-admin-customers] v3.1 Customers tab injected (non-destructive)');
+        console.log('[ameridex-admin-customers] v3.2 Customers tab injected (non-destructive)');
         return true;
     }
 
@@ -607,7 +614,7 @@
                     zipCode: document.getElementById('edit-cust-zip').value.trim(),
                     notes: document.getElementById('edit-cust-notes').value
                 };
-                if (!updates.name || !updates.email) { alert('Name and email are required.'); return; }
+                if (!updates.name) { alert('Name is required.'); return; }
 
                 const _api = window.ameridexAPI;
                 if (!_api) { alert('API helper unavailable'); return; }
