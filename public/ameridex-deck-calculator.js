@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - Advanced Deck Calculator v1.2
+// AmeriDex Dealer Portal - Advanced Deck Calculator v1.3
 // File: ameridex-deck-calculator.js
 // Date: 2026-02-28
 // ============================================================
@@ -12,7 +12,7 @@
 // calculated. Dealers add it manually when needed.
 //
 // Key features:
-//   - Inline color picker integrated into the calculator
+//   - Inline color picker with full-screen preview on click
 //   - Multi-option comparison (12', 16', 20', custom)
 //   - Custom length rounding: whole foot preferred, .5' when
 //     it saves significant waste
@@ -27,7 +27,7 @@
     // === CONSTANTS ===
     var BOARD_WIDTH_INCH = 5.5;
     var GAP_INCH = 0.125;
-    var EFFECTIVE_FT = (BOARD_WIDTH_INCH + GAP_INCH) / 12; // 0.46875 ft
+    var EFFECTIVE_FT = (BOARD_WIDTH_INCH + GAP_INCH) / 12;
     var STD_LENGTHS = [12, 16, 20];
     var SCREWS_PER_BOX = 375;
     var PLUGS_PER_BOX = 375;
@@ -36,7 +36,7 @@
     // === STATE ===
     var currentCalcResult = null;
     var selectedOptionIndex = null;
-    var calcSelectedColor = null; // color selected inside the calculator
+    var calcSelectedColor = null;
 
     // === CUSTOM LENGTH ROUNDING ===
     function getCustomLength(spanFt) {
@@ -166,19 +166,32 @@
     }
 
     // === GET ACTIVE COLOR ===
-    // Returns the color selected inside the calculator, falling back
-    // to the global selectedColor1 set by the main color grid.
     function getActiveColor() {
         return calcSelectedColor || window.selectedColor1 || 'Driftwood';
+    }
+
+    // === OPEN FULL-SCREEN COLOR PREVIEW ===
+    function openColorPreview(colorName) {
+        var modal = document.getElementById('colorModal');
+        var modalImg = document.getElementById('colorLarge');
+        var modalName = document.getElementById('colorName');
+        if (!modal || !modalImg) return;
+
+        var colorImages = window.COLORIMAGES || {};
+        var imgSrc = 'colors/' + (colorImages[colorName] || colorName + '.png');
+
+        modalImg.src = imgSrc;
+        modalImg.alt = colorName;
+        if (modalName) modalName.textContent = colorName;
+        modal.classList.add('active');
     }
 
     // === COLOR PICKER: UPDATE SELECTION STATE ===
     function updateCalcColorSelection(colorName) {
         calcSelectedColor = colorName;
-        // Sync to global so line items also pick it up
         window.selectedColor1 = colorName;
 
-        // Update the main color grid selection to stay in sync
+        // Sync the main color grid
         document.querySelectorAll('#color-grid .color-card').forEach(function (card) {
             card.classList.toggle('selected', card.getAttribute('data-color') === colorName);
         });
@@ -186,10 +199,17 @@
             window.updateColorComparison();
         }
 
-        // Update inline swatches
+        // Update all inline swatch states (class-driven, no inline style mutation)
         var swatches = document.querySelectorAll('#calc-color-swatches .calc-color-swatch');
         swatches.forEach(function (s) {
-            s.classList.toggle('active', s.getAttribute('data-color') === colorName);
+            var isThis = (s.getAttribute('data-color') === colorName);
+            s.classList.toggle('active', isThis);
+
+            // Update the label color
+            var label = s.querySelector('.calc-swatch-label');
+            if (label) {
+                label.style.color = isThis ? '#2563eb' : '#6b7280';
+            }
         });
 
         // Update inline preview
@@ -203,7 +223,7 @@
             previewLabel.textContent = colorName;
         }
 
-        // Update the result summary color chip if results are visible
+        // Update result color chip if visible
         var colorChip = document.getElementById('calc-result-color-chip');
         if (colorChip) {
             colorChip.textContent = colorName;
@@ -222,20 +242,18 @@
         var orientationRow = fieldRows.length >= 2 ? fieldRows[1] : null;
         if (!orientationRow) return;
 
-        // Don't inject twice
         if (document.getElementById('calc-color-row')) return;
 
-        // Initialize calcSelectedColor from global
         calcSelectedColor = window.selectedColor1 || 'Driftwood';
 
-        // --- Color Picker Row (injected after orientation row) ---
+        // --- Color Picker Row ---
         var colorRow = document.createElement('div');
         colorRow.id = 'calc-color-row';
         colorRow.style.cssText = 'margin-top:0.5rem;padding:1rem;background:#f9fafb;border-radius:10px;border:1px solid #e5e7eb';
 
         var colorLabel = '<label style="font-size:0.9rem;font-weight:600;color:#374151;margin-bottom:0.5rem;display:block">Board Color</label>';
 
-        // Build swatches from the global COLORS array
+        // Build swatches: ALL start with transparent border. Active state is class-only.
         var swatchesHtml = '<div id="calc-color-swatches" style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:flex-start">';
         var colors = window.COLORS || ['Driftwood', 'Khaki', 'Slate', 'Beachwood', 'Chestnut', 'Redwood', 'Hazelnut'];
         var colorImages = window.COLORIMAGES || {};
@@ -246,49 +264,78 @@
             swatchesHtml +=
                 '<div class="calc-color-swatch' + (isActive ? ' active' : '') + '" data-color="' + c + '" ' +
                     'style="cursor:pointer;text-align:center;width:72px;transition:transform 0.15s" ' +
-                    'title="' + c + '">' +
-                    '<div style="width:64px;height:44px;border-radius:8px;overflow:hidden;border:3px solid ' +
-                        (isActive ? '#2563eb' : 'transparent') +
-                        ';box-shadow:' + (isActive ? '0 0 0 2px rgba(37,99,235,0.25)' : '0 1px 3px rgba(0,0,0,0.1)') +
-                        ';transition:border-color 0.15s,box-shadow 0.15s">' +
+                    'title="Click to select, double-click for full preview">' +
+                    '<div class="calc-swatch-img" style="position:relative;width:64px;height:44px;border-radius:8px;overflow:hidden;' +
+                        'border:3px solid transparent;box-shadow:0 1px 3px rgba(0,0,0,0.1);transition:border-color 0.15s,box-shadow 0.15s">' +
                         '<img src="' + imgSrc + '" alt="' + c + '" ' +
-                            'style="width:100%;height:100%;object-fit:cover" ' +
+                            'style="width:100%;height:100%;object-fit:cover;display:block" ' +
                             'onerror="this.style.background=\'#d4a574\';this.style.display=\'block\'">' +
+                        '<div class="calc-swatch-expand" style="position:absolute;inset:0;display:flex;align-items:center;' +
+                            'justify-content:center;background:rgba(0,0,0,0.35);opacity:0;transition:opacity 0.15s;pointer-events:none">' +
+                            '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
+                                '<polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline>' +
+                                '<line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line>' +
+                            '</svg>' +
+                        '</div>' +
                     '</div>' +
-                    '<div style="font-size:0.7rem;font-weight:600;margin-top:0.25rem;color:' +
-                        (isActive ? '#2563eb' : '#6b7280') + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' +
+                    '<div class="calc-swatch-label" style="font-size:0.7rem;font-weight:600;margin-top:0.25rem;' +
+                        'color:' + (isActive ? '#2563eb' : '#6b7280') + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' +
                         c +
                     '</div>' +
                 '</div>';
         });
         swatchesHtml += '</div>';
 
-        // Preview panel beside swatches
+        // Preview panel
         var previewImgSrc = 'colors/' + (colorImages[calcSelectedColor] || calcSelectedColor + '.png');
         var previewHtml =
             '<div id="calc-color-preview" style="display:flex;align-items:center;gap:0.75rem;margin-top:0.75rem;' +
-                'padding:0.6rem 0.85rem;background:white;border-radius:8px;border:1px solid #e5e7eb">' +
+                'padding:0.6rem 0.85rem;background:white;border-radius:8px;border:1px solid #e5e7eb;cursor:pointer" ' +
+                'title="Click for full-screen preview">' +
                 '<img id="calc-color-preview-img" src="' + previewImgSrc + '" alt="' + calcSelectedColor + '" ' +
                     'style="width:56px;height:56px;border-radius:8px;object-fit:cover;border:1px solid #e5e7eb">' +
-                '<div>' +
+                '<div style="flex:1">' +
                     '<div style="font-size:0.78rem;color:#6b7280">Selected Color</div>' +
                     '<div id="calc-color-preview-label" style="font-size:1rem;font-weight:700;color:#111827">' +
                         calcSelectedColor +
                     '</div>' +
+                    '<div style="font-size:0.72rem;color:#9ca3af;margin-top:0.15rem">Tap preview to view full screen</div>' +
                 '</div>' +
+                '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0">' +
+                    '<polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline>' +
+                    '<line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line>' +
+                '</svg>' +
             '</div>';
 
         colorRow.innerHTML = colorLabel + swatchesHtml + previewHtml;
         orientationRow.parentNode.insertBefore(colorRow, orientationRow.nextSibling);
 
-        // Attach click handlers to swatches
+        // --- Click handlers for swatches ---
         colorRow.querySelectorAll('.calc-color-swatch').forEach(function (swatch) {
-            swatch.addEventListener('click', function () {
-                updateCalcColorSelection(this.getAttribute('data-color'));
+            // Single click: select color
+            swatch.addEventListener('click', function (e) {
+                var colorName = this.getAttribute('data-color');
+                updateCalcColorSelection(colorName);
+            });
+
+            // Double click: open full-screen preview
+            swatch.addEventListener('dblclick', function (e) {
+                e.preventDefault();
+                var colorName = this.getAttribute('data-color');
+                updateCalcColorSelection(colorName);
+                openColorPreview(colorName);
             });
         });
 
-        // --- Board Type + Joist Spacing row (after color row) ---
+        // Click the preview panel to open full-screen modal
+        var previewPanel = colorRow.querySelector('#calc-color-preview');
+        if (previewPanel) {
+            previewPanel.addEventListener('click', function () {
+                openColorPreview(getActiveColor());
+            });
+        }
+
+        // --- Board Type + Joist Spacing row ---
         var advancedRow = document.createElement('div');
         advancedRow.className = 'field-row-2';
         advancedRow.id = 'calc-advanced-row';
@@ -343,17 +390,37 @@
         }
     }
 
-    // === INJECT RESPONSIVE STYLES FOR INLINE COLOR PICKER ===
+    // === INJECT STYLES ===
     function injectCalcColorStyles() {
         var style = document.createElement('style');
+        style.id = 'calc-color-styles';
         style.textContent =
+            // Swatch hover lift
             '.calc-color-swatch:hover { transform: translateY(-2px); }' +
-            '.calc-color-swatch.active div:first-child { border-color: #2563eb !important; box-shadow: 0 0 0 2px rgba(37,99,235,0.25) !important; }' +
-            '.calc-color-swatch.active div:last-child { color: #2563eb !important; }' +
+
+            // Show expand icon on hover
+            '.calc-color-swatch:hover .calc-swatch-expand { opacity: 1 !important; }' +
+
+            // Active swatch: blue ring on the image wrapper
+            '.calc-color-swatch.active .calc-swatch-img {' +
+                'border-color: #2563eb !important;' +
+                'box-shadow: 0 0 0 2px rgba(37,99,235,0.25) !important;' +
+            '}' +
+
+            // Inactive swatch: guarantee transparent border
+            '.calc-color-swatch:not(.active) .calc-swatch-img {' +
+                'border-color: transparent !important;' +
+                'box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;' +
+            '}' +
+
+            // Preview panel hover
+            '#calc-color-preview:hover { background: #f9fafb !important; border-color: #2563eb !important; }' +
+
+            // Mobile tweaks
             '@media (max-width: 768px) {' +
                 '#calc-color-swatches { gap: 0.35rem !important; }' +
                 '.calc-color-swatch { width: 56px !important; }' +
-                '.calc-color-swatch div:first-child { width: 48px !important; height: 36px !important; }' +
+                '.calc-swatch-img { width: 48px !important; height: 36px !important; }' +
                 '#calc-color-preview { margin-top: 0.5rem !important; }' +
                 '#calc-options-desktop { display: none !important; }' +
                 '#calc-options-mobile { display: block !important; }' +
@@ -379,7 +446,6 @@
                 result.joistCount + ' joists @ ' + result.joistSpacingIn + '" OC';
         }
 
-        // Update color chip in results
         var colorChip = document.getElementById('calc-result-color-chip');
         if (colorChip) colorChip.textContent = getActiveColor();
 
@@ -458,7 +524,6 @@
         enableAcceptButton();
         renderFastenerSummary(result);
 
-        // Row click handlers (desktop)
         container.querySelectorAll('tr[data-opt-idx]').forEach(function (row) {
             row.addEventListener('click', function () {
                 selectedOptionIndex = parseInt(this.getAttribute('data-opt-idx'));
@@ -470,7 +535,6 @@
             });
         });
 
-        // Card click handlers (mobile)
         container.querySelectorAll('div[data-opt-idx]').forEach(function (card) {
             card.addEventListener('click', function () {
                 selectedOptionIndex = parseInt(this.getAttribute('data-opt-idx'));
@@ -695,7 +759,7 @@
 
     // === INITIALIZATION ===
     function init() {
-        console.log('[DeckCalc] Initializing advanced deck calculator v1.2');
+        console.log('[DeckCalc] Initializing advanced deck calculator v1.3');
 
         injectCalculatorUI();
         injectCalcColorStyles();
