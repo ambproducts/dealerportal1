@@ -1,7 +1,23 @@
+// ============================================================
+// routes/quotes.js - Quote CRUD with per-dealer pricing
+// Date: 2026-02-28
+// ============================================================
+// v3.0: Replaced tier-based pricing with per-dealer pricing.
+// Line items now get their price from dealer.pricing[productId]
+// instead of basePrice * tierMultiplier.
+//
+// Field names (tierPrice, originalTierPrice, etc.) are preserved
+// for backward compatibility with existing quotes and frontend.
+// ============================================================
+
 const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
-const { readJSON, writeJSON, QUOTES_FILE, TIERS_FILE, CUSTOMERS_FILE, generateId, recalcCustomerStats } = require('../lib/helpers');
+const {
+    readJSON, writeJSON,
+    QUOTES_FILE, CUSTOMERS_FILE, PRODUCTS_FILE,
+    generateId, getDealerPrice, recalcCustomerStats
+} = require('../lib/helpers');
 const { requireAuth, requireRole } = require('../middleware/auth');
 
 router.use(requireAuth);
@@ -15,12 +31,6 @@ function generateQuoteNumber() {
     return 'Q' + y + m + d + '-' + r;
 }
 
-// =============================================================
-// calcItemTotal
-// Computes a single line item's total, accounting for per-foot
-// products where total = price * qty * length.
-// Non-length items (length is null/0) use a multiplier of 1.
-// =============================================================
 function calcItemTotal(item) {
     const rawLength = item.length;
     const customLength = parseFloat(item.customLength) || 0;
@@ -36,11 +46,56 @@ function recalcQuoteTotal(quote) {
 }
 
 // =============================================================
+// buildLineItem
+// Creates a normalized line item using per-dealer pricing.
+// "tierPrice" field name kept for backward compat.
+// =============================================================
+function buildLineItem(item, dealer) {
+    const basePrice = parseFloat(item.basePrice || item.price) || 0;
+    const productId = item.productId || '';
+
+    // Per-dealer pricing: look up the dealer's specific price
+    // For custom items (no productId or productId === 'custom'),
+    // use the price as-is from the line item
+    let dealerPrice;
+    if (!productId || productId === 'custom') {
+        dealerPrice = basePrice;
+    } else {
+        dealerPrice = getDealerPrice(dealer, productId);
+    }
+    dealerPrice = Math.round(dealerPrice * 100) / 100;
+
+    const qty = parseInt(item.quantity) || 1;
+    const length = item.length != null ? item.length : null;
+    const customLength = item.customLength != null ? item.customLength : null;
+
+    // Preserve existing override if present
+    const existingOverride = item.priceOverride || null;
+    let effectivePrice = dealerPrice;
+
+    if (existingOverride && existingOverride.status === 'approved') {
+        effectivePrice = existingOverride.requestedPrice;
+    }
+
+    return {
+        productId: productId,
+        productName: item.productName || '',
+        quantity: qty,
+        length: length,
+        customLength: customLength,
+        basePrice: basePrice,
+        tierPrice: dealerPrice,
+        price: effectivePrice,
+        total: calcItemTotal({ price: effectivePrice, quantity: qty, length: length, customLength: customLength }),
+        color: item.color || '',
+        color2: item.color2 || '',
+        type: item.type || '',
+        priceOverride: existingOverride
+    };
+}
+
+// =============================================================
 // upsertCustomer
-// Finds or creates a customer in customers.json.
-// On update (PUT), prefers matching by customerId first,
-// then falls back to email for legacy quotes.
-// Returns the customer record (with id).
 // =============================================================
 function upsertCustomer(customerData, dealerCode, existingCustomerId) {
     if (!customerData || !customerData.email || !customerData.name) {
@@ -51,13 +106,10 @@ function upsertCustomer(customerData, dealerCode, existingCustomerId) {
     const normalizedEmail = customerData.email.toLowerCase().trim();
     const now = new Date().toISOString();
 
-    // Step 1: Try to find by existingCustomerId (for PUT updates)
     let existing = null;
     if (existingCustomerId) {
         existing = customers.find(c => c.id === existingCustomerId);
     }
-
-    // Step 2: Fall back to email match within this dealer
     if (!existing) {
         existing = customers.find(c =>
             c.email && c.email.toLowerCase() === normalizedEmail
@@ -66,29 +118,22 @@ function upsertCustomer(customerData, dealerCode, existingCustomerId) {
     }
 
     if (existing) {
-        // Update fields from the quote's customer data
         existing.name = customerData.name;
         if (customerData.company !== undefined) existing.company = customerData.company;
         if (customerData.phone !== undefined) existing.phone = customerData.phone;
         if (customerData.zipCode !== undefined) existing.zipCode = customerData.zipCode;
         existing.email = normalizedEmail;
-
-        // Ensure this dealer is in the dealers array
         if (!existing.dealers) existing.dealers = [];
         if (!existing.dealers.includes(dealerCode)) {
             existing.dealers.push(dealerCode);
         }
-
         existing.lastContact = now;
         existing.updatedAt = now;
-
         writeJSON(CUSTOMERS_FILE, customers);
-
         console.log('[CustomerDB] Updated via quote: ' + existing.name + ' (' + normalizedEmail + ') dealer: ' + dealerCode);
         return existing;
     }
 
-    // Step 3: Create new customer
     const newCustomer = {
         id: crypto.randomUUID(),
         name: customerData.name,
@@ -105,28 +150,21 @@ function upsertCustomer(customerData, dealerCode, existingCustomerId) {
         updatedAt: now,
         notes: ''
     };
-
     customers.push(newCustomer);
     writeJSON(CUSTOMERS_FILE, customers);
-
     console.log('[CustomerDB] Created via quote: ' + newCustomer.name + ' (' + normalizedEmail + ') dealer: ' + dealerCode);
     return newCustomer;
 }
 
 // =============================================================
 // GET /api/quotes/pending-overrides
-// GM sees overrides for their dealer, Admin sees all
-// MUST be defined before /:id route to avoid conflict
 // =============================================================
 router.get('/pending-overrides', requireRole('admin', 'gm'), (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
     const results = [];
 
     quotes.forEach(q => {
-        // Skip soft-deleted quotes
         if (q.deleted) return;
-
-        // GM can only see their own dealer's overrides
         if (req.user.role === 'gm' && q.dealerCode !== req.user.dealerCode) return;
 
         (q.lineItems || []).forEach((item, idx) => {
@@ -150,40 +188,16 @@ router.get('/pending-overrides', requireRole('admin', 'gm'), (req, res) => {
         });
     });
 
-    // Sort newest first
     results.sort((a, b) => (b.requestedAt || '').localeCompare(a.requestedAt || ''));
     res.json({ pending: results, count: results.length });
 });
 
 // =============================================================
 // GET /api/quotes
-// Supports pagination, filtering, and search.
-//
-// Query params:
-//   page       (int, default: none = legacy mode returns raw array)
-//   limit      (int, default 20, max 100)
-//   sort       (string, default '-updatedAt', prefix '-' for desc)
-//   status     (string, filter by quote status)
-//   search     (string, fuzzy match on customer name/company/email/quoteNumber/notes)
-//   since      (ISO date string, quotes updated on or after this date)
-//   customerId (string, filter by customer ID)
-//   scope      (string, 'global' = admin sees all dealers)
-//   dealerCode (string, admin filter to specific dealer)
-//
-// Backward compatible: If 'page' is NOT provided, returns the
-// raw array exactly as before so existing dealer-portal.html
-// and overrides code continues to work without changes.
-//
-// Paginated response shape:
-//   {
-//     quotes: [ ... ],
-//     pagination: { page, limit, totalCount, totalPages, hasNext, hasPrev }
-//   }
 // =============================================================
 router.get('/', (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
 
-    // --- DEALER SCOPE (Admin can view globally) ---
     const scopeParam = (req.query.scope || '').trim().toLowerCase();
     const scopeDealerCode = (req.query.dealerCode || '').trim().toUpperCase();
     let mine;
@@ -196,26 +210,20 @@ router.get('/', (req, res) => {
         mine = quotes.filter(q => q.dealerCode === req.user.dealerCode && !q.deleted);
     }
 
-    // Frontdesk users only see their own quotes
     if (req.user.role === 'frontdesk') {
         mine = mine.filter(q => q.createdBy === req.user.username);
     }
 
-    // --- STATUS FILTER ---
     const statusFilter = (req.query.status || '').trim().toLowerCase();
     if (statusFilter) {
         mine = mine.filter(q => q.status === statusFilter);
     }
 
-    // --- CUSTOMER FILTER ---
     const customerIdFilter = (req.query.customerId || '').trim();
     if (customerIdFilter) {
-        mine = mine.filter(q =>
-            q.customer && q.customer.customerId === customerIdFilter
-        );
+        mine = mine.filter(q => q.customer && q.customer.customerId === customerIdFilter);
     }
 
-    // --- DATE RANGE FILTER (since) ---
     const sinceFilter = req.query.since;
     if (sinceFilter) {
         const sinceDate = new Date(sinceFilter);
@@ -227,7 +235,6 @@ router.get('/', (req, res) => {
         }
     }
 
-    // --- SEARCH ---
     const search = (req.query.search || '').trim().toLowerCase();
     if (search) {
         mine = mine.filter(q => {
@@ -242,7 +249,6 @@ router.get('/', (req, res) => {
         });
     }
 
-    // --- SORT ---
     const sortParam = (req.query.sort || '-updatedAt').trim();
     const sortDesc = sortParam.startsWith('-');
     const sortField = sortDesc ? sortParam.slice(1) : sortParam;
@@ -255,24 +261,18 @@ router.get('/', (req, res) => {
         } else if (sortField === 'quoteNumber') {
             aVal = a.quoteNumber || '';
             bVal = b.quoteNumber || '';
-            return sortDesc
-                ? bVal.localeCompare(aVal)
-                : aVal.localeCompare(bVal);
+            return sortDesc ? bVal.localeCompare(aVal) : aVal.localeCompare(bVal);
         } else {
-            // Date fields: updatedAt, createdAt, submittedAt, etc.
             aVal = new Date(a[sortField] || a.updatedAt || a.createdAt || 0).getTime();
             bVal = new Date(b[sortField] || b.updatedAt || b.createdAt || 0).getTime();
         }
         return sortDesc ? bVal - aVal : aVal - bVal;
     });
 
-    // --- BACKWARD COMPAT ---
-    // If no 'page' param, return raw array (existing code expects this)
     if (!req.query.page) {
         return res.json(mine);
     }
 
-    // --- PAGINATION ---
     const totalCount = mine.length;
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100);
     const totalPages = Math.max(Math.ceil(totalCount / limit), 1);
@@ -295,8 +295,6 @@ router.get('/', (req, res) => {
 
 // =============================================================
 // GET /api/quotes/:id
-// Admin can view any quote (for cross-dealer global view).
-// Other roles scoped to their own dealer code.
 // =============================================================
 router.get('/:id', (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
@@ -305,7 +303,6 @@ router.get('/:id', (req, res) => {
         : quotes.find(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
     if (!quote) return res.status(404).json({ error: 'Quote not found' });
 
-    // Frontdesk can only see their own quotes
     if (req.user.role === 'frontdesk' && quote.createdBy !== req.user.username) {
         return res.status(403).json({ error: 'Access denied' });
     }
@@ -318,40 +315,13 @@ router.get('/:id', (req, res) => {
 // =============================================================
 router.post('/', (req, res) => {
     const { customer, lineItems, notes } = req.body;
+    const dealer = req.dealer;
 
-    const tiers = readJSON(TIERS_FILE);
-    const dealerTier = req.dealer.pricingTier || 'standard';
-    const tier = tiers.find(t => t.slug === dealerTier) || { multiplier: 1.0 };
-
-    const items = (lineItems || []).map(item => {
-        const basePrice = parseFloat(item.basePrice || item.price) || 0;
-        const tierPrice = Math.round(basePrice * tier.multiplier * 100) / 100;
-        const qty = parseInt(item.quantity) || 1;
-        const length = item.length != null ? item.length : null;
-        const customLength = item.customLength != null ? item.customLength : null;
-        return {
-            productId: item.productId || '',
-            productName: item.productName || '',
-            quantity: qty,
-            length: length,
-            customLength: customLength,
-            basePrice: basePrice,
-            tierPrice: tierPrice,
-            price: tierPrice,
-            total: calcItemTotal({ price: tierPrice, quantity: qty, length: length, customLength: customLength }),
-            color: item.color || '',
-            color2: item.color2 || '',
-            type: item.type || '',
-            priceOverride: null
-        };
-    });
-
+    const items = (lineItems || []).map(item => buildLineItem(item, dealer));
     const totalAmount = items.reduce((sum, i) => sum + i.total, 0);
 
-    // Upsert customer into customers.json and get back the record with id
     const upsertedCustomer = upsertCustomer(customer, req.user.dealerCode, null);
 
-    // Build the customer snapshot stored on the quote (includes customerId)
     const customerSnapshot = {
         customerId: upsertedCustomer.id || null,
         name: upsertedCustomer.name || (customer && customer.name) || '',
@@ -370,8 +340,7 @@ router.post('/', (req, res) => {
         customer: customerSnapshot,
         lineItems: items,
         notes: notes || '',
-        pricingTier: dealerTier,
-        tierMultiplier: tier.multiplier,
+        pricingModel: 'per-dealer',
         totalAmount: Math.round(totalAmount * 100) / 100,
         hasPendingOverrides: false,
         status: 'draft',
@@ -386,7 +355,6 @@ router.post('/', (req, res) => {
     quotes.push(newQuote);
     writeJSON(QUOTES_FILE, quotes);
 
-    // Recalculate customer stats now that the quote exists in the file
     recalcCustomerStats(customerSnapshot.customerId);
 
     console.log('[Quotes] Created: ' + newQuote.quoteNumber + ' by ' + req.user.username + ' (' + req.user.role + ') | Dealer: ' + req.user.dealerCode + ' | Customer: ' + customerSnapshot.name + ' (' + (customerSnapshot.customerId || 'no-id') + ')');
@@ -401,7 +369,6 @@ router.put('/:id', (req, res) => {
     const idx = quotes.findIndex(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
     if (idx === -1) return res.status(404).json({ error: 'Quote not found' });
 
-    // Frontdesk can only edit their own quotes
     if (req.user.role === 'frontdesk' && quotes[idx].createdBy !== req.user.username) {
         return res.status(403).json({ error: 'Access denied' });
     }
@@ -411,12 +378,9 @@ router.put('/:id', (req, res) => {
     }
 
     const { customer, lineItems, notes } = req.body;
-
-    // Track the old customerId for stats recalc (in case customer changes)
     const oldCustomerId = quotes[idx].customer ? quotes[idx].customer.customerId : null;
 
     if (customer) {
-        // Use the existing customerId on the quote to find the right record to update
         const existingCustomerId = (quotes[idx].customer && quotes[idx].customer.customerId) || null;
         const upsertedCustomer = upsertCustomer(customer, req.user.dealerCode, existingCustomerId);
 
@@ -433,42 +397,8 @@ router.put('/:id', (req, res) => {
     if (notes !== undefined) quotes[idx].notes = notes;
 
     if (lineItems) {
-        const tiers = readJSON(TIERS_FILE);
-        const dealerTier = req.dealer.pricingTier || 'standard';
-        const tier = tiers.find(t => t.slug === dealerTier) || { multiplier: 1.0 };
-
-        quotes[idx].lineItems = lineItems.map(item => {
-            const basePrice = parseFloat(item.basePrice || item.price) || 0;
-            const tierPrice = Math.round(basePrice * tier.multiplier * 100) / 100;
-            const qty = parseInt(item.quantity) || 1;
-            const length = item.length != null ? item.length : null;
-            const customLength = item.customLength != null ? item.customLength : null;
-
-            // Preserve existing override if item has one
-            const existingOverride = item.priceOverride || null;
-            let effectivePrice = tierPrice;
-
-            if (existingOverride && existingOverride.status === 'approved') {
-                effectivePrice = existingOverride.requestedPrice;
-            }
-
-            return {
-                productId: item.productId || '',
-                productName: item.productName || '',
-                quantity: qty,
-                length: length,
-                customLength: customLength,
-                basePrice: basePrice,
-                tierPrice: tierPrice,
-                price: effectivePrice,
-                total: calcItemTotal({ price: effectivePrice, quantity: qty, length: length, customLength: customLength }),
-                color: item.color || '',
-                color2: item.color2 || '',
-                type: item.type || '',
-                priceOverride: existingOverride
-            };
-        });
-
+        const dealer = req.dealer;
+        quotes[idx].lineItems = lineItems.map(item => buildLineItem(item, dealer));
         recalcQuoteTotal(quotes[idx]);
         quotes[idx].hasPendingOverrides = quotes[idx].lineItems.some(
             i => i.priceOverride && i.priceOverride.status === 'pending'
@@ -478,23 +408,15 @@ router.put('/:id', (req, res) => {
     quotes[idx].updatedAt = new Date().toISOString();
     writeJSON(QUOTES_FILE, quotes);
 
-    // Recalculate stats for the current customer
     const newCustomerId = quotes[idx].customer ? quotes[idx].customer.customerId : null;
-    if (newCustomerId) {
-        recalcCustomerStats(newCustomerId);
-    }
-    // If the customer changed, also recalc the old customer's stats
-    if (oldCustomerId && oldCustomerId !== newCustomerId) {
-        recalcCustomerStats(oldCustomerId);
-    }
+    if (newCustomerId) recalcCustomerStats(newCustomerId);
+    if (oldCustomerId && oldCustomerId !== newCustomerId) recalcCustomerStats(oldCustomerId);
 
     res.json(quotes[idx]);
 });
 
 // =============================================================
 // POST /api/quotes/:id/items/:itemIndex/request-override
-// Frontdesk: creates pending override (needs GM/Admin approval)
-// GM/Admin: auto-approves the override immediately
 // =============================================================
 router.post('/:id/items/:itemIndex/request-override', (req, res) => {
     const { requestedPrice, reason } = req.body;
@@ -523,7 +445,6 @@ router.post('/:id/items/:itemIndex/request-override', (req, res) => {
         return res.status(404).json({ error: 'Line item not found at index ' + req.params.itemIndex });
     }
 
-    // Frontdesk can only override on their own quotes
     if (req.user.role === 'frontdesk' && quote.createdBy !== req.user.username) {
         return res.status(403).json({ error: 'Access denied' });
     }
@@ -546,14 +467,12 @@ router.post('/:id/items/:itemIndex/request-override', (req, res) => {
         rejectedReason: null
     };
 
-    // If auto-approved (GM/Admin), apply the price immediately
     if (isAutoApprover) {
         item.price = item.priceOverride.requestedPrice;
         item.total = calcItemTotal(item);
         recalcQuoteTotal(quote);
     }
 
-    // Update pending flag
     quote.hasPendingOverrides = quote.lineItems.some(
         i => i.priceOverride && i.priceOverride.status === 'pending'
     );
@@ -578,14 +497,12 @@ router.post('/:id/items/:itemIndex/request-override', (req, res) => {
 
 // =============================================================
 // POST /api/quotes/:id/items/:itemIndex/approve-override
-// GM/Admin only
 // =============================================================
 router.post('/:id/items/:itemIndex/approve-override', requireRole('admin', 'gm'), (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
     const quote = quotes.find(q => q.id === req.params.id && !q.deleted);
     if (!quote) return res.status(404).json({ error: 'Quote not found' });
 
-    // GM can only approve for their own dealer
     if (req.user.role === 'gm' && quote.dealerCode !== req.user.dealerCode) {
         return res.status(403).json({ error: 'Access denied' });
     }
@@ -600,12 +517,10 @@ router.post('/:id/items/:itemIndex/approve-override', requireRole('admin', 'gm')
         return res.status(400).json({ error: 'No pending override on this line item' });
     }
 
-    // Approve the override
     item.priceOverride.status = 'approved';
     item.priceOverride.approvedBy = req.user.username;
     item.priceOverride.approvedAt = new Date().toISOString();
 
-    // Apply the overridden price
     item.price = item.priceOverride.requestedPrice;
     item.total = calcItemTotal(item);
 
@@ -624,16 +539,11 @@ router.post('/:id/items/:itemIndex/approve-override', requireRole('admin', 'gm')
         + ' by ' + req.user.username
         + ' (requested by ' + item.priceOverride.requestedBy + ')');
 
-    res.json({
-        message: 'Price override approved',
-        item: item,
-        quote: quote
-    });
+    res.json({ message: 'Price override approved', item: item, quote: quote });
 });
 
 // =============================================================
 // POST /api/quotes/:id/items/:itemIndex/reject-override
-// GM/Admin only
 // =============================================================
 router.post('/:id/items/:itemIndex/reject-override', requireRole('admin', 'gm'), (req, res) => {
     const { rejectedReason } = req.body;
@@ -642,7 +552,6 @@ router.post('/:id/items/:itemIndex/reject-override', requireRole('admin', 'gm'),
     const quote = quotes.find(q => q.id === req.params.id && !q.deleted);
     if (!quote) return res.status(404).json({ error: 'Quote not found' });
 
-    // GM can only reject for their own dealer
     if (req.user.role === 'gm' && quote.dealerCode !== req.user.dealerCode) {
         return res.status(403).json({ error: 'Access denied' });
     }
@@ -657,13 +566,12 @@ router.post('/:id/items/:itemIndex/reject-override', requireRole('admin', 'gm'),
         return res.status(400).json({ error: 'No pending override on this line item' });
     }
 
-    // Reject and revert to tier price
     item.priceOverride.status = 'rejected';
     item.priceOverride.rejectedBy = req.user.username;
     item.priceOverride.rejectedAt = new Date().toISOString();
     item.priceOverride.rejectedReason = (rejectedReason || '').trim() || null;
 
-    // Revert price to tier price
+    // Revert to dealer price
     item.price = item.tierPrice;
     item.total = calcItemTotal(item);
 
@@ -682,23 +590,17 @@ router.post('/:id/items/:itemIndex/reject-override', requireRole('admin', 'gm'),
         + ' by ' + req.user.username
         + ' | Reason: ' + (item.priceOverride.rejectedReason || 'none'));
 
-    res.json({
-        message: 'Price override rejected',
-        item: item,
-        quote: quote
-    });
+    res.json({ message: 'Price override rejected', item: item, quote: quote });
 });
 
 // =============================================================
 // POST /api/quotes/:id/submit
-// Blocks submission if there are pending overrides
 // =============================================================
 router.post('/:id/submit', (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
     const idx = quotes.findIndex(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
     if (idx === -1) return res.status(404).json({ error: 'Quote not found' });
 
-    // Frontdesk can only submit their own quotes
     if (req.user.role === 'frontdesk' && quotes[idx].createdBy !== req.user.username) {
         return res.status(403).json({ error: 'Access denied' });
     }
@@ -710,7 +612,6 @@ router.post('/:id/submit', (req, res) => {
         return res.status(400).json({ error: 'Cannot submit a quote with no line items' });
     }
 
-    // Check for pending overrides
     const pendingCount = quotes[idx].lineItems.filter(
         i => i.priceOverride && i.priceOverride.status === 'pending'
     ).length;
@@ -732,9 +633,6 @@ router.post('/:id/submit', (req, res) => {
 
 // =============================================================
 // DELETE /api/quotes/:id
-// GM + Admin only. Soft-deletes any quote (all statuses).
-// Records audit trail: deletedBy, deletedByRole, deletedAt.
-// Recalculates customer stats after deletion.
 // =============================================================
 router.delete('/:id', requireRole('admin', 'gm'), (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
@@ -743,7 +641,6 @@ router.delete('/:id', requireRole('admin', 'gm'), (req, res) => {
         : quotes.findIndex(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
     if (idx === -1) return res.status(404).json({ error: 'Quote not found' });
 
-    // Soft delete with audit trail
     quotes[idx].deleted = true;
     quotes[idx].deletedBy = req.user.username;
     quotes[idx].deletedByRole = req.user.role;
@@ -751,11 +648,8 @@ router.delete('/:id', requireRole('admin', 'gm'), (req, res) => {
     quotes[idx].updatedAt = new Date().toISOString();
     writeJSON(QUOTES_FILE, quotes);
 
-    // Recalculate customer stats since a quote was soft-deleted
     const custId = quotes[idx].customer ? quotes[idx].customer.customerId : null;
-    if (custId) {
-        recalcCustomerStats(custId);
-    }
+    if (custId) recalcCustomerStats(custId);
 
     console.log('[Quotes] Soft-deleted: ' + quotes[idx].quoteNumber + ' by ' + req.user.username + ' (' + req.user.role + ')');
     res.json({ message: 'Quote ' + quotes[idx].quoteNumber + ' deleted' });
@@ -763,8 +657,6 @@ router.delete('/:id', requireRole('admin', 'gm'), (req, res) => {
 
 // =============================================================
 // POST /api/quotes/:id/duplicate
-// Admin can duplicate cross-dealer quotes; the duplicate is
-// assigned to the admin's own dealer code.
 // =============================================================
 router.post('/:id/duplicate', (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
@@ -784,13 +676,13 @@ router.post('/:id/duplicate', (req, res) => {
     dup.submittedAt = null;
     dup.reviewedAt = null;
     dup.approvedAt = null;
+    dup.pricingModel = 'per-dealer';
 
-    // Admin cross-dealer duplicate: assign to admin's own dealer
     if (req.user.role === 'admin' && dup.dealerCode !== req.user.dealerCode) {
         dup.dealerCode = req.user.dealerCode;
     }
 
-    // Clear all overrides on duplicated quote (start fresh)
+    // Clear overrides, revert to dealer price (tierPrice field)
     dup.lineItems.forEach(item => {
         item.priceOverride = null;
         item.price = item.tierPrice;
@@ -802,11 +694,8 @@ router.post('/:id/duplicate', (req, res) => {
     quotes.push(dup);
     writeJSON(QUOTES_FILE, quotes);
 
-    // Recalculate customer stats since a new quote references this customer
     const custId = dup.customer ? dup.customer.customerId : null;
-    if (custId) {
-        recalcCustomerStats(custId);
-    }
+    if (custId) recalcCustomerStats(custId);
 
     console.log('[Quotes] Duplicated: ' + original.quoteNumber + ' -> ' + dup.quoteNumber + (dup.dealerCode !== original.dealerCode ? ' (reassigned to ' + dup.dealerCode + ')' : ''));
     res.status(201).json(dup);
