@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - Advanced Deck Calculator v1.0
+// AmeriDex Dealer Portal - Advanced Deck Calculator v1.1
 // File: ameridex-deck-calculator.js
 // Date: 2026-02-28
 // ============================================================
@@ -8,13 +8,21 @@
 // auto-calculates screws and plugs, and pushes all line items
 // to the order on Accept.
 //
-// Key improvements over inline calculator:
+// The AmeriDex System = Grooved deck boards + Dexerdry seal
+// integrated at $8/ft. The calculator defaults to System boards.
+// No separate Dexerdry seal line item is needed for System.
+//
+// BlueClaw ($150) is a reusable compression tool for seating
+// the Dexerdry seal. It is NOT a consumable and is NOT auto-
+// calculated. Dealers add it manually when needed.
+//
+// Key features:
 //   - Multi-option comparison (12', 16', 20', custom)
 //   - Custom length rounding: whole foot preferred, .5' when
 //     it saves significant waste
 //   - Screw calculation: boardRows x joists x 2 per crossing
-//   - Plug calculation: 1 plug per screw (face screw systems)
-//   - Pushes boards + screws + plugs + picture frame + stairs
+//   - Plug calculation: 1 plug per screw (375/box each)
+//   - Pushes boards + screws + plugs + picture frame (if on)
 //   - Fixes waste percentage bug (ternary was inverted)
 // ============================================================
 
@@ -195,11 +203,11 @@
             '<div class="field">' +
                 '<label for="calc-board-type">Board Type</label>' +
                 '<select id="calc-board-type">' +
-                    '<option value="system" selected>System Boards (Grooved + Dexerdry)</option>' +
-                    '<option value="grooved">Grooved Boards (no Dexerdry)</option>' +
+                    '<option value="system" selected>AmeriDex System (Board + Dexerdry Seal)</option>' +
+                    '<option value="grooved">Grooved Boards only (no seal)</option>' +
                     '<option value="solid">Solid Edge Boards</option>' +
                 '</select>' +
-                '<div class="help-text">Product type added to line items</div>' +
+                '<div class="help-text">System includes integrated Dexerdry seal at the board price</div>' +
             '</div>' +
             '<div class="field">' +
                 '<label for="calc-joist-spacing">Joist Spacing</label>' +
@@ -295,7 +303,7 @@
 
         html += '</tbody></table></div>';
 
-        // Mobile cards (hidden on desktop via media query in main CSS)
+        // Mobile cards (hidden on desktop via media query)
         html += '<div id="calc-options-mobile" style="display:none">';
         result.options.forEach(function (opt, idx) {
             var isRec = opt.recommended;
@@ -463,6 +471,9 @@
     };
 
     // === OVERRIDE: addSuggestionToOrder ===
+    // Pushes: decking boards + screws + plugs + picture frame (if checked)
+    // System boards include Dexerdry seal (no separate seal line item)
+    // BlueClaw is a manual-add tool, not auto-calculated
     window.addSuggestionToOrder = function () {
         if (!currentCalcResult || selectedOptionIndex === null) {
             alert('Please calculate and select an option first.');
@@ -488,7 +499,12 @@
             customLengthVal = null;
         }
 
-        // 1. Decking boards
+        // Board type label for confirmation message
+        var boardTypeLabel = boardType === 'system' ? 'AmeriDex System'
+                           : boardType === 'grooved' ? 'Grooved'
+                           : 'Solid Edge';
+
+        // 1. Decking boards (System = board + Dexerdry seal integrated)
         window.currentQuote.lineItems.push({
             type: boardType,
             color: color,
@@ -498,11 +514,11 @@
             customDesc: '',
             customUnitPrice: 0,
             _source: 'calculator',
-            _sourceNote: opt.totalBoards + 'x ' + opt.label + ' ' + boardType + ' (' + color + ')'
+            _sourceNote: opt.totalBoards + 'x ' + opt.label + ' ' + boardTypeLabel + ' (' + color + ')'
         });
-        itemsAdded.push(opt.totalBoards + ' ' + boardType + ' boards (' + opt.label + ', ' + color + ')');
+        itemsAdded.push(opt.totalBoards + ' ' + boardTypeLabel + ' boards (' + opt.label + ', ' + color + ')');
 
-        // 2. Screws (always)
+        // 2. Screws (always added)
         if (fasteners.screwBoxes > 0) {
             window.currentQuote.lineItems.push({
                 type: 'screws',
@@ -518,7 +534,7 @@
             itemsAdded.push(fasteners.screwBoxes + ' box(es) screws (' + fasteners.totalScrews.toLocaleString() + ' total)');
         }
 
-        // 3. Plugs (always for face screw, 1 per screw)
+        // 3. Plugs (1 plug per screw, always added)
         if (fasteners.plugBoxes > 0) {
             window.currentQuote.lineItems.push({
                 type: 'plugs',
@@ -534,10 +550,9 @@
             itemsAdded.push(fasteners.plugBoxes + ' box(es) plugs (' + fasteners.totalPlugs.toLocaleString() + ' total)');
         }
 
-        // 4. Picture frame solid edge boards (if checked)
+        // 4. Picture frame solid edge boards (only if checkbox is checked)
         if (window.currentQuote.options && window.currentQuote.options.pictureFrame) {
             var perimeterFt = 2 * (currentCalcResult.coverageFt + currentCalcResult.spanFt);
-            // Use longest standard that fits, or match the deck board length
             var pfBoardLen = currentCalcResult.spanFt <= 12 ? 12 :
                              currentCalcResult.spanFt <= 16 ? 16 : 20;
             var pfBoards = Math.ceil(perimeterFt / pfBoardLen);
@@ -554,24 +569,6 @@
                 _sourceNote: 'Picture frame: ' + Math.round(perimeterFt) + ' LF perimeter'
             });
             itemsAdded.push(pfBoards + ' solid edge boards (picture frame)');
-        }
-
-        // 5. Stair boards (if checked)
-        if (window.currentQuote.options && window.currentQuote.options.stairs) {
-            // Default assumption: 4 treads (2 boards each) + 4 risers (1 board each)
-            var stairBoards = 12;
-            window.currentQuote.lineItems.push({
-                type: 'solid',
-                color: color,
-                length: 12,
-                customLength: null,
-                qty: stairBoards,
-                customDesc: '',
-                customUnitPrice: 0,
-                _source: 'calculator',
-                _sourceNote: 'Stairs: 4 treads (2 boards ea) + 4 risers'
-            });
-            itemsAdded.push(stairBoards + ' solid edge boards (stairs)');
         }
 
         // Clean up and re-render
@@ -610,7 +607,7 @@
 
     // === INITIALIZATION ===
     function init() {
-        console.log('[DeckCalc] Initializing advanced deck calculator v1.0');
+        console.log('[DeckCalc] Initializing advanced deck calculator v1.1');
 
         // Inject new UI fields
         injectCalculatorUI();
