@@ -1,7 +1,7 @@
 // ============================================================
-// AmeriDex Dealer Portal - Script Loader v1.8
+// AmeriDex Dealer Portal - Script Loader v1.9
 // File: script-loader.js
-// Date: 2026-02-27
+// Date: 2026-02-28
 // ============================================================
 // CRITICAL: Function stubs below MUST execute synchronously
 // before DOMContentLoaded fires. They are intentionally placed
@@ -64,6 +64,13 @@ if (typeof window.showQuotesView !== 'function') {
 //  13. ameridex-admin-delete.js          (Soft delete + undo + recently deleted)
 //  14. ameridex-admin-user-delete.js     (Delete users + dealers from Users tab)
 //  15. ameridex-admin-csv-fix.js         (CSV export formula injection prevention)
+//  16. ameridex-deck-calculator.js       (Advanced deck calc + board optimizer)
+//
+// v1.9 Changes (2026-02-28):
+//   - Added ameridex-deck-calculator.js at position 16.
+//     Replaces basic calculator with multi-option board optimizer,
+//     custom length recommendations, and auto screw/plug line items.
+//     Fixes critical waste percentage bug (inverted ternary).
 //
 // v1.8 Changes (2026-02-27):
 //   - REMOVED ameridex-global-scope-fix.js from load chain.
@@ -121,7 +128,8 @@ if (typeof window.showQuotesView !== 'function') {
         'ameridex-admin-customers.js',
         'ameridex-admin-delete.js',
         'ameridex-admin-user-delete.js',
-        'ameridex-admin-csv-fix.js'
+        'ameridex-admin-csv-fix.js',
+        'ameridex-deck-calculator.js'
     ];
 
     let loaded = 0;
