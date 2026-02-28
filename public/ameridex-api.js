@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - API Integration Patch v2.14
+// AmeriDex Dealer Portal - API Integration Patch v2.15
 // Date: 2026-02-27
 // ============================================================
 // REQUIRES: ameridex-patches.js (v1.0+) loaded first
@@ -8,71 +8,33 @@
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
 //
+// v2.15 Changes (2026-02-27):
+//   - FIX: Override window.loadQuote() (new Section 14b) to restore
+//     all 11 DOM fields when loading a saved quote. The inline
+//     loadQuote(idx) in dealer-portal.html only restored 5 fields
+//     (customer name/email/zip/company/phone), silently dropping:
+//       - pic-frame checkbox
+//       - stairs checkbox
+//       - special-instr textarea
+//       - internal-notes textarea
+//       - ship-addr textarea
+//       - del-date input
+//     Data was saved correctly by syncQuoteFromDOM() but lost on
+//     every reload. Both loadQuote() and applyQuoteToDOM() now
+//     share the same restoreQuoteToDOM() helper for consistency.
+//
 // v2.14 Changes (2026-02-27):
 //   - FIX: loadQuoteFromUrlParam() Section 18 applyQuoteToDOM()
 //     no longer calls mapServerLineItemToFrontend() on line items.
-//     Root cause: loadServerQuotes() already maps server items to
-//     frontend format. When opening a quote via ?quoteId= from the
-//     My Quotes tab, applyQuoteToDOM() would re-map already-mapped
-//     items. The mapper saw frontend-format objects, treated them
-//     as unknown product types, and returned corrupted or empty
-//     line items. Result: line items disappeared from the UI, and
-//     saving created a duplicate quote with $0.00 total.
-//     Fix: Line items from both GET /api/quotes/:id and from
-//     window.savedQuotes are already in frontend format. Skip the
-//     redundant mapping entirely.
 //
 // v2.13 Changes (2026-02-27):
 //   - FIX: syncQuoteToServer() now sends the original catalog base
 //     price (pre-tier) instead of the already tier-adjusted price.
-//     The backend applies the tier multiplier on its own, so sending
-//     an adjusted price caused double-discounting. For a $100 item
-//     at 0.85x tier, the old code sent basePrice=85 and the backend
-//     computed 85*0.85=72.25. Now it correctly sends basePrice=100
-//     and the backend computes 100*0.85=85.
-//   - FIX: syncQuoteToServer() totalAmount now uses the quote's own
-//     lineItems instead of window.currentQuote.lineItems. The old
-//     code would compute the wrong total when syncing a different
-//     quote (e.g. during batch reconnect sync).
 //
 // v2.12 Changes (2026-02-27):
 //   - FIX: All bare `currentQuote` and `savedQuotes` references
 //     inside the IIFE now use `window.currentQuote` and
 //     `window.savedQuotes` throughout.
-//
-//     Root cause: ameridex-global-scope-fix.js proxies the inline
-//     script's `let` bindings onto window via indirect eval getter/
-//     setter pairs. The IIFE's closed-over `var currentQuote` and
-//     `var savedQuotes` were completely separate references from
-//     window.currentQuote and window.savedQuotes. Writes in either
-//     direction never propagated to the other side, causing two bugs:
-//
-//     Bug 1 - Duplicate quote on open+save:
-//       loadServerQuotes() did `savedQuotes = serverQuotes.map(...)`
-//       which updated only the IIFE-local var. window.savedQuotes
-//       (the let binding) remained the old empty array. Meanwhile
-//       applyQuoteToDOM() wrote currentQuote._serverId to
-//       window.currentQuote (the proxy). saveCurrentQuote()'s
-//       findIndex ran against IIFE-local savedQuotes but compared
-//       against window.currentQuote._serverId - they never matched.
-//       findIndex always returned -1, the else-branch pushed a new
-//       entry, syncQuoteToServer() fired POST instead of PUT, and
-//       a duplicate was created on the server every single save.
-//
-//     Bug 2 - Line items not adding up:
-//       render(), getItemSubtotal(), updateTotalAndFasteners() all
-//       read the global let currentQuote (via window proxy).
-//       applyQuoteToDOM() wrote lineItems onto window.currentQuote.
-//       But every bare `currentQuote` read inside the IIFE (e.g.
-//       syncQuoteToServer totalAmount reducer, duplicateQuote,
-//       handleLogout, saveAndClose, applyTierPricing re-render
-//       guard) still read the stale IIFE-local var holding the
-//       original empty { lineItems: [] }. Result: totals always
-//       $0.00, render saw no line items.
-//
-//     Fix: use window.currentQuote and window.savedQuotes throughout
-//     the IIFE so all code paths share the same live object reference
-//     as the inline script, render functions, and patch scripts.
 //
 // v2.11 Changes (2026-02-27):
 //   - FIX: saveCurrentQuote() (Section 7) now matches by _serverId
@@ -215,6 +177,45 @@
             evt.initEvent('ameridex-login', true, true);
             window.dispatchEvent(evt);
         }
+    }
+
+
+    // ----------------------------------------------------------
+    // SHARED HELPER: Restore a quote object to the DOM (v2.15)
+    // ----------------------------------------------------------
+    // Used by both loadQuote() (Section 14b) and
+    // applyQuoteToDOM() (Section 18) so all fields are
+    // restored consistently in every code path.
+    // ----------------------------------------------------------
+    function restoreQuoteToDOM(quoteObj) {
+        // Customer fields
+        var c = quoteObj.customer || {};
+        document.getElementById('cust-name').value    = c.name    || '';
+        document.getElementById('cust-email').value   = c.email   || '';
+        document.getElementById('cust-zip').value     = c.zipCode || '';
+        document.getElementById('cust-company').value = c.company || '';
+        document.getElementById('cust-phone').value   = c.phone   || '';
+
+        // Options checkboxes
+        var opts = quoteObj.options || { pictureFrame: false, stairs: false };
+        document.getElementById('pic-frame').checked = !!opts.pictureFrame;
+        document.getElementById('stairs').checked    = !!opts.stairs;
+
+        var picFrameNote = document.getElementById('pic-frame-note');
+        var stairsNote   = document.getElementById('stairs-note');
+        if (picFrameNote) picFrameNote.style.display = opts.pictureFrame ? 'block' : 'none';
+        if (stairsNote)   stairsNote.style.display   = opts.stairs       ? 'block' : 'none';
+
+        // Text fields that the inline loadQuote() missed
+        document.getElementById('special-instr').value  = quoteObj.specialInstructions || '';
+        document.getElementById('internal-notes').value = quoteObj.internalNotes       || '';
+        document.getElementById('ship-addr').value      = quoteObj.shippingAddress     || '';
+        document.getElementById('del-date').value       = quoteObj.deliveryDate        || '';
+
+        // Re-render line items table and totals
+        render();
+        updateTotalAndFasteners();
+        if (typeof updateCustomerProgress === 'function') updateCustomerProgress();
     }
 
 
@@ -407,7 +408,6 @@
                 _currentDealer = data.dealer;
                 _currentDealer.role = data.user.role;
 
-                // v2.12: use window.dealerSettings (proxied let binding)
                 window.dealerSettings.dealerCode = data.dealer.dealerCode;
                 window.dealerSettings.dealerName = data.dealer.dealerName || '';
                 window.dealerSettings.dealerContact = data.dealer.contactPerson || '';
@@ -514,7 +514,6 @@
                 window._currentTier = data.tier;
                 console.log('[Pricing] Tier: ' + data.tier.label + ' (x' + data.tier.multiplier + ')');
 
-                // v2.12: read window.currentQuote so we see the live let binding
                 if (window.currentQuote.lineItems.length > 0) {
                     render();
                     updateTotalAndFasteners();
@@ -610,20 +609,13 @@
     // ----------------------------------------------------------
     // 6b. QUOTE SYNC: Server with localStorage fallback
     // ----------------------------------------------------------
-    // v2.12: All savedQuotes reads/writes use window.savedQuotes
-    // so they operate on the proxied let binding, not a stale
-    // closed-over IIFE var.
-    // ----------------------------------------------------------
     function loadServerQuotes() {
         return api('GET', '/api/quotes')
             .then(function (serverQuotes) {
-                // v2.12: read window.savedQuotes for the live binding
                 var localOnly = window.savedQuotes.filter(function (lq) {
                     return !lq._serverId && lq.lineItems.length > 0;
                 });
 
-                // v2.12: write to window.savedQuotes so the let binding
-                // and all other scripts see the updated array
                 window.savedQuotes = serverQuotes.map(function (sq) {
                     var mappedLineItems = (sq.lineItems || []).map(function (serverLI) {
                         var mapped = mapServerLineItemToFrontend(serverLI);
@@ -667,9 +659,6 @@
     function syncQuoteToServer(quote) {
         if (!_authToken) return Promise.resolve(null);
 
-        // v2.13: Compute the original (pre-tier) base price for each line item.
-        // The backend applies the tier multiplier itself, so sending an already-
-        // adjusted price caused double-discounting (Bug 1).
         var tierMultiplier = (window._currentTier && window._currentTier.multiplier)
             ? window._currentTier.multiplier : 1;
 
@@ -679,8 +668,6 @@
             var tierAdjustedPrice = (typeof getItemPrice === 'function') ? getItemPrice(li) : 0;
             var subtotal = (typeof getItemSubtotal === 'function') ? getItemSubtotal(li) : 0;
 
-            // Reverse the tier adjustment to recover the true catalog base price.
-            // Custom items use customUnitPrice which is not tier-adjusted.
             var originalBase;
             if (li.type === 'custom' || !prod) {
                 originalBase = parseFloat(li.customUnitPrice) || tierAdjustedPrice;
@@ -708,9 +695,6 @@
             };
         });
 
-        // v2.13: Use the quote's own lineItems for totalAmount, not
-        // window.currentQuote which may reference a different quote
-        // (e.g. during batch sync of savedQuotes on reconnect).
         var payload = {
             quoteNumber: quote.quoteId,
             customer: quote.customer,
@@ -754,10 +738,6 @@
     // ----------------------------------------------------------
     // 7. OVERRIDE: saveCurrentQuote (server + local)
     // ----------------------------------------------------------
-    // v2.12: All currentQuote and savedQuotes reads/writes use
-    // window.* so they hit the proxied let binding and stay in
-    // sync with the inline script, render(), and patch scripts.
-    // ----------------------------------------------------------
     var _origSaveCurrentQuote = window.saveCurrentQuote;
     window.saveCurrentQuote = function () {
         if (typeof window.syncQuoteFromDOM === 'function') {
@@ -768,8 +748,6 @@
             window.currentQuote.quoteId = generateQuoteNumber();
         }
 
-        // v2.11 + v2.12: Match by _serverId first, then quoteId.
-        // Use window.savedQuotes and window.currentQuote.
         var existingIdx = window.savedQuotes.findIndex(function (q) {
             return (window.currentQuote._serverId && q._serverId &&
                     String(q._serverId) === String(window.currentQuote._serverId))
@@ -834,7 +812,6 @@
     // ----------------------------------------------------------
     var _origHandleLogout = window.handleLogout;
     window.handleLogout = function () {
-        // v2.12: read window.currentQuote for the live let binding
         if (window.currentQuote.lineItems.length > 0 || document.getElementById('cust-name').value.trim()) {
             if (!confirm('Are you sure you want to log out? Any unsaved changes will be lost.')) {
                 return;
@@ -854,7 +831,6 @@
         clearTimeout(window.warningTimer);
         clearInterval(window.countdownInterval);
 
-        // v2.12: write through window.dealerSettings proxy
         window.dealerSettings.dealerCode = '';
         window.dealerSettings.role = '';
         saveDealerSettings();
@@ -901,7 +877,6 @@
     window.sendFormalRequest = function () {
         var quoteId = saveCurrentQuote();
 
-        // v2.12: read window.savedQuotes for the live let binding
         var quote = window.savedQuotes.find(function (q) {
             return q.quoteId === quoteId;
         });
@@ -941,7 +916,6 @@
         var newContact = document.getElementById('settings-dealer-contact').value.trim();
         var newPhone = document.getElementById('settings-dealer-phone').value.trim();
 
-        // v2.12: write through window.dealerSettings proxy
         window.dealerSettings.dealerName = newName;
         window.dealerSettings.dealerContact = newContact;
         window.dealerSettings.dealerPhone = newPhone;
@@ -1025,7 +999,6 @@
             window.syncQuoteFromDOM();
         }
 
-        // v2.12: read window.currentQuote for the live let binding
         if (window.currentQuote.lineItems.length > 0 || document.getElementById('cust-name').value.trim()) {
             var quoteId = saveCurrentQuote();
             alert('Quote saved! ID: ' + quoteId);
@@ -1047,7 +1020,6 @@
 
         var searchEl = document.getElementById('quote-search');
         var searchQuery = (searchEl ? searchEl.value : '').toLowerCase();
-        // v2.12: read window.savedQuotes for the live let binding
         var filtered = window.savedQuotes;
 
         if (searchQuery) {
@@ -1132,7 +1104,6 @@
                     duplicateQuote(filtered[i]);
                 } else {
                     if (typeof window.loadQuote === 'function') {
-                        // v2.12: use window.savedQuotes for the live binding
                         var realIdx = window.savedQuotes.indexOf(filtered[i]);
                         if (realIdx > -1) window.loadQuote(realIdx);
                     }
@@ -1146,7 +1117,6 @@
                 if (confirm('Delete this quote?')) {
                     var quote = filtered[i];
                     deleteQuoteFromServer(quote);
-                    // v2.12: use window.savedQuotes for the live binding
                     var qIdx = window.savedQuotes.indexOf(quote);
                     if (qIdx > -1) window.savedQuotes.splice(qIdx, 1);
                     saveToStorage();
@@ -1158,16 +1128,52 @@
 
 
     // ----------------------------------------------------------
+    // 14b. OVERRIDE: loadQuote (full field restoration) (v2.15)
+    // ----------------------------------------------------------
+    // The inline loadQuote(idx) in dealer-portal.html only restores
+    // 5 customer fields. It does NOT restore:
+    //   - pic-frame checkbox
+    //   - stairs checkbox
+    //   - special-instr textarea
+    //   - internal-notes textarea
+    //   - ship-addr textarea
+    //   - del-date input
+    //
+    // This override deep-clones savedQuotes[idx] into currentQuote
+    // (same as the inline version), then calls restoreQuoteToDOM()
+    // which sets ALL 11 fields consistently.
+    // ----------------------------------------------------------
+    window.loadQuote = function (idx) {
+        if (idx < 0 || idx >= window.savedQuotes.length) {
+            console.warn('[v2.15] loadQuote: invalid index ' + idx);
+            return;
+        }
+
+        if (window.currentQuote.lineItems.length > 0) {
+            if (!confirm('Loading this quote will replace your current work. Continue?')) return;
+        }
+
+        // Deep-clone the saved quote into currentQuote
+        var source = window.savedQuotes[idx];
+        window.currentQuote = JSON.parse(JSON.stringify(source));
+
+        // Restore all 11 DOM fields via the shared helper
+        restoreQuoteToDOM(window.currentQuote);
+
+        console.log('[v2.15] loadQuote(' + idx + '): Loaded "'
+            + (window.currentQuote.quoteId || 'Draft') + '" with '
+            + window.currentQuote.lineItems.length + ' line items, all fields restored.');
+    };
+
+
+    // ----------------------------------------------------------
     // 15. QUOTE DUPLICATION
     // ----------------------------------------------------------
     function duplicateQuote(original) {
-        // v2.12: read window.currentQuote for the live let binding
         if (window.currentQuote.lineItems.length > 0) {
             if (!confirm('This will replace your current work with a copy. Continue?')) return;
         }
 
-        // v2.12: write to window.currentQuote so the proxy setter
-        // updates the let binding and render() sees the new object
         window.currentQuote = {
             quoteId: null,
             status: 'draft',
@@ -1180,25 +1186,8 @@
             deliveryDate: ''
         };
 
-        document.getElementById('cust-name').value = '';
-        document.getElementById('cust-email').value = '';
-        document.getElementById('cust-zip').value = '';
-        document.getElementById('cust-company').value = '';
-        document.getElementById('cust-phone').value = '';
-
-        document.getElementById('pic-frame').checked = window.currentQuote.options.pictureFrame;
-        document.getElementById('stairs').checked = window.currentQuote.options.stairs;
-        document.getElementById('pic-frame-note').style.display = window.currentQuote.options.pictureFrame ? 'block' : 'none';
-        document.getElementById('stairs-note').style.display = window.currentQuote.options.stairs ? 'block' : 'none';
-
-        document.getElementById('special-instr').value = window.currentQuote.specialInstructions;
-        document.getElementById('internal-notes').value = '';
-        document.getElementById('ship-addr').value = '';
-        document.getElementById('del-date').value = '';
-
-        render();
-        updateTotalAndFasteners();
-        updateCustomerProgress();
+        // Use shared helper for full DOM restoration
+        restoreQuoteToDOM(window.currentQuote);
 
         document.getElementById('customer').scrollIntoView({ behavior: 'smooth' });
 
@@ -1227,7 +1216,6 @@
                 _currentDealer = data.dealer;
                 _currentDealer.role = data.user.role;
 
-                // v2.12: write through window.dealerSettings proxy
                 window.dealerSettings.dealerCode = data.dealer.dealerCode;
                 window.dealerSettings.dealerName = data.dealer.dealerName || '';
                 window.dealerSettings.dealerContact = data.dealer.contactPerson || '';
@@ -1262,7 +1250,6 @@
     window.addEventListener('online', function () {
         _serverOnline = true;
         console.log('[Network] Back online, syncing...');
-        // v2.12: read window.savedQuotes for the live let binding
         window.savedQuotes.forEach(function (q) {
             if (!q._serverId && q.lineItems.length > 0) {
                 syncQuoteToServer(q);
@@ -1280,16 +1267,10 @@
         if (!serverId) return;
 
         function applyQuoteToDOM(sq) {
-            // v2.14: Line items from both the server API response and
-            // window.savedQuotes are already in frontend format. They were
-            // mapped by loadServerQuotes() when the session started. Do NOT
-            // call mapServerLineItemToFrontend() again or it will corrupt them.
             var frontendLineItems = sq.lineItems || [];
-
             var mappedCustomer = mapServerCustomerToFrontend(sq.customer);
 
-            // v2.12: write to window.currentQuote so the proxy setter
-            // updates the let binding and all render fns see the data
+            // Write all fields to currentQuote
             window.currentQuote.quoteId             = sq.quoteNumber || sq.quoteId || null;
             window.currentQuote._serverId           = sq.id || sq._serverId || null;
             window.currentQuote.status              = sq.status || 'draft';
@@ -1301,31 +1282,12 @@
             window.currentQuote.shippingAddress     = sq.shippingAddress || '';
             window.currentQuote.deliveryDate        = sq.deliveryDate || '';
 
-            document.getElementById('cust-name').value    = mappedCustomer.name    || '';
-            document.getElementById('cust-email').value   = mappedCustomer.email   || '';
-            document.getElementById('cust-zip').value     = mappedCustomer.zipCode || '';
-            document.getElementById('cust-company').value = mappedCustomer.company || '';
-            document.getElementById('cust-phone').value   = mappedCustomer.phone   || '';
+            // v2.15: Use shared helper for full DOM restoration
+            restoreQuoteToDOM(window.currentQuote);
 
-            document.getElementById('special-instr').value  = window.currentQuote.specialInstructions;
-            document.getElementById('internal-notes').value = window.currentQuote.internalNotes;
-            document.getElementById('ship-addr').value      = window.currentQuote.shippingAddress;
-            document.getElementById('del-date').value       = window.currentQuote.deliveryDate;
-
-            document.getElementById('pic-frame').checked = window.currentQuote.options.pictureFrame;
-            document.getElementById('stairs').checked    = window.currentQuote.options.stairs;
-            var picFrameNote = document.getElementById('pic-frame-note');
-            var stairsNote   = document.getElementById('stairs-note');
-            if (picFrameNote) picFrameNote.style.display = window.currentQuote.options.pictureFrame ? 'block' : 'none';
-            if (stairsNote)   stairsNote.style.display   = window.currentQuote.options.stairs       ? 'block' : 'none';
-
-            render();
-            updateTotalAndFasteners();
-            if (typeof updateCustomerProgress === 'function') updateCustomerProgress();
-
-            console.log('[v2.14] Loaded quote from URL param: '
+            console.log('[v2.15] Loaded quote from URL param: '
                 + (window.currentQuote.quoteId || serverId)
-                + ' | ' + frontendLineItems.length + ' line items');
+                + ' | ' + frontendLineItems.length + ' line items (all fields restored)');
 
             try {
                 var cleanUrl = window.location.pathname;
@@ -1339,9 +1301,8 @@
                     applyQuoteToDOM(sq);
                 })
                 .catch(function (err) {
-                    console.warn('[v2.14] Server fetch failed for quoteId=' + serverId + ', falling back to savedQuotes[]:', err.message);
+                    console.warn('[v2.15] Server fetch failed for quoteId=' + serverId + ', falling back to savedQuotes[]:', err.message);
 
-                    // v2.12: read window.savedQuotes for the live let binding
                     var found = window.savedQuotes.find(function (q) {
                         return String(q._serverId) === String(serverId)
                             || String(q.quoteId)   === String(serverId);
@@ -1350,7 +1311,7 @@
                     if (found) {
                         applyQuoteToDOM(found);
                     } else {
-                        console.error('[v2.14] Quote not found in savedQuotes[] either. quoteId=' + serverId);
+                        console.error('[v2.15] Quote not found in savedQuotes[] either. quoteId=' + serverId);
                     }
                 });
         }
@@ -1379,5 +1340,5 @@
 
     loadQuoteFromUrlParam();
 
-    console.log('[AmeriDex API] v2.14 loaded: Auth + API integration active.');
+    console.log('[AmeriDex API] v2.15 loaded: Auth + API integration active.');
 })();
