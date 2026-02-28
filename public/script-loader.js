@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - Script Loader v2.0
+// AmeriDex Dealer Portal - Script Loader v2.1
 // File: script-loader.js
 // Date: 2026-02-28
 // ============================================================
@@ -66,6 +66,17 @@ if (typeof window.showQuotesView !== 'function') {
 //  15. ameridex-admin-csv-fix.js         (CSV export formula injection prevention)
 //  16. ameridex-deck-calculator.js       (Advanced deck calc + board optimizer)
 //  17. ameridex-admin-patch.js           (Per-dealer pricing migration patch)
+//  18. ameridex-email-optional.js        (Email optional, name+zip required)
+//
+// v2.1 Changes (2026-02-28):
+//   - Added ameridex-email-optional.js at position 18.
+//     Customer email is now optional on the quote form.
+//     Only Name and Zip Code are mandatory.
+//     Overrides updateCustomerProgress, validateRequired,
+//     searchCustomers, showCustomerLookup,
+//     updateCustomerHistory, showReviewModal.
+//     Patches DOM to remove required attr from email input
+//     and update the label to "Email (optional)".
 //
 // v2.0 Changes (2026-02-28):
 //   - Added ameridex-admin-patch.js at position 17.
@@ -138,7 +149,8 @@ if (typeof window.showQuotesView !== 'function') {
         'ameridex-admin-user-delete.js',
         'ameridex-admin-csv-fix.js',
         'ameridex-deck-calculator.js',
-        'ameridex-admin-patch.js'
+        'ameridex-admin-patch.js',
+        'ameridex-email-optional.js'
     ];
 
     let loaded = 0;
