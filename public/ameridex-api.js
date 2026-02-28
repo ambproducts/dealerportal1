@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - API Integration Patch v2.12
+// AmeriDex Dealer Portal - API Integration Patch v2.13
 // Date: 2026-02-27
 // ============================================================
 // REQUIRES: ameridex-patches.js (v1.0+) loaded first
@@ -7,6 +7,19 @@
 // Load order in dealer-portal.html (before </body>):
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
+//
+// v2.13 Changes (2026-02-27):
+//   - FIX: syncQuoteToServer() now sends the original catalog base
+//     price (pre-tier) instead of the already tier-adjusted price.
+//     The backend applies the tier multiplier on its own, so sending
+//     an adjusted price caused double-discounting. For a $100 item
+//     at 0.85x tier, the old code sent basePrice=85 and the backend
+//     computed 85*0.85=72.25. Now it correctly sends basePrice=100
+//     and the backend computes 100*0.85=85.
+//   - FIX: syncQuoteToServer() totalAmount now uses the quote's own
+//     lineItems instead of window.currentQuote.lineItems. The old
+//     code would compute the wrong total when syncing a different
+//     quote (e.g. during batch reconnect sync).
 //
 // v2.12 Changes (2026-02-27):
 //   - FIX: All bare `currentQuote` and `savedQuotes` references
@@ -640,16 +653,34 @@
     function syncQuoteToServer(quote) {
         if (!_authToken) return Promise.resolve(null);
 
+        // v2.13: Compute the original (pre-tier) base price for each line item.
+        // The backend applies the tier multiplier itself, so sending an already-
+        // adjusted price caused double-discounting (Bug 1).
+        var tierMultiplier = (window._currentTier && window._currentTier.multiplier)
+            ? window._currentTier.multiplier : 1;
+
         var mappedLineItems = quote.lineItems.map(function (li) {
-            var price = (typeof getItemPrice === 'function') ? getItemPrice(li) : 0;
-            var subtotal = (typeof getItemSubtotal === 'function') ? getItemSubtotal(li) : 0;
             var prod = (typeof PRODUCTS !== 'undefined' && PRODUCTS[li.type])
                 ? PRODUCTS[li.type] : null;
+            var tierAdjustedPrice = (typeof getItemPrice === 'function') ? getItemPrice(li) : 0;
+            var subtotal = (typeof getItemSubtotal === 'function') ? getItemSubtotal(li) : 0;
+
+            // Reverse the tier adjustment to recover the true catalog base price.
+            // Custom items use customUnitPrice which is not tier-adjusted.
+            var originalBase;
+            if (li.type === 'custom' || !prod) {
+                originalBase = parseFloat(li.customUnitPrice) || tierAdjustedPrice;
+            } else if (tierMultiplier && tierMultiplier !== 1) {
+                originalBase = Math.round((tierAdjustedPrice / tierMultiplier) * 100) / 100;
+            } else {
+                originalBase = tierAdjustedPrice;
+            }
+
             return {
                 productId: li.productId || li.type || '',
                 productName: li.productName || (prod ? prod.name : '') || li.type || 'Custom Item',
-                basePrice: price,
-                price: price,
+                basePrice: originalBase,
+                price: originalBase,
                 quantity: parseInt(li.qty, 10) || parseInt(li.quantity, 10) || 1,
                 length: li.length || null,
                 customLength: li.customLength || null,
@@ -663,6 +694,9 @@
             };
         });
 
+        // v2.13: Use the quote's own lineItems for totalAmount, not
+        // window.currentQuote which may reference a different quote
+        // (e.g. during batch sync of savedQuotes on reconnect).
         var payload = {
             quoteNumber: quote.quoteId,
             customer: quote.customer,
@@ -672,8 +706,7 @@
             internalNotes: quote.internalNotes,
             shippingAddress: quote.shippingAddress,
             deliveryDate: quote.deliveryDate,
-            // v2.12: read window.currentQuote for the live let binding
-            totalAmount: window.currentQuote.lineItems.reduce(function (sum, li) {
+            totalAmount: quote.lineItems.reduce(function (sum, li) {
                 return sum + ((typeof getItemSubtotal === 'function') ? getItemSubtotal(li) : 0);
             }, 0)
         };
@@ -1330,5 +1363,5 @@
 
     loadQuoteFromUrlParam();
 
-    console.log('[AmeriDex API] v2.12 loaded: Auth + API integration active.');
+    console.log('[AmeriDex API] v2.13 loaded: Auth + API integration active.');
 })();
