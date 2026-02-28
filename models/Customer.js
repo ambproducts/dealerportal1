@@ -1,7 +1,15 @@
 // ============================================================
 // AmeriDex Dealer Portal - Customer Model (Mongoose)
 // File: models/Customer.js
-// Date: 2026-02-13
+// Date: 2026-02-28
+// ============================================================
+// v2 Changes (2026-02-28):
+//   - Email is now OPTIONAL (was required). Default is ''.
+//   - Zip code is now REQUIRED (was optional with default '').
+//   - Unique compound index changed to partial index: only
+//     enforces email+dealer uniqueness when email is non-empty.
+//   - Added fallback compound index on name+zipCode+dealers
+//     for dedup when email is absent.
 // ============================================================
 
 const mongoose = require('mongoose');
@@ -15,9 +23,9 @@ const customerSchema = new mongoose.Schema({
     },
     email: {
         type: String,
-        required: [true, 'Customer email is required'],
         trim: true,
         lowercase: true,
+        default: '',
         index: true
     },
     company: {
@@ -32,8 +40,8 @@ const customerSchema = new mongoose.Schema({
     },
     zipCode: {
         type: String,
+        required: [true, 'Customer zip code is required'],
         trim: true,
-        default: '',
         index: true
     },
     dealers: {
@@ -63,20 +71,34 @@ const customerSchema = new mongoose.Schema({
 });
 
 // -------------------------------------------------------
-// COMPOUND INDEX: enforce one record per email per dealer
-// This is the core of Option A isolation.
-// The same email CAN exist under different dealers as
-// separate documents, but cannot be duplicated within the
-// same dealer.
+// COMPOUND INDEX: enforce one record per email per dealer,
+// but ONLY when email is non-empty.  This is a partial
+// unique index so that multiple customers without an email
+// can coexist under the same dealer.
 // -------------------------------------------------------
 customerSchema.index(
     { email: 1, dealers: 1 },
-    { unique: true, name: 'unique_email_per_dealer' }
+    {
+        unique: true,
+        name: 'unique_email_per_dealer',
+        partialFilterExpression: {
+            email: { $exists: true, $gt: '' }
+        }
+    }
+);
+
+// -------------------------------------------------------
+// FALLBACK DEDUP: when email is absent, use name + zip +
+// dealer to prevent obvious duplicates.
+// -------------------------------------------------------
+customerSchema.index(
+    { name: 1, zipCode: 1, dealers: 1 },
+    { name: 'name_zip_dealer' }
 );
 
 // Text search index for autocomplete
 customerSchema.index(
-    { name: 'text', email: 'text', company: 'text' },
+    { name: 'text', email: 'text', company: 'text', zipCode: 'text' },
     { name: 'customer_text_search' }
 );
 
