@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - Patch File v1.6
+// AmeriDex Dealer Portal - Patch File v1.6.1
 // Date: 2026-02-27
 // ============================================================
 // HOW TO USE:
@@ -10,6 +10,12 @@
 //
 //   This file monkey-patches the existing global functions
 //   in-place. No edits to the main file required.
+//
+// v1.6.1 Changes (2026-02-27):
+//   - BUGFIX: PATCH 2 had a backwards typeof check (`=== 'function'`
+//     instead of `!== 'function'`). The alias getItemSubtotalFromData
+//     was NEVER being created because the condition only passed if
+//     it already existed. Fixed to `!== 'function'`.
 //
 // v1.6 Changes (2026-02-27):
 //   - PATCH 0 rewritten: Instead of repairing broken DOM nesting
@@ -52,7 +58,7 @@
     function removeSavedQuotesSection() {
         var savedSection = document.getElementById('saved-quotes-section');
         if (!savedSection) {
-            console.log('[patches v1.6] PATCH 0: No saved-quotes-section found, nothing to remove.');
+            console.log('[patches v1.6.1] PATCH 0: No saved-quotes-section found, nothing to remove.');
             return;
         }
 
@@ -60,7 +66,7 @@
         if (!form) {
             // Fallback: just hide it
             savedSection.style.display = 'none';
-            console.log('[patches v1.6] PATCH 0: No order-form found, hid saved-quotes-section.');
+            console.log('[patches v1.6.1] PATCH 0: No order-form found, hid saved-quotes-section.');
             return;
         }
 
@@ -79,7 +85,7 @@
                     form.appendChild(el);
                 }
                 insertAfter = el;
-                console.log('[patches v1.6] PATCH 0: Rescued section #' + id + ' from saved-quotes.');
+                console.log('[patches v1.6.1] PATCH 0: Rescued section #' + id + ' from saved-quotes.');
             }
         });
 
@@ -90,19 +96,19 @@
             if (section === savedSection) return;
             section.parentNode.removeChild(section);
             form.appendChild(section);
-            console.log('[patches v1.6] PATCH 0: Rescued unnamed trapped section.');
+            console.log('[patches v1.6.1] PATCH 0: Rescued unnamed trapped section.');
         });
 
         // Step 2: Remove the saved-quotes-section itself
         savedSection.parentNode.removeChild(savedSection);
-        console.log('[patches v1.6] PATCH 0: Removed saved-quotes-section from DOM.');
+        console.log('[patches v1.6.1] PATCH 0: Removed saved-quotes-section from DOM.');
 
         // Step 3: Also remove the old customers-section on the dashboard
         // (not the one on quotes-customers.html, which has different IDs)
         var customersSection = document.getElementById('customers-section');
         if (customersSection && form.contains(customersSection)) {
             customersSection.parentNode.removeChild(customersSection);
-            console.log('[patches v1.6] PATCH 0: Removed customers-section from dashboard DOM.');
+            console.log('[patches v1.6.1] PATCH 0: Removed customers-section from dashboard DOM.');
         }
 
         // Step 4: Force re-render to fix any layout issues
@@ -141,9 +147,9 @@
             // v1.6: No-op. The old customers list on the dashboard
             // has been removed. Customer management now lives on
             // the My Quotes page (quotes-customers.html).
-            console.log('[patches v1.6] renderCustomersList() called but customers-section has been removed. Use My Quotes tab.');
+            console.log('[patches v1.6.1] renderCustomersList() called but customers-section has been removed. Use My Quotes tab.');
         };
-        console.log('[patches v1.6] PATCH 0b: Registered renderCustomersList() as no-op (section removed).');
+        console.log('[patches v1.6.1] PATCH 0b: Registered renderCustomersList() as no-op (section removed).');
     }
 
 
@@ -159,12 +165,21 @@
 
 
     // ===========================================================
-    // PATCH 2: Consolidated Subtotal Function
+    // PATCH 2: Consolidated Subtotal Function (FIXED in v1.6.1)
     // ===========================================================
-    if (typeof window.getItemSubtotalFromData === 'function') {
+    // BUG (v1.6 and earlier): The condition was `=== 'function'`,
+    // meaning the alias was only created if it ALREADY existed.
+    // Since nothing else defines it, the alias was never created,
+    // causing ReferenceErrors in the inline renderSavedQuotes().
+    //
+    // FIX: Changed to `!== 'function'` so the alias is created
+    // when it's MISSING (which is always on first load).
+    // ===========================================================
+    if (typeof window.getItemSubtotalFromData !== 'function') {
         window.getItemSubtotalFromData = function (li) {
             return window.getItemSubtotal(li);
         };
+        console.log('[patches v1.6.1] PATCH 2: Created getItemSubtotalFromData alias (was missing due to inverted check).');
     }
 
 
@@ -313,7 +328,7 @@
         var delDate = document.getElementById('del-date').value;
         if (shipAddr || delDate) {
             html += '<div style="margin-bottom:20px;"><h2 style="color:#374151;font-size:1.1rem;border-bottom:1px solid #ddd;padding-bottom:5px;">Shipping &amp; Delivery</h2>';
-            if (shipAddr) html += '<p><strong>Address:</strong><br>' + escapeHTML(shipAddr).replace(/\n/g, '<br>') + '</p>';
+            if (shipAddr) html += '<p><strong>Address:</strong><br>' + escapeHTML(shipAddr).replace(/\\n/g, '<br>') + '</p>';
             if (delDate) html += '<p><strong>Preferred Date:</strong> ' + escapeHTML(delDate) + '</p>';
             html += '</div>';
         }
@@ -346,7 +361,7 @@
 
     function loadNextScript() {
         if (scriptIndex >= EXTRA_SCRIPTS.length) {
-            console.log('[patches v1.6] PATCH 6: All ' + EXTRA_SCRIPTS.length + ' extra scripts loaded.');
+            console.log('[patches v1.6.1] PATCH 6: All ' + EXTRA_SCRIPTS.length + ' extra scripts loaded.');
             // Run removal one more time after all scripts loaded,
             // in case any script re-rendered the section
             setTimeout(function() {
@@ -358,12 +373,12 @@
         var el = document.createElement('script');
         el.src = src;
         el.onload = function () {
-            console.log('[patches v1.6] PATCH 6: Loaded ' + src);
+            console.log('[patches v1.6.1] PATCH 6: Loaded ' + src);
             scriptIndex++;
             loadNextScript();
         };
         el.onerror = function () {
-            console.error('[patches v1.6] PATCH 6: FAILED to load ' + src);
+            console.error('[patches v1.6.1] PATCH 6: FAILED to load ' + src);
             scriptIndex++;
             loadNextScript();
         };
