@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - Script Loader v1.9
+// AmeriDex Dealer Portal - Script Loader v2.0
 // File: script-loader.js
 // Date: 2026-02-28
 // ============================================================
@@ -65,6 +65,14 @@ if (typeof window.showQuotesView !== 'function') {
 //  14. ameridex-admin-user-delete.js     (Delete users + dealers from Users tab)
 //  15. ameridex-admin-csv-fix.js         (CSV export formula injection prevention)
 //  16. ameridex-deck-calculator.js       (Advanced deck calc + board optimizer)
+//  17. ameridex-admin-patch.js           (Per-dealer pricing migration patch)
+//
+// v2.0 Changes (2026-02-28):
+//   - Added ameridex-admin-patch.js at position 17.
+//     Phase 1: Removes legacy tier UI from admin panel
+//     (tier dropdowns, tier columns, tier exempt fields).
+//     Phase 2: Per-dealer pricing editor (TBD).
+//     Loads after all admin scripts so DOM elements exist.
 //
 // v1.9 Changes (2026-02-28):
 //   - Added ameridex-deck-calculator.js at position 16.
@@ -129,7 +137,8 @@ if (typeof window.showQuotesView !== 'function') {
         'ameridex-admin-delete.js',
         'ameridex-admin-user-delete.js',
         'ameridex-admin-csv-fix.js',
-        'ameridex-deck-calculator.js'
+        'ameridex-deck-calculator.js',
+        'ameridex-admin-patch.js'
     ];
 
     let loaded = 0;
