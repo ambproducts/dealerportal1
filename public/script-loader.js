@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - Script Loader v1.7
+// AmeriDex Dealer Portal - Script Loader v1.8
 // File: script-loader.js
 // Date: 2026-02-27
 // ============================================================
@@ -28,7 +28,7 @@
 
 if (typeof window.renderCustomersList !== 'function') {
     window.renderCustomersList = function renderCustomersList() {
-        // No-op stub. Replaced by ameridex-addrow-fix.js (position 1).
+        // No-op stub. Replaced by ameridex-addrow-fix.js (position 0).
     };
 }
 
@@ -48,23 +48,29 @@ if (typeof window.showQuotesView !== 'function') {
 
 // ============================================================
 // Load order:
-//   0. ameridex-global-scope-fix.js      (expose let globals to window)
-//   1. ameridex-addrow-fix.js            (DOM repair + missing function defs)
-//   2. ameridex-portal-nav.js            (Navigation system)
-//   3. ameridex-patches.js               (DOM patches and fixes)
-//   4. ameridex-idle-fix.js              (guard resetIdleTimer null crash)
-//   5. ameridex-api.js                   (API client and helpers)
-//   6. ameridex-pricing-fix.js           (Pricing resolution + getDisplayPrice)
-//   7. ameridex-overrides.js             (General UI overrides)
-//   8. ameridex-print-branding.js        (Branded print/preview output)
-//   9. ameridex-customer-address.js      (Address/City/State fields patch)
-//  10. ameridex-customer-sync.js         (Customer history sync)
-//  11. ameridex-roles.js                 (GM/Frontdesk role system + override buttons)
-//  12. ameridex-admin.js                 (Admin panel)
-//  13. ameridex-admin-customers.js       (Admin customer management)
-//  14. ameridex-admin-delete.js          (Soft delete + undo + recently deleted)
-//  15. ameridex-admin-user-delete.js     (Delete users + dealers from Users tab)
-//  16. ameridex-admin-csv-fix.js         (CSV export formula injection prevention)
+//   0. ameridex-addrow-fix.js            (DOM repair + missing function defs)
+//   1. ameridex-portal-nav.js            (Navigation system)
+//   2. ameridex-patches.js               (DOM patches and fixes)
+//   3. ameridex-idle-fix.js              (guard resetIdleTimer null crash)
+//   4. ameridex-api.js                   (API client and helpers)
+//   5. ameridex-pricing-fix.js           (Pricing resolution + getDisplayPrice)
+//   6. ameridex-overrides.js             (General UI overrides)
+//   7. ameridex-print-branding.js        (Branded print/preview output)
+//   8. ameridex-customer-address.js      (Address/City/State fields patch)
+//   9. ameridex-customer-sync.js         (Customer history sync)
+//  10. ameridex-roles.js                 (GM/Frontdesk role system + override buttons)
+//  11. ameridex-admin.js                 (Admin panel)
+//  12. ameridex-admin-customers.js       (Admin customer management)
+//  13. ameridex-admin-delete.js          (Soft delete + undo + recently deleted)
+//  14. ameridex-admin-user-delete.js     (Delete users + dealers from Users tab)
+//  15. ameridex-admin-csv-fix.js         (CSV export formula injection prevention)
+//
+// v1.8 Changes (2026-02-27):
+//   - REMOVED ameridex-global-scope-fix.js from load chain.
+//     dealer-portal.html now uses var (not let) for all 15 state
+//     variables, so they live directly on window. The eval-based
+//     proxy was silently breaking setter calls from patch scripts.
+//   - Renumbered all positions (0-15 instead of 0-16).
 //
 // v1.7 Changes (2026-02-27):
 //   - Moved renderCustomersList, updateCustomerProgress, and
@@ -100,7 +106,6 @@ if (typeof window.showQuotesView !== 'function') {
     'use strict';
 
     const SCRIPTS = [
-        'ameridex-global-scope-fix.js',
         'ameridex-addrow-fix.js',
         'ameridex-portal-nav.js',
         'ameridex-patches.js',
