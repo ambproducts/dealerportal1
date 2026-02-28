@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - Advanced Deck Calculator v1.4
+// AmeriDex Dealer Portal - Advanced Deck Calculator v1.4.1
 // File: ameridex-deck-calculator.js
 // Date: 2026-02-28
 // ============================================================
@@ -38,6 +38,12 @@
     var currentCalcResult = null;
     var selectedOptionIndex = null;
     var calcSelectedColor = null;
+
+    // === HELPER: resolve color image path ===
+    function colorImgPath(colorName) {
+        var map = window.COLORIMAGES || {};
+        return 'colors/' + (map[colorName] || colorName + '.png');
+    }
 
     // === CUSTOM LENGTH ROUNDING ===
     function getCustomLength(spanFt) {
@@ -178,10 +184,7 @@
         var modalName = document.getElementById('colorName');
         if (!modal || !modalImg) return;
 
-        var colorImages = window.COLORIMAGES || {};
-        var imgSrc = 'colors/' + (colorImages[colorName] || colorName + '.png');
-
-        modalImg.src = imgSrc;
+        modalImg.src = colorImgPath(colorName);
         modalImg.alt = colorName;
         if (modalName) modalName.textContent = colorName;
         modal.classList.add('active');
@@ -204,13 +207,14 @@
             }
         });
 
-        // Update inline preview
+        // Update inline preview image and label (always, no COLORIMAGES guard)
         var previewImg = document.getElementById('calc-color-preview-img');
-        var previewLabel = document.getElementById('calc-color-preview-label');
-        if (previewImg && window.COLORIMAGES) {
-            previewImg.src = 'colors/' + (window.COLORIMAGES[colorName] || colorName + '.png');
+        if (previewImg) {
+            previewImg.src = colorImgPath(colorName);
             previewImg.alt = colorName;
         }
+
+        var previewLabel = document.getElementById('calc-color-preview-label');
         if (previewLabel) {
             previewLabel.textContent = colorName;
         }
@@ -223,9 +227,6 @@
     }
 
     // === REMOVE STANDALONE COLOR SECTION ===
-    // The color picker is now inside the calculator. The old standalone
-    // "Select Colors" card (#colors) is redundant and removed from the DOM.
-    // The #colorModal is NOT inside #colors, so it remains available.
     function removeStandaloneColorSection() {
         var colorsSection = document.getElementById('colors');
         if (colorsSection) {
@@ -260,11 +261,10 @@
         // Build swatches: ALL start with transparent border. Active state is class-only.
         var swatchesHtml = '<div id="calc-color-swatches" style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:flex-start">';
         var colors = window.COLORS || ['Driftwood', 'Khaki', 'Slate', 'Beachwood', 'Chestnut', 'Redwood', 'Hazelnut'];
-        var colorImages = window.COLORIMAGES || {};
 
         colors.forEach(function (c) {
             var isActive = (c === calcSelectedColor);
-            var imgSrc = 'colors/' + (colorImages[c] || c + '.png');
+            var imgSrc = colorImgPath(c);
             swatchesHtml +=
                 '<div class="calc-color-swatch' + (isActive ? ' active' : '') + '" data-color="' + c + '" ' +
                     'style="cursor:pointer;text-align:center;width:72px;transition:transform 0.15s" ' +
@@ -291,7 +291,7 @@
         swatchesHtml += '</div>';
 
         // Preview panel
-        var previewImgSrc = 'colors/' + (colorImages[calcSelectedColor] || calcSelectedColor + '.png');
+        var previewImgSrc = colorImgPath(calcSelectedColor);
         var previewHtml =
             '<div id="calc-color-preview" style="display:flex;align-items:center;gap:0.75rem;margin-top:0.75rem;' +
                 'padding:0.6rem 0.85rem;background:white;border-radius:8px;border:1px solid #e5e7eb;cursor:pointer" ' +
@@ -750,7 +750,7 @@
 
     // === INITIALIZATION ===
     function init() {
-        console.log('[DeckCalc] Initializing advanced deck calculator v1.4');
+        console.log('[DeckCalc] Initializing advanced deck calculator v1.4.1');
 
         // Remove the standalone Select Colors section (now integrated here)
         removeStandaloneColorSection();
