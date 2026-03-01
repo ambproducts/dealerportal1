@@ -1,41 +1,30 @@
 /**
- * ameridex-print-branding.js  v2.5
+ * ameridex-print-branding.js  v2.6
  *
- * Changes (v2.5 — 2026-03-01):
- *   TRUE PDF DOWNLOAD
- *     The only correct client-side way to produce a real .pdf binary
- *     without a server renderer is the browser's own print-to-PDF engine.
- *     downloadPDF() now:
- *       1. Builds the fully filled, logo-inlined HTML.
- *       2. Opens it in a new window (same as Print Customer Quote).
- *       3. Injects a one-shot onafterprint handler that closes the window.
- *       4. Calls window.print() on that window.
- *     The system print dialog opens with "Save as PDF" as the default
- *     destination on Chrome and Edge. The user clicks Save and gets a
- *     real .pdf file in their downloads folder.
- *     This is identical to how Notion, Google Docs, and Figma handle
- *     client-side PDF export.
+ * Changes (v2.6 — 2026-03-01):
+ *   TRUE ONE-CLICK PDF DOWNLOAD
+ *     downloadPDF() now calls POST /api/pdf/generate on the existing
+ *     Render server. The server uses Puppeteer + headless Chromium to
+ *     render the filled quote HTML and returns a real application/pdf
+ *     binary. The browser receives it as a file download with the
+ *     filename AmeriDex-Quote-XXXX.pdf — no print dialog, no user
+ *     interaction, no viewer error.
  *
- *   DIFFERENCE from Print Customer Quote:
- *     - Print Customer Quote: opens print dialog immediately, intended
- *       for sending to a physical printer or saving manually.
- *     - Download PDF: opens print dialog with a toast hint telling the
- *       user to select "Save as PDF" as the destination, making the
- *       intent clear.
+ *     Flow:
+ *       1. buildFilledHtml() — fetches template + inlines base64 logo
+ *       2. POST /api/pdf/generate with { html, filename }
+ *       3. Server returns pdf binary
+ *       4. response.blob() → <a download> click → file in downloads
  *
- * Changes (v2.4 — 2026-03-01):
- *   - Logo inlined as base64 data URI (fixes missing logo in Blob docs).
- *   - Force .html download via <a download>.
+ *     Fallback:
+ *       If the server returns an error or is unreachable, falls back
+ *       to print-to-PDF (window.print()) so the button always works.
  *
- * Changes (v2.3 — 2026-03-01):
- *   - Removed dead server /api/quotes/:id/pdf call.
- *   - Switched Blob MIME to text/html.
- *
- * Changes (v2.2 — 2026-03-01):
- *   - Double-load guard, null classList fix, full customer info.
- *
- * Changes (v2.1 — 2026-03-01):
- *   - No print dialog on Download PDF, unsaved-quote save prompt.
+ * Changes (v2.5): print-to-PDF via window.print(), base64 logo.
+ * Changes (v2.4): force .html download, base64 logo inline.
+ * Changes (v2.3): removed dead server call, text/html Blob.
+ * Changes (v2.2): double-load guard, null classList fix, full customer info.
+ * Changes (v2.1): no print dialog, unsaved-quote save prompt.
  */
 
 (function () {
@@ -51,7 +40,7 @@
     window.__adxPrintBrandingLoaded = true;
 
     // =========================================================================
-    // LOGO — fetched once, cached as base64 data URI so it renders in Blob docs
+    // LOGO — fetched once, cached as base64 data URI
     // =========================================================================
     var cachedLogoDataUri = null;
 
@@ -147,7 +136,6 @@
     function showSavePrompt() {
         return new Promise(function (resolve) {
             injectSaveModalStyles();
-
             var overlay = document.createElement('div');
             overlay.id = 'adx-save-modal-overlay';
             overlay.innerHTML = [
@@ -161,22 +149,17 @@
                 '  </div>',
                 '</div>'
             ].join('');
-
             document.body.appendChild(overlay);
-
             function cleanup() {
                 if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
             }
-
             document.getElementById('adx-btn-save-continue').addEventListener('click', function () {
                 cleanup();
                 if (typeof saveQuote === 'function') {
                     Promise.resolve(saveQuote())
                         .then(function () { resolve(true); })
                         .catch(function () { resolve(true); });
-                } else {
-                    resolve(true);
-                }
+                } else { resolve(true); }
             });
             document.getElementById('adx-btn-continue-nosave').addEventListener('click', function () {
                 cleanup(); resolve(true);
@@ -224,7 +207,6 @@
         };
 
         var cq = (typeof currentQuote !== 'undefined') ? currentQuote : null;
-
         if (cq) {
             data.quoteNumber = cq.quoteNumber || cq.quoteId || 'Draft';
             if (cq.createdAt) {
@@ -233,13 +215,11 @@
                 });
             }
         }
-
         if (typeof dealerSettings !== 'undefined' && dealerSettings) {
             data.dealerCode     = dealerSettings.dealerCode    || '';
             data.dealerBusiness = dealerSettings.dealerName    || dealerSettings.businessName || '';
             data.dealerContact  = dealerSettings.dealerContact || dealerSettings.contactName  || '';
         }
-
         var custObj = (cq && cq.customer) ? cq.customer : null;
         data.customerName    = (custObj && custObj.name)    || readField('cust-name');
         data.customerEmail   = (custObj && custObj.email)   || readField('cust-email');
@@ -291,7 +271,6 @@
             data.subtotal      = total;
             data.estimatedTotal = total;
         }
-
         return data;
     }
 
@@ -360,7 +339,6 @@
 
     function fillTemplate(html, data, logoDataUri) {
         if (logoDataUri) {
-            // Replace logo src regardless of attribute order
             html = html.replace(
                 /(<img\b[^>]*?\bclass="logo"[^>]*?\bsrc=")[^"]*(")/,
                 '$1' + logoDataUri + '$2'
@@ -393,30 +371,80 @@
     }
 
     // =========================================================================
-    // OPEN QUOTE WINDOW — shared by both download and print paths
-    // Writes filled HTML into a new window and resolves with that window ref.
+    // DOWNLOAD PDF — PRIMARY PATH
+    // Sends filled HTML to POST /api/pdf/generate on the existing Render
+    // server. Puppeteer renders it server-side and returns a real .pdf binary.
+    // The browser triggers a file download — no dialog, no viewer, no prompt.
     // =========================================================================
-    function openQuoteWindow(filledHtml) {
-        var win = window.open('', '_blank', 'width=900,height=700');
-        if (!win) return null;
-        win.document.open();
-        win.document.write(filledHtml);
-        win.document.close();
-        return win;
+    function serverPdfDownload(filledHtml, filename) {
+        var token = localStorage.getItem('authToken') || '';
+        return fetch('/api/pdf/generate', {
+            method:  'POST',
+            headers: {
+                'Content-Type':  'application/json',
+                'Authorization': 'Bearer ' + token
+            },
+            body: JSON.stringify({ html: filledHtml, filename: filename })
+        })
+        .then(function (res) {
+            if (!res.ok) throw new Error('Server PDF failed: ' + res.status);
+            return res.blob();
+        })
+        .then(function (blob) {
+            var url = URL.createObjectURL(blob);
+            var a   = document.createElement('a');
+            a.href        = url;
+            a.download    = filename + '.pdf';
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(function () {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 1000);
+            console.log('[PDF] Server-rendered PDF downloaded:', filename + '.pdf');
+        });
     }
 
     // =========================================================================
-    // DOWNLOAD PDF
-    // Opens the quote in a new window configured for "Save as PDF":
-    //   - Page title set to the quote filename so the browser pre-fills
-    //     the Save dialog with the correct name (e.g. AmeriDex-Quote-Q260301-X5L2).
-    //   - A prominent toast inside the window instructs the user to choose
-    //     "Save as PDF" as the destination.
-    //   - window.print() fires automatically on load.
-    //   - onafterprint closes the window automatically.
-    // On Chrome/Edge the default print destination is "Save as PDF".
-    // The resulting file is a real .pdf binary saved by the OS.
+    // FALLBACK — print-to-PDF via system print dialog
+    // Only used if the server endpoint returns an error or is unreachable.
     // =========================================================================
+    function printToPdfFallback(filledHtml, filename) {
+        console.warn('[PDF] Falling back to print-to-PDF for:', filename);
+        var pdfHelpInjection = [
+            '<style>',
+            '  #adx-pdf-toast {',
+            '    position:fixed;bottom:24px;left:50%;transform:translateX(-50%);',
+            '    background:#1B2F6B;color:#fff;padding:12px 24px;border-radius:999px;',
+            '    font-family:system-ui,Arial,sans-serif;font-size:14px;font-weight:600;',
+            '    box-shadow:0 8px 32px rgba(27,47,107,.35);z-index:9999;white-space:nowrap;',
+            '  }',
+            '  #adx-pdf-toast span { color:#C8102E; }',
+            '  @media print { #adx-pdf-toast { display:none !important; } }',
+            '</style>',
+            '<div id="adx-pdf-toast">',
+            '  Set Destination to <span>Save as PDF</span> then click Save',
+            '</div>',
+            '<script>',
+            '  document.title = ' + JSON.stringify(filename) + ';',
+            '  window.onload = function() {',
+            '    window.onafterprint = function() { window.close(); };',
+            '    setTimeout(function() { window.print(); }, 400);',
+            '  };',
+            '<\/script>'
+        ].join('\n');
+        var injected = filledHtml.replace('</body>', pdfHelpInjection + '\n</body>');
+        var win = window.open('', '_blank', 'width=900,height=700');
+        if (!win) {
+            alert('Pop-up blocked. Please allow pop-ups for this site.');
+            return;
+        }
+        win.document.open();
+        win.document.write(injected);
+        win.document.close();
+    }
+
     function clientSideDownload() {
         return buildFilledHtml()
             .then(function (filledHtml) {
@@ -424,44 +452,14 @@
                 var filename = 'AmeriDex-Quote-'
                              + (data.quoteNumber || 'Draft').replace(/[^a-zA-Z0-9-]/g, '-');
 
-                // Inject print-to-PDF helper styles + toast + auto-print into the template.
-                // The toast is only visible on screen (hidden in @media print) so it
-                // doesn't appear in the saved PDF.
-                var pdfHelpInjection = [
-                    '<style>',
-                    '  #adx-pdf-toast {',
-                    '    position:fixed;bottom:24px;left:50%;transform:translateX(-50%);',
-                    '    background:#1B2F6B;color:#fff;padding:12px 24px;border-radius:999px;',
-                    '    font-family:system-ui,Arial,sans-serif;font-size:14px;font-weight:600;',
-                    '    box-shadow:0 8px 32px rgba(27,47,107,.35);z-index:9999;',
-                    '    white-space:nowrap;',
-                    '  }',
-                    '  #adx-pdf-toast span { color:#C8102E; }',
-                    '  @media print { #adx-pdf-toast { display:none !important; } }',
-                    '</style>',
-                    '<div id="adx-pdf-toast">',
-                    '  In the print dialog, set Destination to <span>Save as PDF</span> then click Save',
-                    '</div>',
-                    '<script>',
-                    '  document.title = ' + JSON.stringify(filename) + ';',
-                    '  window.onload = function() {',
-                    '    window.onafterprint = function() { window.close(); };',
-                    '    setTimeout(function() { window.print(); }, 400);',
-                    '  };',
-                    '<\/script>'
-                ].join('\n');
-
-                // Inject before </body>
-                var injected = filledHtml.replace('</body>', pdfHelpInjection + '\n</body>');
-
-                var win = openQuoteWindow(injected);
-                if (!win) {
-                    alert('Pop-up blocked. Please allow pop-ups for this site to download quotes as PDF.');
-                }
-                console.log('[PDF] Print-to-PDF window opened for:', filename);
+                return serverPdfDownload(filledHtml, filename)
+                    .catch(function (err) {
+                        console.warn('[PDF] Server unavailable, using print-to-PDF fallback:', err.message);
+                        printToPdfFallback(filledHtml, filename);
+                    });
             })
             .catch(function (err) {
-                console.error('[PDF] Download failed:', err);
+                console.error('[PDF] Build failed:', err);
                 alert('Failed to generate quote. Please try again.');
             });
     }
@@ -474,8 +472,7 @@
     }
 
     // =========================================================================
-    // PRINT CUSTOMER QUOTE — opens in new window, triggers print dialog
-    // Same as download but no toast and no auto-close after print.
+    // PRINT CUSTOMER QUOTE — always opens print dialog (physical printer intent)
     // =========================================================================
     function printQuote() {
         return buildFilledHtml()
@@ -488,10 +485,14 @@
                     '<\/script>'
                 ].join('\n');
                 var injected = filledHtml.replace('</body>', autoprint + '\n</body>');
-                var win = openQuoteWindow(injected);
+                var win = window.open('', '_blank', 'width=900,height=700');
                 if (!win) {
                     alert('Pop-up blocked. Please allow pop-ups for this site to print quotes.');
+                    return;
                 }
+                win.document.open();
+                win.document.write(injected);
+                win.document.close();
             })
             .catch(function (err) {
                 console.error('[Print] Failed:', err);
@@ -552,6 +553,6 @@
         patchPrintPreviewButton();
     }
 
-    console.log('[ameridex-print-branding] v2.5 loaded — print-to-PDF download, base64 logo, full customer info.');
+    console.log('[ameridex-print-branding] v2.6 loaded — server PDF via /api/pdf/generate, print-to-PDF fallback.');
 
 })();
