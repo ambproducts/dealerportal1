@@ -1,25 +1,34 @@
 /**
- * ameridex-print-branding.js  v2.6
+ * ameridex-print-branding.js  v2.7
  *
- * Changes (v2.6 — 2026-03-01):
- *   TRUE ONE-CLICK PDF DOWNLOAD
- *     downloadPDF() now calls POST /api/pdf/generate on the existing
- *     Render server. The server uses Puppeteer + headless Chromium to
- *     render the filled quote HTML and returns a real application/pdf
- *     binary. The browser receives it as a file download with the
- *     filename AmeriDex-Quote-XXXX.pdf — no print dialog, no user
- *     interaction, no viewer error.
+ * Changes (v2.7 — 2026-03-01):
+ *   FIX: Duplicate quote created when downloading PDF from a loaded quote.
  *
- *     Flow:
- *       1. buildFilledHtml() — fetches template + inlines base64 logo
- *       2. POST /api/pdf/generate with { html, filename }
- *       3. Server returns pdf binary
- *       4. response.blob() → <a download> click → file in downloads
+ *   Root cause: checkUnsaved() called isQuoteSaved() which always returned
+ *   false for a loaded/retrieved quote because:
+ *     1. `quoteDirty` is not defined in the portal, so isDirty was always
+ *        false but the hasId check used cq.id instead of cq._serverId.
+ *     2. When the "Save & Continue" button was clicked inside showSavePrompt(),
+ *        it called saveCurrentQuote() which — because currentQuote._serverId
+ *        was not matching any savedQuotes entry at that point — pushed a brand
+ *        new quote into savedQuotes[] and POSTed it to the server.
  *
- *     Fallback:
- *       If the server returns an error or is unreachable, falls back
- *       to print-to-PDF (window.print()) so the button always works.
+ *   Fix:
+ *     - isQuoteSaved() now checks cq._serverId || cq.quoteId (not cq.id).
+ *       A quote loaded from the server always has _serverId set by loadQuote().
+ *       This means checkUnsaved() short-circuits immediately for any retrieved
+ *       quote and NEVER calls saveCurrentQuote() — no duplicate.
+ *     - showSavePrompt() "Save & Continue" path now calls
+ *       window.saveCurrentQuote() (the overridden API version from
+ *       ameridex-api.js) instead of a bare saveQuote() which may not exist.
+ *     - authToken lookup for serverPdfDownload() now checks both
+ *       sessionStorage('ameridex-token') AND localStorage('authToken')
+ *       so it works regardless of which key the auth module uses.
  *
+ *   FIX: /api/pdf/generate is now protected by requireAuth middleware
+ *   (see routes/pdf.js — committed in the same push).
+ *
+ * Changes (v2.6): TRUE one-click server PDF via POST /api/pdf/generate.
  * Changes (v2.5): print-to-PDF via window.print(), base64 logo.
  * Changes (v2.4): force .html download, base64 logo inline.
  * Changes (v2.3): removed dead server call, text/html Blob.
@@ -87,14 +96,40 @@
     }
 
     // =========================================================================
+    // AUTH TOKEN — reads whichever key the auth module uses
+    // =========================================================================
+    function getAuthToken() {
+        // ameridex-api.js stores the token in sessionStorage under 'ameridex-token'.
+        // A fallback to localStorage('authToken') covers any older code paths.
+        return sessionStorage.getItem('ameridex-token')
+            || localStorage.getItem('authToken')
+            || '';
+    }
+
+    // =========================================================================
     // UNSAVED QUOTE GUARD
     // =========================================================================
+    // A quote is considered "saved" (i.e. already on the server) when:
+    //   - currentQuote has a _serverId (set by loadQuote / saveCurrentQuote)
+    //     OR a quoteId string (locally saved but not yet synced)
+    //
+    // NOTE: We intentionally do NOT check quoteDirty here because that flag
+    // is not reliably maintained. The only consequence of skipping the prompt
+    // for a genuinely dirty-but-saved quote is that the PDF reflects whatever
+    // is currently in currentQuote.lineItems, which is exactly what the user
+    // sees on screen — correct behaviour.
+    //
+    // What we must NEVER do is call saveCurrentQuote() on a quote that
+    // already has a _serverId, because saveCurrentQuote() re-evaluates
+    // savedQuotes[] membership at that moment and can push a duplicate entry
+    // if the array reference is stale.
+    // =========================================================================
     function isQuoteSaved() {
-        var cq = (typeof currentQuote !== 'undefined') ? currentQuote : null;
+        var cq = (typeof window.currentQuote !== 'undefined') ? window.currentQuote : null;
         if (!cq) return false;
-        var hasId   = !!(cq.id || cq.quoteId);
-        var isDirty = (typeof quoteDirty !== 'undefined') ? !!quoteDirty : false;
-        return hasId && !isDirty;
+        // _serverId means the server knows about this quote
+        // quoteId means it was saved at least locally
+        return !!(cq._serverId || cq.quoteId);
     }
 
     function injectSaveModalStyles() {
@@ -150,29 +185,44 @@
                 '</div>'
             ].join('');
             document.body.appendChild(overlay);
+
             function cleanup() {
                 if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
             }
+
             document.getElementById('adx-btn-save-continue').addEventListener('click', function () {
                 cleanup();
-                if (typeof saveQuote === 'function') {
-                    Promise.resolve(saveQuote())
+                // Use the overridden saveCurrentQuote from ameridex-api.js.
+                // This version correctly checks _serverId before deciding
+                // whether to PUT (update) or POST (create) on the server.
+                var saveFn = window.saveCurrentQuote || null;
+                if (typeof saveFn === 'function') {
+                    Promise.resolve(saveFn())
                         .then(function () { resolve(true); })
                         .catch(function () { resolve(true); });
-                } else { resolve(true); }
+                } else {
+                    resolve(true);
+                }
             });
+
             document.getElementById('adx-btn-continue-nosave').addEventListener('click', function () {
-                cleanup(); resolve(true);
+                cleanup();
+                resolve(true);
             });
+
             document.getElementById('adx-btn-cancel-save').addEventListener('click', function () {
-                cleanup(); resolve(false);
+                cleanup();
+                resolve(false);
             });
+
             overlay.addEventListener('click', function (e) {
                 if (e.target === overlay) { cleanup(); resolve(false); }
             });
         });
     }
 
+    // checkUnsaved: if quote is already saved/synced, proceed immediately.
+    // Only show the prompt for a brand-new unsaved quote (no _serverId, no quoteId).
     function checkUnsaved() {
         if (isQuoteSaved()) return Promise.resolve(true);
         return showSavePrompt();
@@ -206,7 +256,7 @@
             estimatedTotal:  0
         };
 
-        var cq = (typeof currentQuote !== 'undefined') ? currentQuote : null;
+        var cq = (typeof window.currentQuote !== 'undefined') ? window.currentQuote : null;
         if (cq) {
             data.quoteNumber = cq.quoteNumber || cq.quoteId || 'Draft';
             if (cq.createdAt) {
@@ -215,10 +265,10 @@
                 });
             }
         }
-        if (typeof dealerSettings !== 'undefined' && dealerSettings) {
-            data.dealerCode     = dealerSettings.dealerCode    || '';
-            data.dealerBusiness = dealerSettings.dealerName    || dealerSettings.businessName || '';
-            data.dealerContact  = dealerSettings.dealerContact || dealerSettings.contactName  || '';
+        if (typeof window.dealerSettings !== 'undefined' && window.dealerSettings) {
+            data.dealerCode     = window.dealerSettings.dealerCode    || '';
+            data.dealerBusiness = window.dealerSettings.dealerName    || window.dealerSettings.businessName || '';
+            data.dealerContact  = window.dealerSettings.dealerContact || window.dealerSettings.contactName  || '';
         }
         var custObj = (cq && cq.customer) ? cq.customer : null;
         data.customerName    = (custObj && custObj.name)    || readField('cust-name');
@@ -268,7 +318,7 @@
                     total:        sub
                 };
             });
-            data.subtotal      = total;
+            data.subtotal       = total;
             data.estimatedTotal = total;
         }
         return data;
@@ -298,14 +348,14 @@
 
     function buildCustomerInfoRows(data) {
         var rows = '';
-        rows += infoRow('Name',       data.customerName);
-        rows += infoRow('Company',    data.customerCompany);
-        rows += infoRow('Phone',      data.customerPhone);
-        rows += infoRow('Email',      data.customerEmail);
-        rows += infoRow('Address',    data.customerAddress);
+        rows += infoRow('Name',         data.customerName);
+        rows += infoRow('Company',      data.customerCompany);
+        rows += infoRow('Phone',        data.customerPhone);
+        rows += infoRow('Email',        data.customerEmail);
+        rows += infoRow('Address',      data.customerAddress);
         var cityState = [data.customerCity, data.customerState].filter(Boolean).join(', ');
         if (cityState) rows += infoRow('City / State', cityState);
-        rows += infoRow('Zip Code',   data.customerZip);
+        rows += infoRow('Zip Code',     data.customerZip);
         if (!rows) {
             rows = '<div class="info-row"><span class="info-value" style="color:#6B7A90;font-weight:400;">No customer information entered</span></div>';
         }
@@ -372,12 +422,12 @@
 
     // =========================================================================
     // DOWNLOAD PDF — PRIMARY PATH
-    // Sends filled HTML to POST /api/pdf/generate on the existing Render
-    // server. Puppeteer renders it server-side and returns a real .pdf binary.
-    // The browser triggers a file download — no dialog, no viewer, no prompt.
+    // POST /api/pdf/generate is now protected by requireAuth middleware.
+    // getAuthToken() reads sessionStorage('ameridex-token') which is where
+    // ameridex-api.js stores the token after login / session resume.
     // =========================================================================
     function serverPdfDownload(filledHtml, filename) {
-        var token = localStorage.getItem('authToken') || '';
+        var token = getAuthToken();
         return fetch('/api/pdf/generate', {
             method:  'POST',
             headers: {
@@ -393,8 +443,8 @@
         .then(function (blob) {
             var url = URL.createObjectURL(blob);
             var a   = document.createElement('a');
-            a.href        = url;
-            a.download    = filename + '.pdf';
+            a.href          = url;
+            a.download      = filename + '.pdf';
             a.style.display = 'none';
             document.body.appendChild(a);
             a.click();
@@ -408,7 +458,7 @@
 
     // =========================================================================
     // FALLBACK — print-to-PDF via system print dialog
-    // Only used if the server endpoint returns an error or is unreachable.
+    // Only triggered if the server endpoint is unreachable or returns an error.
     // =========================================================================
     function printToPdfFallback(filledHtml, filename) {
         console.warn('[PDF] Falling back to print-to-PDF for:', filename);
@@ -472,7 +522,7 @@
     }
 
     // =========================================================================
-    // PRINT CUSTOMER QUOTE — always opens print dialog (physical printer intent)
+    // PRINT CUSTOMER QUOTE — physical printer intent, always opens print dialog
     // =========================================================================
     function printQuote() {
         return buildFilledHtml()
@@ -553,6 +603,6 @@
         patchPrintPreviewButton();
     }
 
-    console.log('[ameridex-print-branding] v2.6 loaded — server PDF via /api/pdf/generate, print-to-PDF fallback.');
+    console.log('[ameridex-print-branding] v2.7 loaded — no-duplicate fix, auth token fix, requireAuth on /api/pdf/generate.');
 
 })();

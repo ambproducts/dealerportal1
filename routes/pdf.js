@@ -2,22 +2,24 @@
 // routes/pdf.js
 // POST /api/pdf/generate
 //
+// Protected by requireAuth middleware — a valid Bearer token
+// (issued by /api/auth/login) is required. Unauthenticated
+// requests receive 401 before Puppeteer is ever invoked.
+//
 // Accepts a filled HTML string from the client, renders it
 // with Puppeteer (headless Chromium), and returns a real .pdf
-// binary as a file download — zero user interaction required.
+// binary as a file download.
 //
 // Uses @sparticuz/chromium which is pre-optimised for serverless
 // and Render.com environments (already in package.json).
 // =============================================================
 
-const express  = require('express');
-const router   = express.Router();
-const path     = require('path');
-const fs       = require('fs');
+const express      = require('express');
+const router       = express.Router();
+const { requireAuth } = require('../middleware/auth');
 
-// Lazy-load Puppeteer so the server starts even if Chromium
-// isn't available in the current environment (e.g. local dev
-// without the binary downloaded yet).
+// Lazy-load Puppeteer so the server starts even if the Chromium
+// binary hasn't been downloaded yet (e.g. local dev).
 let puppeteer = null;
 let chromium  = null;
 
@@ -36,6 +38,9 @@ function getPuppeteer() {
 // =============================================================
 // POST /api/pdf/generate
 //
+// Headers:
+//   Authorization: Bearer <token>   (required — checked by requireAuth)
+//
 // Request body (JSON):
 //   { html: '<full filled HTML string>', filename: 'AmeriDex-Quote-XXXX' }
 //
@@ -43,9 +48,10 @@ function getPuppeteer() {
 //   200  application/pdf  binary stream
 //        Content-Disposition: attachment; filename="AmeriDex-Quote-XXXX.pdf"
 //   400  { error: 'html is required' }
+//   401  { error: 'Authentication required' }   (from requireAuth)
 //   500  { error: 'PDF generation failed', detail: '...' }
 // =============================================================
-router.post('/generate', async (req, res) => {
+router.post('/generate', requireAuth, async (req, res) => {
     const { html, filename } = req.body;
 
     if (!html || typeof html !== 'string' || !html.trim()) {
