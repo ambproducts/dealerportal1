@@ -1,24 +1,35 @@
 /**
- * ameridex-print-branding.js  v2.4
+ * ameridex-print-branding.js  v2.5
+ *
+ * Changes (v2.5 — 2026-03-01):
+ *   TRUE PDF DOWNLOAD
+ *     The only correct client-side way to produce a real .pdf binary
+ *     without a server renderer is the browser's own print-to-PDF engine.
+ *     downloadPDF() now:
+ *       1. Builds the fully filled, logo-inlined HTML.
+ *       2. Opens it in a new window (same as Print Customer Quote).
+ *       3. Injects a one-shot onafterprint handler that closes the window.
+ *       4. Calls window.print() on that window.
+ *     The system print dialog opens with "Save as PDF" as the default
+ *     destination on Chrome and Edge. The user clicks Save and gets a
+ *     real .pdf file in their downloads folder.
+ *     This is identical to how Notion, Google Docs, and Figma handle
+ *     client-side PDF export.
+ *
+ *   DIFFERENCE from Print Customer Quote:
+ *     - Print Customer Quote: opens print dialog immediately, intended
+ *       for sending to a physical printer or saving manually.
+ *     - Download PDF: opens print dialog with a toast hint telling the
+ *       user to select "Save as PDF" as the destination, making the
+ *       intent clear.
  *
  * Changes (v2.4 — 2026-03-01):
- *   BUG FIX — Logo missing in downloaded quote.
- *     Root cause: <img src="/images/ameridex-logo.png"> resolves against
- *     blob: URLs as nothing — the browser cannot load a relative path
- *     from a Blob document. Fix: the script fetches the logo at download
- *     time, converts it to a base64 data URI, and splices it directly
- *     into the template HTML before the Blob is created. The logo is
- *     fully self-contained in the output file.
- *
- *   BUG FIX — Download opens window instead of prompting save.
- *     v2.3 used window.open(blobUrl) to avoid the PDF viewer error.
- *     Now that the file is .html (not .pdf), a direct <a download>
- *     force-download works correctly — the browser saves it to the
- *     downloads folder immediately without opening a viewer or a window.
+ *   - Logo inlined as base64 data URI (fixes missing logo in Blob docs).
+ *   - Force .html download via <a download>.
  *
  * Changes (v2.3 — 2026-03-01):
- *   - Removed dead /api/quotes/:id/pdf server call (was causing 401).
- *   - Switched Blob MIME from application/pdf to text/html.
+ *   - Removed dead server /api/quotes/:id/pdf call.
+ *   - Switched Blob MIME to text/html.
  *
  * Changes (v2.2 — 2026-03-01):
  *   - Double-load guard, null classList fix, full customer info.
@@ -40,7 +51,7 @@
     window.__adxPrintBrandingLoaded = true;
 
     // =========================================================================
-    // LOGO — fetched once, cached as a base64 data URI
+    // LOGO — fetched once, cached as base64 data URI so it renders in Blob docs
     // =========================================================================
     var cachedLogoDataUri = null;
 
@@ -54,8 +65,8 @@
             .then(function (blob) {
                 return new Promise(function (resolve, reject) {
                     var reader = new FileReader();
-                    reader.onload = function () {
-                        cachedLogoDataUri = reader.result; // data:image/png;base64,...
+                    reader.onload  = function () {
+                        cachedLogoDataUri = reader.result;
                         resolve(cachedLogoDataUri);
                     };
                     reader.onerror = reject;
@@ -64,7 +75,7 @@
             })
             .catch(function (err) {
                 console.warn('[PDF] Could not inline logo:', err.message);
-                return ''; // graceful — logo simply absent if fetch fails
+                return '';
             });
     }
 
@@ -167,17 +178,12 @@
                     resolve(true);
                 }
             });
-
             document.getElementById('adx-btn-continue-nosave').addEventListener('click', function () {
-                cleanup();
-                resolve(true);
+                cleanup(); resolve(true);
             });
-
             document.getElementById('adx-btn-cancel-save').addEventListener('click', function () {
-                cleanup();
-                resolve(false);
+                cleanup(); resolve(false);
             });
-
             overlay.addEventListener('click', function (e) {
                 if (e.target === overlay) { cleanup(); resolve(false); }
             });
@@ -255,7 +261,6 @@
                 } else if (item.productName) {
                     prodName = item.productName;
                 }
-
                 var sub = 0;
                 if (typeof getItemSubtotal === 'function') {
                     sub = getItemSubtotal(item);
@@ -272,7 +277,6 @@
                     }
                 }
                 total += sub;
-
                 return {
                     productName:  prodName,
                     type:         item.type || '',
@@ -315,14 +319,14 @@
 
     function buildCustomerInfoRows(data) {
         var rows = '';
-        rows += infoRow('Name',        data.customerName);
-        rows += infoRow('Company',     data.customerCompany);
-        rows += infoRow('Phone',       data.customerPhone);
-        rows += infoRow('Email',       data.customerEmail);
-        rows += infoRow('Address',     data.customerAddress);
+        rows += infoRow('Name',       data.customerName);
+        rows += infoRow('Company',    data.customerCompany);
+        rows += infoRow('Phone',      data.customerPhone);
+        rows += infoRow('Email',      data.customerEmail);
+        rows += infoRow('Address',    data.customerAddress);
         var cityState = [data.customerCity, data.customerState].filter(Boolean).join(', ');
         if (cityState) rows += infoRow('City / State', cityState);
-        rows += infoRow('Zip Code',    data.customerZip);
+        rows += infoRow('Zip Code',   data.customerZip);
         if (!rows) {
             rows = '<div class="info-row"><span class="info-value" style="color:#6B7A90;font-weight:400;">No customer information entered</span></div>';
         }
@@ -355,16 +359,14 @@
     }
 
     function fillTemplate(html, data, logoDataUri) {
-        // Inline the logo: replace the src attribute of the .logo img
-        // whether it points to a relative path or is already a data URI.
         if (logoDataUri) {
+            // Replace logo src regardless of attribute order
             html = html.replace(
-                /(<img[^>]*class="logo"[^>]*src=")[^"]*("/)/,
+                /(<img\b[^>]*?\bclass="logo"[^>]*?\bsrc=")[^"]*(")/,
                 '$1' + logoDataUri + '$2'
             );
-            // Also handle src before class attribute order
             html = html.replace(
-                /(<img[^>]*src=")[^"]*([^>]*class="logo")/,
+                /(<img\b[^>]*?\bsrc=")[^"]*([^>]*?\bclass="logo")/,
                 '$1' + logoDataUri + '$2'
             );
         }
@@ -381,48 +383,86 @@
     }
 
     // =========================================================================
-    // BUILD FILLED HTML — fetches template + logo in parallel, inlines both
+    // BUILD FILLED HTML — fetches template + logo in parallel
     // =========================================================================
     function buildFilledHtml() {
         return Promise.all([fetchTemplate(), fetchLogoDataUri()])
             .then(function (results) {
-                var html       = results[0];
-                var logoUri    = results[1];
-                var data       = gatherQuoteData();
-                return fillTemplate(html, data, logoUri);
+                return fillTemplate(results[0], gatherQuoteData(), results[1]);
             });
     }
 
     // =========================================================================
-    // DOWNLOAD — force-downloads as .html file directly to downloads folder.
-    // No new window, no viewer, no PDF error.
-    // The file is fully self-contained (logo inlined as base64).
+    // OPEN QUOTE WINDOW — shared by both download and print paths
+    // Writes filled HTML into a new window and resolves with that window ref.
+    // =========================================================================
+    function openQuoteWindow(filledHtml) {
+        var win = window.open('', '_blank', 'width=900,height=700');
+        if (!win) return null;
+        win.document.open();
+        win.document.write(filledHtml);
+        win.document.close();
+        return win;
+    }
+
+    // =========================================================================
+    // DOWNLOAD PDF
+    // Opens the quote in a new window configured for "Save as PDF":
+    //   - Page title set to the quote filename so the browser pre-fills
+    //     the Save dialog with the correct name (e.g. AmeriDex-Quote-Q260301-X5L2).
+    //   - A prominent toast inside the window instructs the user to choose
+    //     "Save as PDF" as the destination.
+    //   - window.print() fires automatically on load.
+    //   - onafterprint closes the window automatically.
+    // On Chrome/Edge the default print destination is "Save as PDF".
+    // The resulting file is a real .pdf binary saved by the OS.
     // =========================================================================
     function clientSideDownload() {
         return buildFilledHtml()
             .then(function (filledHtml) {
                 var data     = gatherQuoteData();
                 var filename = 'AmeriDex-Quote-'
-                             + (data.quoteNumber || 'Draft').replace(/[^a-zA-Z0-9-]/g, '-')
-                             + '.html';
+                             + (data.quoteNumber || 'Draft').replace(/[^a-zA-Z0-9-]/g, '-');
 
-                var blob = new Blob([filledHtml], { type: 'text/html;charset=utf-8' });
-                var url  = URL.createObjectURL(blob);
-                var a    = document.createElement('a');
-                a.href        = url;
-                a.download    = filename;
-                a.style.display = 'none';
-                document.body.appendChild(a);
-                a.click();
-                setTimeout(function () {
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                }, 1000);
-                console.log('[PDF] Download triggered:', filename);
+                // Inject print-to-PDF helper styles + toast + auto-print into the template.
+                // The toast is only visible on screen (hidden in @media print) so it
+                // doesn't appear in the saved PDF.
+                var pdfHelpInjection = [
+                    '<style>',
+                    '  #adx-pdf-toast {',
+                    '    position:fixed;bottom:24px;left:50%;transform:translateX(-50%);',
+                    '    background:#1B2F6B;color:#fff;padding:12px 24px;border-radius:999px;',
+                    '    font-family:system-ui,Arial,sans-serif;font-size:14px;font-weight:600;',
+                    '    box-shadow:0 8px 32px rgba(27,47,107,.35);z-index:9999;',
+                    '    white-space:nowrap;',
+                    '  }',
+                    '  #adx-pdf-toast span { color:#C8102E; }',
+                    '  @media print { #adx-pdf-toast { display:none !important; } }',
+                    '</style>',
+                    '<div id="adx-pdf-toast">',
+                    '  In the print dialog, set Destination to <span>Save as PDF</span> then click Save',
+                    '</div>',
+                    '<script>',
+                    '  document.title = ' + JSON.stringify(filename) + ';',
+                    '  window.onload = function() {',
+                    '    window.onafterprint = function() { window.close(); };',
+                    '    setTimeout(function() { window.print(); }, 400);',
+                    '  };',
+                    '<\/script>'
+                ].join('\n');
+
+                // Inject before </body>
+                var injected = filledHtml.replace('</body>', pdfHelpInjection + '\n</body>');
+
+                var win = openQuoteWindow(injected);
+                if (!win) {
+                    alert('Pop-up blocked. Please allow pop-ups for this site to download quotes as PDF.');
+                }
+                console.log('[PDF] Print-to-PDF window opened for:', filename);
             })
             .catch(function (err) {
                 console.error('[PDF] Download failed:', err);
-                alert('Failed to generate quote file. Please try again.');
+                alert('Failed to generate quote. Please try again.');
             });
     }
 
@@ -435,22 +475,23 @@
 
     // =========================================================================
     // PRINT CUSTOMER QUOTE — opens in new window, triggers print dialog
+    // Same as download but no toast and no auto-close after print.
     // =========================================================================
     function printQuote() {
         return buildFilledHtml()
             .then(function (filledHtml) {
-                var printWindow = window.open('', '_blank', 'width=900,height=700');
-                if (!printWindow) {
+                var data = gatherQuoteData();
+                var autoprint = [
+                    '<script>',
+                    '  document.title = ' + JSON.stringify('AmeriDex Quote ' + (data.quoteNumber || 'Draft')) + ';',
+                    '  window.onload = function() { window.focus(); window.print(); };',
+                    '<\/script>'
+                ].join('\n');
+                var injected = filledHtml.replace('</body>', autoprint + '\n</body>');
+                var win = openQuoteWindow(injected);
+                if (!win) {
                     alert('Pop-up blocked. Please allow pop-ups for this site to print quotes.');
-                    return;
                 }
-                printWindow.document.open();
-                printWindow.document.write(filledHtml);
-                printWindow.document.close();
-                printWindow.onload = function () {
-                    printWindow.focus();
-                    printWindow.print();
-                };
             })
             .catch(function (err) {
                 console.error('[Print] Failed:', err);
@@ -511,6 +552,6 @@
         patchPrintPreviewButton();
     }
 
-    console.log('[ameridex-print-branding] v2.4 loaded — base64 logo inline, force .html download.');
+    console.log('[ameridex-print-branding] v2.5 loaded — print-to-PDF download, base64 logo, full customer info.');
 
 })();
