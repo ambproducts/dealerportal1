@@ -1,35 +1,30 @@
 /**
- * ameridex-print-branding.js  v2.3
+ * ameridex-print-branding.js  v2.4
+ *
+ * Changes (v2.4 — 2026-03-01):
+ *   BUG FIX — Logo missing in downloaded quote.
+ *     Root cause: <img src="/images/ameridex-logo.png"> resolves against
+ *     blob: URLs as nothing — the browser cannot load a relative path
+ *     from a Blob document. Fix: the script fetches the logo at download
+ *     time, converts it to a base64 data URI, and splices it directly
+ *     into the template HTML before the Blob is created. The logo is
+ *     fully self-contained in the output file.
+ *
+ *   BUG FIX — Download opens window instead of prompting save.
+ *     v2.3 used window.open(blobUrl) to avoid the PDF viewer error.
+ *     Now that the file is .html (not .pdf), a direct <a download>
+ *     force-download works correctly — the browser saves it to the
+ *     downloads folder immediately without opening a viewer or a window.
  *
  * Changes (v2.3 — 2026-03-01):
- *   BUG FIX — "Failed to load PDF document" error.
- *     Root cause: clientSideDownload() was creating a Blob typed as
- *     'application/pdf' but filled with HTML content. Any PDF viewer
- *     (browser built-in, PDF.js, OS viewer) correctly rejected it.
- *     Fix: Download PDF now opens a new window with a Blob URL typed
- *     as 'text/html' — the browser renders the branded quote template
- *     perfectly and the user can Save As from there. No viewer error.
- *
- *   CLEANUP — Removed dead server endpoint attempt.
- *     The /api/quotes/:id/pdf endpoint returns 401 on every call
- *     because no backend is deployed. The server-first branch has been
- *     removed entirely. downloadPDF() now goes straight to the
- *     client-side path, eliminating the 401 console noise and the
- *     second classList null crash that was triggered by the error
- *     handler racing with the DOM.
+ *   - Removed dead /api/quotes/:id/pdf server call (was causing 401).
+ *   - Switched Blob MIME from application/pdf to text/html.
  *
  * Changes (v2.2 — 2026-03-01):
- *   - Double-load guard (window.__adxPrintBrandingLoaded).
- *   - Null classList guard in patchPrintPreviewButton().
- *   - Full customer info in PDF (all 8 fields, conditional rows).
- *   - Retrieved quote auto-populates customer DOM fields.
+ *   - Double-load guard, null classList fix, full customer info.
  *
  * Changes (v2.1 — 2026-03-01):
- *   - True client-side download — no print dialog for Download PDF.
- *   - Unsaved-quote save prompt.
- *
- * Previous fixes (v2.0 — 2026-03-01):
- *   - Double print dialog, $0 values, color scheme, Print button patch.
+ *   - No print dialog on Download PDF, unsaved-quote save prompt.
  */
 
 (function () {
@@ -43,6 +38,35 @@
         return;
     }
     window.__adxPrintBrandingLoaded = true;
+
+    // =========================================================================
+    // LOGO — fetched once, cached as a base64 data URI
+    // =========================================================================
+    var cachedLogoDataUri = null;
+
+    function fetchLogoDataUri() {
+        if (cachedLogoDataUri) return Promise.resolve(cachedLogoDataUri);
+        return fetch('/images/ameridex-logo.png')
+            .then(function (res) {
+                if (!res.ok) throw new Error('Logo fetch failed: ' + res.status);
+                return res.blob();
+            })
+            .then(function (blob) {
+                return new Promise(function (resolve, reject) {
+                    var reader = new FileReader();
+                    reader.onload = function () {
+                        cachedLogoDataUri = reader.result; // data:image/png;base64,...
+                        resolve(cachedLogoDataUri);
+                    };
+                    reader.onerror = reject;
+                    reader.readAsDataURL(blob);
+                });
+            })
+            .catch(function (err) {
+                console.warn('[PDF] Could not inline logo:', err.message);
+                return ''; // graceful — logo simply absent if fetch fails
+            });
+    }
 
     // =========================================================================
     // TEMPLATE CACHE
@@ -166,7 +190,7 @@
     }
 
     // =========================================================================
-    // DATA GATHERING — reads ALL customer fields from DOM + currentQuote
+    // DATA GATHERING
     // =========================================================================
     function readField(id) {
         var el = document.getElementById(id);
@@ -210,11 +234,7 @@
             data.dealerContact  = dealerSettings.dealerContact || dealerSettings.contactName  || '';
         }
 
-        // Prefer currentQuote.customer; fall back to live DOM fields.
-        // Ensures retrieved quotes show stored info without requiring
-        // the user to touch the form first.
         var custObj = (cq && cq.customer) ? cq.customer : null;
-
         data.customerName    = (custObj && custObj.name)    || readField('cust-name');
         data.customerEmail   = (custObj && custObj.email)   || readField('cust-email');
         data.customerPhone   = (custObj && custObj.phone)   || readField('cust-phone');
@@ -285,7 +305,6 @@
         return '$' + Number(num || 0).toFixed(2);
     }
 
-    // Only renders a row when value is non-empty — no blank "N/A" rows.
     function infoRow(label, value) {
         if (!value || !String(value).trim()) return '';
         return '<div class="info-row">'
@@ -323,7 +342,9 @@
                 : (item.color || 'N/A');
             return '<tr>'
                 + '<td><span class="product-name">' + escapeHtml(item.productName) + '</span>'
-                + (item.type && item.type !== 'custom' ? '<br><small style="color:#6B7A90">' + escapeHtml(item.type) + '</small>' : '')
+                + (item.type && item.type !== 'custom'
+                    ? '<br><small style="color:#6B7A90">' + escapeHtml(item.type) + '</small>'
+                    : '')
                 + '</td>'
                 + '<td><span class="color-swatch"><span class="swatch-dot"></span>' + escapeHtml(colorDisplay) + '</span></td>'
                 + '<td>' + escapeHtml(lengthDisplay) + '</td>'
@@ -333,7 +354,20 @@
         }).join('\n');
     }
 
-    function fillTemplate(html, data) {
+    function fillTemplate(html, data, logoDataUri) {
+        // Inline the logo: replace the src attribute of the .logo img
+        // whether it points to a relative path or is already a data URI.
+        if (logoDataUri) {
+            html = html.replace(
+                /(<img[^>]*class="logo"[^>]*src=")[^"]*("/)/,
+                '$1' + logoDataUri + '$2'
+            );
+            // Also handle src before class attribute order
+            html = html.replace(
+                /(<img[^>]*src=")[^"]*([^>]*class="logo")/,
+                '$1' + logoDataUri + '$2'
+            );
+        }
         return html
             .replace(/{{QUOTE_NUMBER}}/g,      escapeHtml(data.quoteNumber))
             .replace(/{{QUOTE_DATE}}/g,         escapeHtml(data.quoteDate))
@@ -347,78 +381,60 @@
     }
 
     // =========================================================================
-    // BUILD FILLED HTML — shared by both download and print paths
+    // BUILD FILLED HTML — fetches template + logo in parallel, inlines both
     // =========================================================================
     function buildFilledHtml() {
-        return fetchTemplate().then(function (html) {
-            return fillTemplate(html, gatherQuoteData());
-        });
+        return Promise.all([fetchTemplate(), fetchLogoDataUri()])
+            .then(function (results) {
+                var html       = results[0];
+                var logoUri    = results[1];
+                var data       = gatherQuoteData();
+                return fillTemplate(html, data, logoUri);
+            });
     }
 
     // =========================================================================
-    // DOWNLOAD PDF
-    // Opens the filled quote template in a new browser window as HTML.
-    // The user sees the fully styled quote and can use File > Save As
-    // or Ctrl+S to save. No PDF viewer error, no print dialog.
-    //
-    // Why not force-download as .pdf:
-    //   A Blob containing HTML cannot be decoded as a PDF binary.
-    //   Every OS PDF viewer and Chrome's built-in viewer will reject it
-    //   with "Failed to load PDF document". The only correct client-side
-    //   approach without a server renderer (Puppeteer/wkhtmltopdf) is to
-    //   serve the HTML to a window and let the user save from there.
+    // DOWNLOAD — force-downloads as .html file directly to downloads folder.
+    // No new window, no viewer, no PDF error.
+    // The file is fully self-contained (logo inlined as base64).
     // =========================================================================
     function clientSideDownload() {
         return buildFilledHtml()
             .then(function (filledHtml) {
                 var data     = gatherQuoteData();
-                var filename = 'quote-' + (data.quoteNumber || 'draft').replace(/[^a-zA-Z0-9-]/g, '-');
+                var filename = 'AmeriDex-Quote-'
+                             + (data.quoteNumber || 'Draft').replace(/[^a-zA-Z0-9-]/g, '-')
+                             + '.html';
 
-                // Open a new window with a text/html Blob URL.
-                // The browser renders the styled template cleanly.
                 var blob = new Blob([filledHtml], { type: 'text/html;charset=utf-8' });
                 var url  = URL.createObjectURL(blob);
-                var win  = window.open(url, '_blank');
-
-                if (!win) {
-                    // Pop-up blocked — fall back to a direct <a download> as .html
-                    var a    = document.createElement('a');
-                    a.href     = url;
-                    a.download = filename + '.html';
-                    a.style.display = 'none';
-                    document.body.appendChild(a);
-                    a.click();
-                    setTimeout(function () {
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(url);
-                    }, 1000);
-                    console.log('[PDF] Pop-up blocked — direct HTML download triggered:', filename + '.html');
-                } else {
-                    // Revoke the object URL after the window has loaded
-                    win.addEventListener('load', function () {
-                        URL.revokeObjectURL(url);
-                    });
-                    // Fallback revoke after 30s if load event doesn't fire
-                    setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
-                    console.log('[PDF] Quote window opened:', filename);
-                }
+                var a    = document.createElement('a');
+                a.href        = url;
+                a.download    = filename;
+                a.style.display = 'none';
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(function () {
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }, 1000);
+                console.log('[PDF] Download triggered:', filename);
             })
             .catch(function (err) {
-                console.error('[PDF] Client-side download failed:', err);
-                alert('Failed to generate quote. Please try again.');
+                console.error('[PDF] Download failed:', err);
+                alert('Failed to generate quote file. Please try again.');
             });
     }
 
     function downloadPDF() {
         return checkUnsaved().then(function (proceed) {
             if (!proceed) return;
-            // Go straight to client-side — no backend PDF endpoint deployed.
             return clientSideDownload();
         });
     }
 
     // =========================================================================
-    // PRINT CUSTOMER QUOTE — opens template in new window then triggers print
+    // PRINT CUSTOMER QUOTE — opens in new window, triggers print dialog
     // =========================================================================
     function printQuote() {
         return buildFilledHtml()
@@ -495,6 +511,6 @@
         patchPrintPreviewButton();
     }
 
-    console.log('[ameridex-print-branding] v2.3 loaded — HTML window download, no server call, full customer info.');
+    console.log('[ameridex-print-branding] v2.4 loaded — base64 logo inline, force .html download.');
 
 })();
