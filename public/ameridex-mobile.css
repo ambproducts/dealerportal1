@@ -9,70 +9,154 @@
  */
 
 /* ============================================================
-   1. BASE / GLOBAL
+   GLOBAL OVERFLOW GUARD — applies at ALL widths
+   Prevents header or any element from causing horizontal scroll
+   ============================================================ */
+
+html {
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+  box-sizing: border-box;
+}
+
+*, *::before, *::after {
+  box-sizing: inherit;
+}
+
+body {
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+/*
+ * The header lives OUTSIDE .page-shell so it must be
+ * full-width-safe on its own at every breakpoint.
+ */
+header.app-header {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  /* Prevent any child from punching outside */
+  overflow: hidden;
+}
+
+/* ============================================================
+   1. BASE / GLOBAL  (≤ 768px)
    ============================================================ */
 
 @media (max-width: 768px) {
 
-  html, body {
-    overflow-x: hidden;
-    -webkit-text-size-adjust: 100%;
-  }
-
   .page-shell {
     padding: 0.75rem 0.9rem 3rem;
     max-width: 100%;
+    width: 100%;
   }
 
   /* ============================================================
-     2. HEADER
+     2. HEADER  — complete rewrite for mobile
      ============================================================ */
 
   header.app-header {
-    padding: 1rem;
-    border-radius: 0 0 10px 10px;
+    /* Stack brand on top, actions below */
     flex-direction: column;
     align-items: stretch;
-    gap: 0.75rem;
+    padding: 0.85rem 1rem;
+    gap: 0.6rem;
+    border-radius: 0 0 10px 10px;
+    /* Allow internal wrapping instead of clipping */
+    overflow: visible;
   }
 
+  /* ---- Brand row: logo + title side by side ---- */
   .header-brand {
     flex-direction: row;
     align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
+    justify-content: flex-start;
+    gap: 0.65rem;
+    flex-wrap: nowrap;
+    width: 100%;
   }
 
   header.app-header img {
-    max-width: 120px;
+    max-width: 100px;
+    flex-shrink: 0;
+  }
+
+  .header-titles {
+    flex: 1;
+    min-width: 0; /* allow text to truncate rather than overflow */
   }
 
   .header-titles h1 {
-    font-size: 1.1rem;
+    font-size: 1rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin: 0;
   }
 
+  .header-titles .portal-badge {
+    font-size: 0.62rem;
+    padding: 0.15rem 0.45rem;
+  }
+
+  /* ---- Actions row: dealer info + all nav buttons ---- */
   .header-actions {
     display: flex;
-    flex-wrap: wrap;
-    gap: 0.4rem;
-    justify-content: flex-end;
+    flex-direction: row;
+    flex-wrap: wrap;          /* let buttons wrap to a second line naturally */
+    align-items: center;
+    gap: 0.35rem;
     width: 100%;
   }
 
+  /* Dealer code label sits on its own full-width line above buttons */
   .header-dealer-info {
     width: 100%;
-    text-align: right;
-    font-size: 0.75rem;
+    flex-basis: 100%;
+    font-size: 0.72rem;
+    opacity: 0.85;
     margin-right: 0;
     margin-bottom: 0.1rem;
+    text-align: left;
   }
 
+  /* Nav buttons — shrink text, allow wrapping, never clip */
   .header-btn {
-    padding: 0.55rem 0.85rem;
-    font-size: 0.78rem;
-    min-height: 36px;
-    /* Ensure nav buttons (My Quotes, Settings, Logout) wrap nicely */
+    flex: 1 1 auto;           /* grow/shrink equally */
+    min-width: 0;
     white-space: nowrap;
+    padding: 0.5rem 0.65rem;
+    font-size: 0.74rem;
+    min-height: 36px;
+    text-align: center;
+    border-radius: 999px;
+    /* ensure they never punch outside the header */
+    max-width: calc(50% - 0.35rem);
+  }
+
+  /* On very small phones three/four buttons go two-per-row naturally
+     because of flex-wrap + max-width 50%.  That's the desired behavior.
+     Quote Builder | My Quotes
+     Settings      | Logout
+  */
+
+  /* ============================================================
+     ADMIN PANEL HEADER — quotes-customers.html has an extra
+     "Quote Builder" link plus "My Quotes" active badge.
+     Give it its own treatment so it never overflows.
+     ============================================================ */
+
+  /* The active nav badge on quotes-customers */
+  .header-btn.active-nav {
+    background: rgba(255,255,255,0.3);
+    border-color: rgba(255,255,255,0.6);
+  }
+
+  /* If there are 4 nav items force a 2×2 grid layout */
+  .header-actions > .header-btn:nth-child(n+3) {
+    /* already handled by flex-wrap, just confirm sizing */
+    flex: 1 1 calc(50% - 0.35rem);
   }
 
   /* ============================================================
@@ -115,6 +199,8 @@
     font-size: 16px; /* Prevents iOS zoom on focus */
     padding: 0.7rem 0.8rem;
     min-height: 44px;
+    width: 100%;
+    max-width: 100%;
   }
 
   label {
@@ -166,7 +252,6 @@
     font-size: 16px;
   }
 
-  /* Card-header action buttons (Customers + New Quote) */
   #saved-quotes-section .card-header > div:last-child {
     display: flex;
     flex-wrap: wrap;
@@ -182,7 +267,6 @@
     padding: 0.55rem 0.75rem;
   }
 
-  /* Each saved quote row becomes a compact stacked card */
   .saved-quote-item {
     flex-direction: column;
     align-items: flex-start;
@@ -194,22 +278,10 @@
     width: 100%;
   }
 
-  .saved-quote-id {
-    font-size: 0.88rem;
-  }
-
-  .saved-quote-customer {
-    font-size: 0.82rem;
-  }
-
-  .saved-quote-date {
-    font-size: 0.72rem;
-  }
-
-  .saved-quote-total {
-    margin-right: 0;
-    font-size: 1rem;
-  }
+  .saved-quote-id    { font-size: 0.88rem; }
+  .saved-quote-customer { font-size: 0.82rem; }
+  .saved-quote-date  { font-size: 0.72rem; }
+  .saved-quote-total { margin-right: 0; font-size: 1rem; }
 
   .saved-quote-actions {
     display: flex;
@@ -226,7 +298,7 @@
   }
 
   /* ============================================================
-     7. CUSTOMERS SECTION
+     7. CUSTOMERS SECTION (inline in dealer-portal.html)
      ============================================================ */
 
   #customers-section .card-header {
@@ -246,21 +318,10 @@
     gap: 0.5rem;
   }
 
-  .customers-search {
-    max-width: none;
-  }
-
-  .customers-search input {
-    font-size: 16px;
-  }
-
-  .customers-stats {
-    font-size: 0.82rem;
-  }
-
-  .customers-list {
-    max-height: 60vh;
-  }
+  .customers-search    { max-width: none; }
+  .customers-search input { font-size: 16px; }
+  .customers-stats     { font-size: 0.82rem; }
+  .customers-list      { max-height: 60vh; }
 
   .customer-item {
     grid-template-columns: 1fr;
@@ -283,39 +344,160 @@
     min-height: 38px;
   }
 
-  .customer-name {
-    font-size: 0.95rem;
+  .customer-name                   { font-size: 0.95rem; }
+  .customer-email, .customer-company { font-size: 0.8rem; }
+  .customer-meta                   { flex-wrap: wrap; gap: 0.5rem; }
+
+  /* ============================================================
+     7b. QUOTES-CUSTOMERS PAGE (quotes-customers.html)
+     ============================================================ */
+
+  /* Tab bar */
+  .page-tabs {
+    margin-top: 0.85rem;
   }
 
-  .customer-email,
-  .customer-company {
+  .page-tab {
+    font-size: 0.88rem;
+    padding: 0.65rem 0.75rem;
+    min-height: 40px;
+  }
+
+  /* Stat cards go 2-column on mobile */
+  .stat-cards {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .stat-card {
+    padding: 0.85rem 0.75rem;
+  }
+
+  .stat-card .stat-value {
+    font-size: 1.35rem;
+  }
+
+  .stat-card .stat-label {
+    font-size: 0.7rem;
+  }
+
+  /* Filter bar stacks vertically */
+  .filter-bar {
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.85rem 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .filter-bar .search-input {
+    min-width: unset;
+    width: 100%;
+    font-size: 16px;
+  }
+
+  .filter-bar .filter-select {
+    width: 100%;
+    font-size: 16px;
+    min-height: 44px;
+  }
+
+  .filter-bar .filter-clear {
+    width: 100%;
+    min-height: 40px;
+    text-align: center;
+  }
+
+  /* Dealer scope bar */
+  .dealer-scope-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+  }
+
+  .dealer-scope-bar input {
+    width: 100%;
+    font-size: 16px;
+    min-height: 44px;
+  }
+
+  .scope-toggle {
+    width: 100%;
+  }
+
+  .scope-toggle-btn {
+    flex: 1;
+    text-align: center;
+    min-height: 36px;
+  }
+
+  .scope-indicator {
+    margin-left: 0;
+    justify-content: flex-start;
+  }
+
+  /* Data table — allow horizontal scroll inside wrapper only */
+  .data-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    max-height: 55vh;
+    margin-bottom: 1rem;
+    /* Pull slightly edge-to-edge for more reading room */
+    margin-left: -0.9rem;
+    margin-right: -0.9rem;
+    border-radius: 0;
+  }
+
+  .data-table {
+    font-size: 0.82rem;
+    min-width: 520px; /* ensure columns don't collapse */
+  }
+
+  .data-table thead th {
+    padding: 0.6rem 0.75rem;
+    font-size: 0.74rem;
+  }
+
+  .data-table tbody td {
+    padding: 0.65rem 0.75rem;
+  }
+
+  /* Pagination stacks */
+  .pagination {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+  }
+
+  .pagination-info {
     font-size: 0.8rem;
   }
 
-  .customer-meta {
+  .pagination-controls {
+    justify-content: center;
     flex-wrap: wrap;
-    gap: 0.5rem;
+    gap: 0.25rem;
+  }
+
+  .pagination-btn {
+    min-height: 36px;
+    min-width: 36px;
+    padding: 0.4rem 0.65rem;
+    font-size: 0.82rem;
   }
 
   /* ============================================================
      8. DECK CALCULATOR
      ============================================================ */
 
-  #calculator .form-grid {
-    gap: 0.75rem;
-  }
+  #calculator .form-grid { gap: 0.75rem; }
 
-  .deck-diagram {
-    max-width: 220px;
-  }
-
-  .deck-area {
-    height: 110px;
-  }
-
-  .dimension-arrow {
-    font-size: 0.65rem;
-  }
+  .deck-diagram    { max-width: 220px; }
+  .deck-area       { height: 110px; }
+  .dimension-arrow { font-size: 0.65rem; }
 
   .calc-buttons-row {
     flex-direction: column;
@@ -327,17 +509,9 @@
     min-height: 44px;
   }
 
-  .calc-result-box {
-    padding: 0.85rem;
-  }
-
-  .calc-result-box h3 {
-    font-size: 0.95rem;
-  }
-
-  .calc-result-details {
-    font-size: 0.85rem;
-  }
+  .calc-result-box        { padding: 0.85rem; }
+  .calc-result-box h3     { font-size: 0.95rem; }
+  .calc-result-details    { font-size: 0.85rem; }
 
   /* ============================================================
      9. COLOR GRID
@@ -348,13 +522,8 @@
     gap: 0.65rem;
   }
 
-  .color-card img {
-    height: 65px;
-  }
-
-  .color-card-label {
-    font-size: 0.72rem;
-  }
+  .color-card img   { height: 65px; }
+  .color-card-label { font-size: 0.72rem; }
 
   .comparison-panel {
     grid-template-columns: 1fr 1fr;
@@ -362,9 +531,7 @@
     padding: 0.75rem;
   }
 
-  .color-preview h4 {
-    font-size: 0.82rem;
-  }
+  .color-preview h4 { font-size: 0.82rem; }
 
   /* ============================================================
      10. CUSTOMER INFO FORM
@@ -386,13 +553,8 @@
      11. ORDER / LINE ITEMS
      ============================================================ */
 
-  #desktop-table-container {
-    display: none;
-  }
-
-  #mobile-items-container {
-    display: block;
-  }
+  #desktop-table-container  { display: none; }
+  #mobile-items-container   { display: block; }
 
   .line-item-card {
     padding: 1rem;
@@ -405,14 +567,8 @@
     margin-bottom: 0.85rem;
   }
 
-  .line-item-row {
-    grid-template-columns: 1fr 1fr;
-    gap: 0.65rem;
-  }
-
-  .line-item-row.full {
-    grid-template-columns: 1fr;
-  }
+  .line-item-row        { grid-template-columns: 1fr 1fr; gap: 0.65rem; }
+  .line-item-row.full   { grid-template-columns: 1fr; }
 
   .line-item-row label {
     font-size: 0.82rem;
@@ -423,10 +579,7 @@
   }
 
   .line-item-row select,
-  .line-item-row input {
-    font-size: 16px;
-    min-height: 40px;
-  }
+  .line-item-row input  { font-size: 16px; min-height: 40px; }
 
   .line-item-card-actions {
     padding-top: 0.85rem;
@@ -440,12 +593,8 @@
     font-size: 0.85rem;
   }
 
-  .custom-item-warning {
-    font-size: 0.78rem;
-    padding: 0.45rem 0.65rem;
-  }
+  .custom-item-warning { font-size: 0.78rem; padding: 0.45rem 0.65rem; }
 
-  /* Add row / undo buttons */
   .btn-add-row {
     width: 100%;
     min-height: 44px;
@@ -462,24 +611,10 @@
     margin-top: 0.5rem;
   }
 
-  /* Options checkboxes */
-  .inline-checks {
-    gap: 0.75rem;
-  }
-
-  .check-row label {
-    font-size: 0.95rem;
-  }
-
-  .note-inline {
-    font-size: 0.82rem;
-    margin-left: 1.5rem;
-  }
-
-  .fastener-block {
-    font-size: 0.84rem;
-    padding: 0.7rem 0.8rem;
-  }
+  .inline-checks         { gap: 0.75rem; }
+  .check-row label       { font-size: 0.95rem; }
+  .note-inline           { font-size: 0.82rem; margin-left: 1.5rem; }
+  .fastener-block        { font-size: 0.84rem; padding: 0.7rem 0.8rem; }
 
   /* ============================================================
      12. TOTAL BAR & ACTIONS
@@ -491,13 +626,8 @@
     padding: 0.85rem 1rem;
   }
 
-  .total-label {
-    font-size: 0.88rem;
-  }
-
-  .total-value {
-    font-size: 1.25rem;
-  }
+  .total-label { font-size: 0.88rem; }
+  .total-value { font-size: 1.25rem; }
 
   .actions-row {
     flex-direction: column;
@@ -506,16 +636,13 @@
   }
 
   .actions-row .btn,
-  .actions-row .dropdown {
-    width: 100%;
-  }
+  .actions-row .dropdown { width: 100%; }
 
   .actions-row .dropdown .btn {
     width: 100%;
     justify-content: center;
   }
 
-  /* Dropdown opens upward — keep it readable on small screens */
   .dropdown-content {
     min-width: 100%;
     left: 0;
@@ -535,7 +662,7 @@
 
   .modal {
     padding: 0.75rem;
-    align-items: flex-end; /* Sheet-style modals from bottom */
+    align-items: flex-end;
   }
 
   .modal-content {
@@ -548,33 +675,13 @@
     -webkit-overflow-scrolling: touch;
   }
 
-  /* Color preview modal keeps natural centering */
-  #colorModal {
-    align-items: center;
-  }
+  #colorModal              { align-items: center; }
+  #colorModal .modal-content { border-radius: 14px; max-width: 90vw; }
+  #colorModal .modal-content img { max-height: 55vh; }
 
-  #colorModal .modal-content {
-    border-radius: 14px;
-    max-width: 90vw;
-  }
-
-  #colorModal .modal-content img {
-    max-height: 55vh;
-  }
-
-  /* Review modal */
-  .review-modal-content {
-    max-width: 100%;
-  }
-
-  .review-modal-content h2 {
-    font-size: 1.15rem;
-    margin-top: 0;
-  }
-
-  .review-section h3 {
-    font-size: 0.9rem;
-  }
+  .review-modal-content    { max-width: 100%; }
+  .review-modal-content h2 { font-size: 1.15rem; margin-top: 0; }
+  .review-section h3       { font-size: 0.9rem; }
 
   .review-item {
     flex-direction: column;
@@ -583,9 +690,7 @@
     margin-bottom: 0.65rem;
   }
 
-  .review-total {
-    font-size: 1.05rem;
-  }
+  .review-total { font-size: 1.05rem; }
 
   .review-modal-content > div:last-of-type {
     flex-direction: column;
@@ -598,11 +703,7 @@
     justify-content: center;
   }
 
-  /* Print preview modal */
-  .print-preview-modal {
-    max-width: 100%;
-    width: 100%;
-  }
+  .print-preview-modal     { max-width: 100%; width: 100%; }
 
   .print-preview-content {
     max-height: 50vh;
@@ -610,43 +711,15 @@
     padding: 1rem;
   }
 
-  .print-preview-actions {
-    flex-direction: column;
-    gap: 0.5rem;
-  }
+  .print-preview-actions   { flex-direction: column; gap: 0.5rem; }
+  .print-preview-actions .btn { width: 100%; min-height: 44px; justify-content: center; }
 
-  .print-preview-actions .btn {
-    width: 100%;
-    min-height: 44px;
-    justify-content: center;
-  }
+  .settings-modal-content  { max-width: 100%; }
+  .settings-modal-content h2 { font-size: 1.1rem; margin-bottom: 1rem; }
+  .settings-actions        { flex-direction: column; gap: 0.5rem; }
+  .settings-actions .btn   { width: 100%; min-height: 44px; justify-content: center; }
 
-  /* Settings modal */
-  .settings-modal-content {
-    max-width: 100%;
-  }
-
-  .settings-modal-content h2 {
-    font-size: 1.1rem;
-    margin-bottom: 1rem;
-  }
-
-  .settings-actions {
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-
-  .settings-actions .btn {
-    width: 100%;
-    min-height: 44px;
-    justify-content: center;
-  }
-
-  /* Success confirmation */
-  .success-confirmation {
-    padding: 0.75rem;
-    align-items: flex-end;
-  }
+  .success-confirmation    { padding: 0.75rem; align-items: flex-end; }
 
   .success-confirmation-content {
     max-width: 100%;
@@ -662,9 +735,7 @@
     margin-bottom: 1rem;
   }
 
-  .success-confirmation h2 {
-    font-size: 1.2rem;
-  }
+  .success-confirmation h2 { font-size: 1.2rem; }
 
   .success-confirmation .btn {
     width: 100%;
@@ -673,11 +744,7 @@
     margin-top: 0.75rem;
   }
 
-  /* Timeout warning */
-  .timeout-warning {
-    padding: 0.75rem;
-    align-items: flex-end;
-  }
+  .timeout-warning         { padding: 0.75rem; align-items: flex-end; }
 
   .timeout-warning-content {
     max-width: 100%;
@@ -701,16 +768,11 @@
     max-width: 100%;
   }
 
-  .login-card img {
-    max-width: 140px;
-  }
-
-  .login-card h1 {
-    font-size: 1.3rem;
-  }
+  .login-card img   { max-width: 140px; }
+  .login-card h1    { font-size: 1.3rem; }
 
   .login-card input {
-    font-size: 1.25rem; /* Large for dealer code entry */
+    font-size: 1.25rem;
     padding: 0.9rem 1rem;
     min-height: 52px;
   }
@@ -724,25 +786,14 @@
      15. GENERAL BUTTON SIZING
      ============================================================ */
 
-  .btn {
-    padding: 0.7rem 1.35rem;
-    font-size: 0.9rem;
-    min-height: 44px;
-  }
-
-  .btn-sm {
-    padding: 0.5rem 0.9rem;
-    font-size: 0.82rem;
-    min-height: 36px;
-  }
+  .btn    { padding: 0.7rem 1.35rem; font-size: 0.9rem; min-height: 44px; }
+  .btn-sm { padding: 0.5rem 0.9rem;  font-size: 0.82rem; min-height: 36px; }
 
   /* ============================================================
      16. CUSTOMER LOOKUP DROPDOWN
      ============================================================ */
 
-  .customer-lookup-results {
-    max-height: 180px;
-  }
+  .customer-lookup-results { max-height: 180px; }
 
   .customer-lookup-item {
     padding: 0.75rem 0.85rem;
@@ -756,81 +807,69 @@
      17. CONNECTIVITY BAR
      ============================================================ */
 
-  .connectivity-bar {
-    font-size: 0.78rem;
-    padding: 0.4rem;
-  }
-
-  body.offline .page-shell {
-    margin-top: 2rem;
-  }
+  .connectivity-bar        { font-size: 0.78rem; padding: 0.4rem; }
+  body.offline .page-shell { margin-top: 2rem; }
 
   /* ============================================================
      18. EMAIL FALLBACK
      ============================================================ */
 
-  .email-fallback-notice {
-    font-size: 0.82rem;
-    padding: 0.85rem;
-  }
+  .email-fallback-notice   { font-size: 0.82rem; padding: 0.85rem; }
 
 } /* end @media (max-width: 768px) */
 
 
 /* ============================================================
-   VERY SMALL PHONES (320px - 374px)
+   VERY SMALL PHONES (≤ 374px)
    ============================================================ */
 @media (max-width: 374px) {
 
-  .page-shell {
-    padding: 0.5rem 0.65rem 3rem;
-  }
+  .page-shell { padding: 0.5rem 0.65rem 3rem; }
+  .card       { padding: 0.9rem; }
 
-  .card {
-    padding: 0.9rem;
-  }
+  header.app-header { padding: 0.7rem 0.75rem; }
 
+  /* On 320px phones allow buttons to shrink further */
   .header-btn {
-    padding: 0.45rem 0.65rem;
-    font-size: 0.72rem;
+    padding: 0.4rem 0.5rem;
+    font-size: 0.68rem;
+    max-width: calc(50% - 0.2rem);
   }
 
-  .total-value {
-    font-size: 1.1rem;
-  }
+  .header-titles h1 { font-size: 0.9rem; }
 
-  .color-grid {
-    grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
-  }
+  header.app-header img { max-width: 80px; }
 
-  .color-card img {
-    height: 55px;
-  }
+  .total-value { font-size: 1.1rem; }
 
-  .comparison-panel {
-    grid-template-columns: 1fr;
-  }
+  .color-grid { grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); }
+  .color-card img { height: 55px; }
+  .comparison-panel { grid-template-columns: 1fr; }
 
   .timeout-warning .btn {
     width: 100%;
     margin-bottom: 0.35rem;
   }
 
+  /* Stat cards go single column on 320 */
+  .stat-cards { grid-template-columns: 1fr 1fr; gap: 0.4rem; }
+  .stat-card  { padding: 0.65rem 0.5rem; }
+  .stat-card .stat-value { font-size: 1.15rem; }
+
 }
 
 
 /* ============================================================
-   TABLET (769px - 1024px) — light touch
+   TABLET (769px - 1024px)
    ============================================================ */
 @media (min-width: 769px) and (max-width: 1024px) {
 
-  .page-shell {
-    padding: 1.25rem 1.5rem 2.5rem;
-  }
+  .page-shell { padding: 1.25rem 1.5rem 2.5rem; }
 
   header.app-header {
     flex-wrap: wrap;
     gap: 0.75rem;
+    padding: 1.25rem 1.5rem;
   }
 
   .header-actions {
@@ -838,13 +877,23 @@
     gap: 0.4rem;
   }
 
-  .color-grid {
-    grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+  /* Tablet still shows all nav buttons on one row normally;
+     only wrap if there are too many (admin panel). */
+  .header-btn {
+    white-space: nowrap;
+    padding: 0.5rem 0.9rem;
+    font-size: 0.78rem;
   }
 
-  .actions-row {
-    flex-wrap: wrap;
-    gap: 0.65rem;
-  }
+  .color-grid  { grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); }
+  .actions-row { flex-wrap: wrap; gap: 0.65rem; }
+
+  /* Stat cards 4-column on tablet */
+  .stat-cards  { grid-template-columns: repeat(4, 1fr); }
+
+  /* Filter bar stays horizontal but wraps */
+  .filter-bar  { flex-wrap: wrap; gap: 0.5rem; }
+
+  .filter-bar .search-input { min-width: 180px; flex: 1; }
 
 }
