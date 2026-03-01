@@ -1,6 +1,6 @@
 // ============================================================
-// AmeriDex Dealer Portal - Admin Panel v1.8
-// Date: 2026-02-26
+// AmeriDex Dealer Portal - Admin Panel v1.9
+// Date: 2026-03-01
 // ============================================================
 // REQUIRES: ameridex-api.js (v2.1+) loaded first
 //
@@ -8,6 +8,15 @@
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
 //   <script src="ameridex-admin.js"></script>
+//
+// v1.9 Changes (2026-03-01):
+//   - FIX: Admin Panel tab bar is now horizontally scrollable on
+//     mobile. .admin-tabs gets overflow-x:auto, white-space:nowrap,
+//     and -webkit-overflow-scrolling:touch so all 5 tabs (Dealers,
+//     Quotes, Products, Pricing Tiers, Users) are reachable on
+//     small screens without wrapping or clipping.
+//   - FIX: .admin-tab flex:1 removed on mobile so tabs stay their
+//     natural width inside the scrollable container.
 //
 // v1.8 Changes (2026-02-26):
 //   - ADD: refreshPricingNow() helper to trigger applyTierPricing()
@@ -77,9 +86,13 @@
         '.admin-header h2 { margin:0; font-size:1.25rem; }' +
         '.admin-close { background:none; border:none; color:#fff; font-size:1.5rem; cursor:pointer; padding:0.5rem; opacity:0.8; }' +
         '.admin-close:hover { opacity:1; }' +
-        '.admin-tabs { display:flex; background:#f9fafb; border-bottom:1px solid #e5e7eb; }' +
+        '.admin-tabs { display:flex; background:#f9fafb; border-bottom:1px solid #e5e7eb; ' +
+            'overflow-x:auto; white-space:nowrap; -webkit-overflow-scrolling:touch; ' +
+            'scrollbar-width:none; }' +
+        '.admin-tabs::-webkit-scrollbar { display:none; }' +
         '.admin-tab { flex:1; padding:0.85rem 1rem; border:none; background:transparent; font-size:0.9rem; ' +
-            'font-weight:600; color:#6b7280; cursor:pointer; transition:all 0.15s; border-bottom:3px solid transparent; }' +
+            'font-weight:600; color:#6b7280; cursor:pointer; transition:all 0.15s; border-bottom:3px solid transparent; ' +
+            'white-space:nowrap; flex-shrink:0; }' +
         '.admin-tab:hover { color:#374151; background:#f3f4f6; }' +
         '.admin-tab.active { color:#dc2626; border-bottom-color:#dc2626; background:#fff; }' +
         '.admin-body { padding:1.5rem; overflow-y:auto; flex:1; }' +
@@ -179,6 +192,7 @@
             'background:#fff; }' +
         '@media (max-width:768px) { ' +
             '#admin-panel { max-width:100%; margin:0; border-radius:10px; } ' +
+            '.admin-tab { flex:none; } ' +
             '.admin-form-row { grid-template-columns:1fr; } ' +
             '.admin-tier-products { grid-template-columns:1fr; } ' +
             '.admin-toolbar { flex-direction:column; align-items:stretch; } ' +
@@ -536,7 +550,6 @@
     var _allProducts = [];
     var _pricingTiers = [];
 
-    // Helper to refresh pricing on the dealer quotes page after product/tier changes
     function refreshPricingNow() {
         if (typeof window.applyTierPricing === 'function') {
             try {
@@ -895,7 +908,7 @@
 
 
     // ----------------------------------------------------------
-    // PRODUCTS TAB (v1.4, inline edit v1.7)
+    // PRODUCTS TAB
     // ----------------------------------------------------------
     function loadProducts() {
         var container = document.getElementById('admin-products-list');
@@ -965,7 +978,6 @@
 
     document.getElementById('admin-product-search').addEventListener('input', renderProductsTable);
 
-    // Create Product
     document.getElementById('admin-create-product-btn').addEventListener('click', function () {
         var name = document.getElementById('admin-new-prod-name').value.trim();
         var id = document.getElementById('admin-new-prod-id').value.trim().toLowerCase();
@@ -1001,12 +1013,10 @@
             .catch(function (err) { showAlert('admin-product-alert', 'Failed: ' + esc(err.message), 'error'); });
     });
 
-    // Inline Edit Product (v1.7)
     function editProduct(id) {
         var prod = _allProducts.find(function (p) { return p.id === id; });
         if (!prod) return;
 
-        // Close any other open edit forms first
         document.querySelectorAll('[id^="prod-edit-row-"]').forEach(function (row) {
             row.style.display = 'none';
             row.querySelector('td').innerHTML = '';
@@ -1143,8 +1153,8 @@
         if (!confirm('Are you sure you want to ' + action + ' "' + prod.name + '"?')) return;
 
         _api('PUT', '/api/admin/products/' + encodeURIComponent(id), { isActive: !currentlyActive })
-            .then(function () { 
-                showAlert('admin-product-alert', 'Product ' + action + 'd!', 'success'); 
+            .then(function () {
+                showAlert('admin-product-alert', 'Product ' + action + 'd!', 'success');
                 loadProducts();
                 refreshPricingNow();
             })
@@ -1163,7 +1173,7 @@
 
 
     // ----------------------------------------------------------
-    // PRICING TAB (v1.4: reads live product catalog from API)
+    // PRICING TAB
     // ----------------------------------------------------------
     function loadPricingTiers() {
         var container = document.getElementById('admin-pricing-list');
@@ -1274,30 +1284,30 @@
             }
         });
 
-        if (promises.length === 0) { 
-            saveBtn.textContent = 'Save All Changes'; 
-            saveBtn.disabled = false; 
-            showAlert('admin-pricing-alert', 'No changes to save', 'success'); 
-            return; 
+        if (promises.length === 0) {
+            saveBtn.textContent = 'Save All Changes';
+            saveBtn.disabled = false;
+            showAlert('admin-pricing-alert', 'No changes to save', 'success');
+            return;
         }
 
         Promise.all(promises)
-            .then(function (saved) { 
-                saveBtn.textContent = 'Save All Changes'; 
-                saveBtn.disabled = false; 
-                showAlert('admin-pricing-alert', 'Saved ' + saved.length + ' tier(s): ' + saved.join(', '), 'success'); 
+            .then(function (saved) {
+                saveBtn.textContent = 'Save All Changes';
+                saveBtn.disabled = false;
+                showAlert('admin-pricing-alert', 'Saved ' + saved.length + ' tier(s): ' + saved.join(', '), 'success');
                 refreshPricingNow();
             })
-            .catch(function (err) { 
-                saveBtn.textContent = 'Save All Changes'; 
-                saveBtn.disabled = false; 
-                showAlert('admin-pricing-alert', 'Save failed: ' + esc(err.message), 'error'); 
+            .catch(function (err) {
+                saveBtn.textContent = 'Save All Changes';
+                saveBtn.disabled = false;
+                showAlert('admin-pricing-alert', 'Save failed: ' + esc(err.message), 'error');
             });
     });
 
 
     // ----------------------------------------------------------
-    // USERS TAB (NEW in v1.5)
+    // USERS TAB
     // ----------------------------------------------------------
     var _allUsers = [];
 
@@ -1525,5 +1535,5 @@
     }
 
 
-    console.log('[AmeriDex Admin] v1.8 loaded.');
+    console.log('[AmeriDex Admin] v1.9 loaded.');
 })();
