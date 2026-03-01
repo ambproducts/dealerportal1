@@ -1,12 +1,27 @@
 // ============================================================
-// AmeriDex Dealer Portal - API Integration Patch v2.17
-// Date: 2026-02-28
+// AmeriDex Dealer Portal - API Integration Patch v2.18
+// Date: 2026-03-01
 // ============================================================
 // REQUIRES: ameridex-patches.js (v1.0+) loaded first
 //
 // Load order in dealer-portal.html (before </body>):
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
+//
+// v2.18 Changes (2026-03-01):
+//   - CRITICAL FIX: saveCurrentQuote() (Section 7) no longer creates
+//     a duplicate quote when currentQuote._serverId is set but
+//     findIndex() returns -1. If _serverId exists, the quote is
+//     force-upserted into savedQuotes[] and always uses PUT, never
+//     POST. This was the root cause of phantom duplicates appearing
+//     after PDF download on loaded quotes.
+//   - FIX: loadServerQuotes() (Section 6b) now re-links
+//     currentQuote to the matching savedQuotes[] entry after
+//     rebuilding the array from the server, preventing findIndex
+//     mismatches on the next save.
+//   - FIX: syncQuoteToServer() (Section 6b) now guards against
+//     POST when quote.quoteId matches server format (Q######-XXXX),
+//     logging a warning instead of creating a duplicate.
 //
 // v2.17 Changes (2026-02-28):
 //   - FIX: applyTierPricing() (Section 5) now stores
@@ -641,14 +656,26 @@
 
 
     // ----------------------------------------------------------
-    // 6b. QUOTE SYNC: Server with localStorage fallback (v2.17)
+    // 6b. QUOTE SYNC: Server with localStorage fallback (v2.18)
     // ----------------------------------------------------------
+    // v2.18: loadServerQuotes() now re-links currentQuote to its
+    // matching savedQuotes[] entry after rebuilding, preventing
+    // the findIndex miss that caused duplicate creation.
+    //
+    // v2.18: syncQuoteToServer() now refuses to POST if quote.quoteId
+    // matches server quote number format (Q######-XXXX), which means
+    // the quote was loaded from the server and should never be re-created.
+    //
     // v2.17: syncQuoteToServer() now reads prod.basePrice directly
     // instead of dividing by tier multiplier. The multiplier is
     // always 1.0 under per-dealer pricing, which caused basePrice
     // and price to be identical in saved quotes.
     // ----------------------------------------------------------
     function loadServerQuotes() {
+        // v2.18: Snapshot currentQuote identity before rebuilding
+        var activeServerId = window.currentQuote ? window.currentQuote._serverId : null;
+        var activeQuoteId = window.currentQuote ? window.currentQuote.quoteId : null;
+
         return api('GET', '/api/quotes')
             .then(function (serverQuotes) {
                 var localOnly = window.savedQuotes.filter(function (lq) {
@@ -685,14 +712,32 @@
                     syncQuoteToServer(lq);
                 });
 
+                // v2.18: Re-link currentQuote to its savedQuotes[] entry
+                // so that saveCurrentQuote()'s findIndex() will match.
+                if (activeServerId && window.currentQuote && window.currentQuote._serverId === activeServerId) {
+                    var matchIdx = window.savedQuotes.findIndex(function (q) {
+                        return String(q._serverId) === String(activeServerId);
+                    });
+                    if (matchIdx >= 0) {
+                        // Adopt the server quoteId so findIndex matches on both fields
+                        window.currentQuote.quoteId = window.savedQuotes[matchIdx].quoteId;
+                        console.log('[v2.18] Re-linked currentQuote to savedQuotes[' + matchIdx + '] (_serverId=' + activeServerId + ', quoteId=' + window.currentQuote.quoteId + ')');
+                    }
+                }
+
                 saveToStorage();
-                console.log('[Quotes v2.9] Loaded ' + window.savedQuotes.length + ' quotes with reverse-mapped line items');
+                console.log('[Quotes v2.18] Loaded ' + window.savedQuotes.length + ' quotes with reverse-mapped line items');
                 return window.savedQuotes;
             })
             .catch(function () {
                 console.warn('[Quotes] Using localStorage quotes (offline)');
                 return window.savedQuotes;
             });
+    }
+
+    // v2.18: Helper to detect server-format quote numbers
+    function isServerQuoteNumber(quoteId) {
+        return quoteId && /^Q\d{6}-[A-Z0-9]{4}$/.test(quoteId);
     }
 
     function syncQuoteToServer(quote) {
@@ -704,10 +749,6 @@
             var dealerPrice = (typeof getItemPrice === 'function') ? getItemPrice(li) : 0;
             var subtotal = (typeof getItemSubtotal === 'function') ? getItemSubtotal(li) : 0;
 
-            // v2.17: Read catalog base price directly from PRODUCTS[].basePrice
-            // which is set by applyTierPricing() from the server's basePrice field.
-            // Previously this divided dealerPrice by tier.multiplier, but per-dealer
-            // pricing made multiplier always 1.0, causing basePrice === price.
             var catalogBase;
             if (li.type === 'custom' || !prod) {
                 catalogBase = parseFloat(li.customUnitPrice) || dealerPrice;
@@ -760,6 +801,16 @@
                     return null;
                 });
         } else {
+            // v2.18: Safety guard - if the quoteId looks like a server-generated
+            // quote number (Q######-XXXX), this quote came from the server and
+            // should NOT be re-created via POST. This catches edge cases where
+            // _serverId was lost during savedQuotes[] rebuild.
+            if (isServerQuoteNumber(quote.quoteId)) {
+                console.error('[Sync v2.18] BLOCKED POST for server-originated quote ' + quote.quoteId
+                    + '. _serverId is missing but quoteId is server format. Skipping to prevent duplicate.');
+                return Promise.resolve(null);
+            }
+
             return api('POST', '/api/quotes', payload)
                 .then(function (created) {
                     quote._serverId = created.id;
@@ -775,7 +826,13 @@
 
 
     // ----------------------------------------------------------
-    // 7. OVERRIDE: saveCurrentQuote (server + local)
+    // 7. OVERRIDE: saveCurrentQuote (server + local) (v2.18)
+    // ----------------------------------------------------------
+    // v2.18: Complete rewrite of the matching logic. If currentQuote
+    // has _serverId set, it is ALWAYS treated as an existing quote.
+    // We search by _serverId first, then quoteId. If neither matches
+    // (e.g. savedQuotes was rebuilt), we force-insert into savedQuotes
+    // with _serverId preserved, ensuring syncQuoteToServer uses PUT.
     // ----------------------------------------------------------
     var _origSaveCurrentQuote = window.saveCurrentQuote;
     window.saveCurrentQuote = function () {
@@ -787,21 +844,43 @@
             window.currentQuote.quoteId = generateQuoteNumber();
         }
 
-        var existingIdx = window.savedQuotes.findIndex(function (q) {
-            return (window.currentQuote._serverId && q._serverId &&
-                    String(q._serverId) === String(window.currentQuote._serverId))
-                || q.quoteId === window.currentQuote.quoteId;
-        });
+        // v2.18: Three-tier matching strategy
+        var existingIdx = -1;
+
+        // Tier 1: Match by _serverId (most reliable, server-assigned)
+        if (window.currentQuote._serverId) {
+            existingIdx = window.savedQuotes.findIndex(function (q) {
+                return q._serverId && String(q._serverId) === String(window.currentQuote._serverId);
+            });
+        }
+
+        // Tier 2: Match by quoteId (client-assigned quote number)
+        if (existingIdx < 0 && window.currentQuote.quoteId) {
+            existingIdx = window.savedQuotes.findIndex(function (q) {
+                return q.quoteId && q.quoteId === window.currentQuote.quoteId;
+            });
+        }
 
         var quoteData = JSON.parse(JSON.stringify(window.currentQuote));
         quoteData.updatedAt = new Date().toISOString();
 
         if (existingIdx >= 0) {
+            // Preserve _serverId from either direction
             if (!quoteData._serverId && window.savedQuotes[existingIdx]._serverId) {
                 quoteData._serverId = window.savedQuotes[existingIdx]._serverId;
             }
             window.savedQuotes[existingIdx] = quoteData;
+        } else if (window.currentQuote._serverId) {
+            // v2.18: _serverId exists but no match found in savedQuotes[].
+            // This happens when savedQuotes was rebuilt by loadServerQuotes()
+            // and the quote's quoteId format didn't match. Force-insert
+            // WITH _serverId so syncQuoteToServer uses PUT, not POST.
+            console.warn('[v2.18] saveCurrentQuote: _serverId=' + window.currentQuote._serverId
+                + ' not found in savedQuotes[]. Force-inserting to prevent duplicate POST.');
+            window.savedQuotes.push(quoteData);
+            existingIdx = window.savedQuotes.length - 1;
         } else {
+            // Genuinely new quote with no server identity
             quoteData.createdAt = new Date().toISOString();
             window.savedQuotes.push(quoteData);
             existingIdx = window.savedQuotes.length - 1;
@@ -1169,19 +1248,6 @@
     // ----------------------------------------------------------
     // 14b. OVERRIDE: loadQuote (full field restoration) (v2.15)
     // ----------------------------------------------------------
-    // The inline loadQuote(idx) in dealer-portal.html only restores
-    // 5 customer fields. It does NOT restore:
-    //   - pic-frame checkbox
-    //   - stairs checkbox
-    //   - special-instr textarea
-    //   - internal-notes textarea
-    //   - ship-addr textarea
-    //   - del-date input
-    //
-    // This override deep-clones savedQuotes[idx] into currentQuote
-    // (same as the inline version), then calls restoreQuoteToDOM()
-    // which sets ALL 11 fields consistently.
-    // ----------------------------------------------------------
     window.loadQuote = function (idx) {
         if (idx < 0 || idx >= window.savedQuotes.length) {
             console.warn('[v2.15] loadQuote: invalid index ' + idx);
@@ -1306,10 +1372,6 @@
         if (!serverId) return;
 
         function applyQuoteToDOM(sq) {
-            // v2.16: Restore mapServerLineItemToFrontend() mapping
-            // that was removed in v2.14. Server field names (quantity,
-            // productName, basePrice) must be converted to frontend
-            // format (qty, customDesc, customUnitPrice) for render().
             var frontendLineItems = (sq.lineItems || []).map(function (serverLI) {
                 return mapServerLineItemToFrontend(serverLI) || serverLI;
             }).filter(function (li) { return li !== null; });
@@ -1386,5 +1448,5 @@
 
     loadQuoteFromUrlParam();
 
-    console.log('[AmeriDex API] v2.17 loaded: Auth + API integration active.');
+    console.log('[AmeriDex API] v2.18 loaded: Auth + API integration active.');
 })();
