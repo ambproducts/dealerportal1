@@ -1,6 +1,5 @@
 // ============================================================
 // AmeriDex Dealer Portal - Server Entry Point
-// Date: 2026-02-28
 // ============================================================
 
 const express = require('express');
@@ -9,7 +8,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware
-app.use(express.json());
+app.use(express.json({ limit: '5mb' })); // raised for full HTML bodies sent to /api/pdf/generate
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ----------------------------------------------------------
@@ -35,6 +34,10 @@ app.use('/api/quotes', quoteRoutes);
 // Customers
 const customerRoutes = require('./routes/customers');
 app.use('/api/customers', customerRoutes);
+
+// PDF generation (Puppeteer — server-side true PDF)
+const pdfRoutes = require('./routes/pdf');
+app.use('/api/pdf', pdfRoutes);
 
 // Admin - Dealers (includes per-dealer pricing endpoints)
 const adminDealerRoutes = require('./routes/admin-dealers');
