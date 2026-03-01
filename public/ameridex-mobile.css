@@ -1,0 +1,850 @@
+/*
+ * ameridex-mobile.css
+ * Total mobile optimization for the AmeriDex Dealer Portal
+ * Targets: 320px (small phones) → 768px (tablet portrait)
+ * Added via <link> in dealer-portal.html and quotes-customers.html
+ *
+ * Strategy: mobile-first overrides on top of existing desktop CSS.
+ * Touch targets >= 44px, no horizontal scroll, readable font sizes.
+ */
+
+/* ============================================================
+   1. BASE / GLOBAL
+   ============================================================ */
+
+@media (max-width: 768px) {
+
+  html, body {
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  .page-shell {
+    padding: 0.75rem 0.9rem 3rem;
+    max-width: 100%;
+  }
+
+  /* ============================================================
+     2. HEADER
+     ============================================================ */
+
+  header.app-header {
+    padding: 1rem;
+    border-radius: 0 0 10px 10px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+  }
+
+  .header-brand {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  header.app-header img {
+    max-width: 120px;
+  }
+
+  .header-titles h1 {
+    font-size: 1.1rem;
+  }
+
+  .header-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    justify-content: flex-end;
+    width: 100%;
+  }
+
+  .header-dealer-info {
+    width: 100%;
+    text-align: right;
+    font-size: 0.75rem;
+    margin-right: 0;
+    margin-bottom: 0.1rem;
+  }
+
+  .header-btn {
+    padding: 0.55rem 0.85rem;
+    font-size: 0.78rem;
+    min-height: 36px;
+    /* Ensure nav buttons (My Quotes, Settings, Logout) wrap nicely */
+    white-space: nowrap;
+  }
+
+  /* ============================================================
+     3. CARDS
+     ============================================================ */
+
+  .card {
+    padding: 1.1rem;
+    margin-bottom: 1rem;
+    border-radius: 10px;
+  }
+
+  .card-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.6rem;
+    padding-bottom: 0.65rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .card-title {
+    font-size: 1rem;
+  }
+
+  .card-subtitle {
+    font-size: 0.82rem;
+  }
+
+  /* ============================================================
+     4. FORM ELEMENTS
+     ============================================================ */
+
+  input[type="text"],
+  input[type="email"],
+  input[type="tel"],
+  input[type="number"],
+  input[type="date"],
+  textarea,
+  select {
+    font-size: 16px; /* Prevents iOS zoom on focus */
+    padding: 0.7rem 0.8rem;
+    min-height: 44px;
+  }
+
+  label {
+    font-size: 0.88rem;
+  }
+
+  .help-text {
+    font-size: 0.78rem;
+  }
+
+  /* ============================================================
+     5. QUOTE MODE TOGGLE
+     ============================================================ */
+
+  .quote-mode-toggle {
+    flex-direction: column;
+    border-radius: 10px;
+    gap: 0.25rem;
+  }
+
+  .quote-mode-btn {
+    border-radius: 8px;
+    padding: 0.7rem 1rem;
+    font-size: 0.9rem;
+    min-height: 44px;
+  }
+
+  .quote-mode-description {
+    font-size: 0.82rem;
+    padding: 0.65rem 0.85rem;
+  }
+
+  /* ============================================================
+     6. SAVED QUOTES PANEL
+     ============================================================ */
+
+  .saved-quotes-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  .saved-quotes-search {
+    max-width: none;
+    width: 100%;
+  }
+
+  .saved-quotes-search input {
+    font-size: 16px;
+  }
+
+  /* Card-header action buttons (Customers + New Quote) */
+  #saved-quotes-section .card-header > div:last-child {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    width: 100%;
+  }
+
+  #saved-quotes-section .card-header .btn-sm {
+    flex: 1;
+    justify-content: center;
+    min-height: 40px;
+    font-size: 0.82rem;
+    padding: 0.55rem 0.75rem;
+  }
+
+  /* Each saved quote row becomes a compact stacked card */
+  .saved-quote-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.85rem 1rem;
+  }
+
+  .saved-quote-info {
+    width: 100%;
+  }
+
+  .saved-quote-id {
+    font-size: 0.88rem;
+  }
+
+  .saved-quote-customer {
+    font-size: 0.82rem;
+  }
+
+  .saved-quote-date {
+    font-size: 0.72rem;
+  }
+
+  .saved-quote-total {
+    margin-right: 0;
+    font-size: 1rem;
+  }
+
+  .saved-quote-actions {
+    display: flex;
+    gap: 0.5rem;
+    width: 100%;
+  }
+
+  .saved-quote-actions button {
+    flex: 1;
+    min-height: 36px;
+    font-size: 0.8rem;
+    padding: 0.4rem 0.5rem;
+    text-align: center;
+  }
+
+  /* ============================================================
+     7. CUSTOMERS SECTION
+     ============================================================ */
+
+  #customers-section .card-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  #customers-section .card-header .btn {
+    width: 100%;
+    justify-content: center;
+    min-height: 40px;
+  }
+
+  .customers-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  .customers-search {
+    max-width: none;
+  }
+
+  .customers-search input {
+    font-size: 16px;
+  }
+
+  .customers-stats {
+    font-size: 0.82rem;
+  }
+
+  .customers-list {
+    max-height: 60vh;
+  }
+
+  .customer-item {
+    grid-template-columns: 1fr;
+    gap: 0.6rem;
+    padding: 1rem;
+  }
+
+  .customer-actions {
+    flex-direction: row;
+    align-items: center;
+    width: 100%;
+    gap: 0.4rem;
+  }
+
+  .customer-actions .btn {
+    flex: 1;
+    padding: 0.55rem 0.5rem;
+    font-size: 0.82rem;
+    justify-content: center;
+    min-height: 38px;
+  }
+
+  .customer-name {
+    font-size: 0.95rem;
+  }
+
+  .customer-email,
+  .customer-company {
+    font-size: 0.8rem;
+  }
+
+  .customer-meta {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  /* ============================================================
+     8. DECK CALCULATOR
+     ============================================================ */
+
+  #calculator .form-grid {
+    gap: 0.75rem;
+  }
+
+  .deck-diagram {
+    max-width: 220px;
+  }
+
+  .deck-area {
+    height: 110px;
+  }
+
+  .dimension-arrow {
+    font-size: 0.65rem;
+  }
+
+  .calc-buttons-row {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .calc-buttons-row .btn {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .calc-result-box {
+    padding: 0.85rem;
+  }
+
+  .calc-result-box h3 {
+    font-size: 0.95rem;
+  }
+
+  .calc-result-details {
+    font-size: 0.85rem;
+  }
+
+  /* ============================================================
+     9. COLOR GRID
+     ============================================================ */
+
+  .color-grid {
+    grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+    gap: 0.65rem;
+  }
+
+  .color-card img {
+    height: 65px;
+  }
+
+  .color-card-label {
+    font-size: 0.72rem;
+  }
+
+  .comparison-panel {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+    padding: 0.75rem;
+  }
+
+  .color-preview h4 {
+    font-size: 0.82rem;
+  }
+
+  /* ============================================================
+     10. CUSTOMER INFO FORM
+     ============================================================ */
+
+  #customer .card-header {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .progress-badge {
+    font-size: 0.72rem;
+    padding: 0.25rem 0.65rem;
+    white-space: nowrap;
+  }
+
+  /* ============================================================
+     11. ORDER / LINE ITEMS
+     ============================================================ */
+
+  #desktop-table-container {
+    display: none;
+  }
+
+  #mobile-items-container {
+    display: block;
+  }
+
+  .line-item-card {
+    padding: 1rem;
+    border-radius: 8px;
+    margin-bottom: 0.85rem;
+  }
+
+  .line-item-card h4 {
+    font-size: 0.9rem;
+    margin-bottom: 0.85rem;
+  }
+
+  .line-item-row {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.65rem;
+  }
+
+  .line-item-row.full {
+    grid-template-columns: 1fr;
+  }
+
+  .line-item-row label {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #374151;
+    display: block;
+    margin-bottom: 0.25rem;
+  }
+
+  .line-item-row select,
+  .line-item-row input {
+    font-size: 16px;
+    min-height: 40px;
+  }
+
+  .line-item-card-actions {
+    padding-top: 0.85rem;
+    margin-top: 0.85rem;
+    gap: 0.5rem;
+  }
+
+  .line-item-card-actions .btn {
+    flex: 1;
+    min-height: 40px;
+    font-size: 0.85rem;
+  }
+
+  .custom-item-warning {
+    font-size: 0.78rem;
+    padding: 0.45rem 0.65rem;
+  }
+
+  /* Add row / undo buttons */
+  .btn-add-row {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
+    margin-top: 0.75rem;
+  }
+
+  .btn-undo {
+    width: 100%;
+    min-height: 40px;
+    text-align: center;
+    padding: 0.6rem 1rem;
+    font-size: 0.88rem;
+    margin-top: 0.5rem;
+  }
+
+  /* Options checkboxes */
+  .inline-checks {
+    gap: 0.75rem;
+  }
+
+  .check-row label {
+    font-size: 0.95rem;
+  }
+
+  .note-inline {
+    font-size: 0.82rem;
+    margin-left: 1.5rem;
+  }
+
+  .fastener-block {
+    font-size: 0.84rem;
+    padding: 0.7rem 0.8rem;
+  }
+
+  /* ============================================================
+     12. TOTAL BAR & ACTIONS
+     ============================================================ */
+
+  .total-bar {
+    flex-direction: row;
+    justify-content: space-between;
+    padding: 0.85rem 1rem;
+  }
+
+  .total-label {
+    font-size: 0.88rem;
+  }
+
+  .total-value {
+    font-size: 1.25rem;
+  }
+
+  .actions-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.6rem;
+  }
+
+  .actions-row .btn,
+  .actions-row .dropdown {
+    width: 100%;
+  }
+
+  .actions-row .dropdown .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* Dropdown opens upward — keep it readable on small screens */
+  .dropdown-content {
+    min-width: 100%;
+    left: 0;
+    transform: none;
+    bottom: calc(100% + 4px);
+  }
+
+  .dropdown-content button {
+    padding: 14px 18px;
+    font-size: 0.9rem;
+    min-height: 44px;
+  }
+
+  /* ============================================================
+     13. MODALS
+     ============================================================ */
+
+  .modal {
+    padding: 0.75rem;
+    align-items: flex-end; /* Sheet-style modals from bottom */
+  }
+
+  .modal-content {
+    max-width: 100%;
+    width: 100%;
+    max-height: 92vh;
+    border-radius: 14px 14px 0 0;
+    padding: 1.25rem;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Color preview modal keeps natural centering */
+  #colorModal {
+    align-items: center;
+  }
+
+  #colorModal .modal-content {
+    border-radius: 14px;
+    max-width: 90vw;
+  }
+
+  #colorModal .modal-content img {
+    max-height: 55vh;
+  }
+
+  /* Review modal */
+  .review-modal-content {
+    max-width: 100%;
+  }
+
+  .review-modal-content h2 {
+    font-size: 1.15rem;
+    margin-top: 0;
+  }
+
+  .review-section h3 {
+    font-size: 0.9rem;
+  }
+
+  .review-item {
+    flex-direction: column;
+    gap: 0.15rem;
+    font-size: 0.85rem;
+    margin-bottom: 0.65rem;
+  }
+
+  .review-total {
+    font-size: 1.05rem;
+  }
+
+  .review-modal-content > div:last-of-type {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .review-modal-content > div:last-of-type .btn {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
+  }
+
+  /* Print preview modal */
+  .print-preview-modal {
+    max-width: 100%;
+    width: 100%;
+  }
+
+  .print-preview-content {
+    max-height: 50vh;
+    font-size: 0.82rem;
+    padding: 1rem;
+  }
+
+  .print-preview-actions {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .print-preview-actions .btn {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
+  }
+
+  /* Settings modal */
+  .settings-modal-content {
+    max-width: 100%;
+  }
+
+  .settings-modal-content h2 {
+    font-size: 1.1rem;
+    margin-bottom: 1rem;
+  }
+
+  .settings-actions {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .settings-actions .btn {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
+  }
+
+  /* Success confirmation */
+  .success-confirmation {
+    padding: 0.75rem;
+    align-items: flex-end;
+  }
+
+  .success-confirmation-content {
+    max-width: 100%;
+    width: 100%;
+    border-radius: 14px 14px 0 0;
+    padding: 1.5rem 1.25rem;
+  }
+
+  .success-checkmark {
+    width: 60px;
+    height: 60px;
+    font-size: 2rem;
+    margin-bottom: 1rem;
+  }
+
+  .success-confirmation h2 {
+    font-size: 1.2rem;
+  }
+
+  .success-confirmation .btn {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
+    margin-top: 0.75rem;
+  }
+
+  /* Timeout warning */
+  .timeout-warning {
+    padding: 0.75rem;
+    align-items: flex-end;
+  }
+
+  .timeout-warning-content {
+    max-width: 100%;
+    width: 100%;
+    border-radius: 14px 14px 0 0;
+    padding: 1.25rem;
+  }
+
+  .timeout-warning .btn {
+    min-height: 44px;
+    width: calc(50% - 0.35rem);
+  }
+
+  /* ============================================================
+     14. LOGIN SCREEN
+     ============================================================ */
+
+  .login-card {
+    padding: 1.75rem 1.25rem;
+    border-radius: 12px;
+    max-width: 100%;
+  }
+
+  .login-card img {
+    max-width: 140px;
+  }
+
+  .login-card h1 {
+    font-size: 1.3rem;
+  }
+
+  .login-card input {
+    font-size: 1.25rem; /* Large for dealer code entry */
+    padding: 0.9rem 1rem;
+    min-height: 52px;
+  }
+
+  .login-btn {
+    min-height: 52px;
+    font-size: 1rem;
+  }
+
+  /* ============================================================
+     15. GENERAL BUTTON SIZING
+     ============================================================ */
+
+  .btn {
+    padding: 0.7rem 1.35rem;
+    font-size: 0.9rem;
+    min-height: 44px;
+  }
+
+  .btn-sm {
+    padding: 0.5rem 0.9rem;
+    font-size: 0.82rem;
+    min-height: 36px;
+  }
+
+  /* ============================================================
+     16. CUSTOMER LOOKUP DROPDOWN
+     ============================================================ */
+
+  .customer-lookup-results {
+    max-height: 180px;
+  }
+
+  .customer-lookup-item {
+    padding: 0.75rem 0.85rem;
+    min-height: 44px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  /* ============================================================
+     17. CONNECTIVITY BAR
+     ============================================================ */
+
+  .connectivity-bar {
+    font-size: 0.78rem;
+    padding: 0.4rem;
+  }
+
+  body.offline .page-shell {
+    margin-top: 2rem;
+  }
+
+  /* ============================================================
+     18. EMAIL FALLBACK
+     ============================================================ */
+
+  .email-fallback-notice {
+    font-size: 0.82rem;
+    padding: 0.85rem;
+  }
+
+} /* end @media (max-width: 768px) */
+
+
+/* ============================================================
+   VERY SMALL PHONES (320px - 374px)
+   ============================================================ */
+@media (max-width: 374px) {
+
+  .page-shell {
+    padding: 0.5rem 0.65rem 3rem;
+  }
+
+  .card {
+    padding: 0.9rem;
+  }
+
+  .header-btn {
+    padding: 0.45rem 0.65rem;
+    font-size: 0.72rem;
+  }
+
+  .total-value {
+    font-size: 1.1rem;
+  }
+
+  .color-grid {
+    grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
+  }
+
+  .color-card img {
+    height: 55px;
+  }
+
+  .comparison-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .timeout-warning .btn {
+    width: 100%;
+    margin-bottom: 0.35rem;
+  }
+
+}
+
+
+/* ============================================================
+   TABLET (769px - 1024px) — light touch
+   ============================================================ */
+@media (min-width: 769px) and (max-width: 1024px) {
+
+  .page-shell {
+    padding: 1.25rem 1.5rem 2.5rem;
+  }
+
+  header.app-header {
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+
+  .header-actions {
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .color-grid {
+    grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+  }
+
+  .actions-row {
+    flex-wrap: wrap;
+    gap: 0.65rem;
+  }
+
+}
