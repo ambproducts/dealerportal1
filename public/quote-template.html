@@ -41,7 +41,7 @@
     -webkit-print-color-adjust: exact;
   }
 
-  /* ── HEADER ───────────────────────────────────────────────────────────────── */
+  /* HEADER */
   .quote-header {
     background: var(--color-brand);
     padding: 24px 36px;
@@ -50,9 +50,6 @@
     justify-content: space-between;
     gap: 24px;
   }
-
-  /* Logo sits on a crisp white pill so the full-color mark shows correctly
-     against the navy header without needing a filter. */
   .quote-header__brand {
     display: flex;
     align-items: center;
@@ -70,7 +67,6 @@
     height: 38px;
     width: auto;
     display: block;
-    /* No filter — logo already has its own colors on white background */
   }
   .quote-header__brand .tagline {
     font-size: 11px;
@@ -78,7 +74,6 @@
     letter-spacing: 1.6px;
     text-transform: uppercase;
   }
-
   .quote-header__meta {
     text-align: right;
     flex-shrink: 0;
@@ -107,13 +102,12 @@
     font-weight: 600;
   }
 
-  /* Red accent stripe beneath header */
   .accent-stripe {
     height: 5px;
     background: var(--color-accent);
   }
 
-  /* ── BODY ─────────────────────────────────────────────────────────────────── */
+  /* BODY */
   .quote-body {
     padding: 32px 36px;
   }
@@ -292,11 +286,7 @@
   <header class="quote-header">
     <div class="quote-header__brand">
       <div class="quote-header__logo-wrap">
-        <img
-          class="logo"
-          src="/images/ameridex-logo.png"
-          alt="AmeriDex"
-        />
+        <img class="logo" src="/images/ameridex-logo.png" alt="AmeriDex" />
       </div>
       <span class="tagline">Dealer Portal &mdash; Quote Document</span>
     </div>
@@ -312,20 +302,11 @@
   <div class="quote-body">
 
     <div class="info-grid">
+
+      <!-- Customer card: rows are injected dynamically — only filled fields appear -->
       <div class="info-card">
         <div class="info-card__title">Customer Information</div>
-        <div class="info-row">
-          <span class="info-label">Name</span>
-          <span class="info-value">{{CUSTOMER_NAME}}</span>
-        </div>
-        <div class="info-row">
-          <span class="info-label">Email</span>
-          <span class="info-value">{{CUSTOMER_EMAIL}}</span>
-        </div>
-        <div class="info-row">
-          <span class="info-label">Zip Code</span>
-          <span class="info-value">{{CUSTOMER_ZIP}}</span>
-        </div>
+        {{CUSTOMER_INFO_ROWS}}
       </div>
 
       <div class="info-card">
@@ -343,6 +324,7 @@
           <span class="info-value">{{DEALER_CODE}}</span>
         </div>
       </div>
+
     </div>
 
     <div class="section-title">Order Items</div>

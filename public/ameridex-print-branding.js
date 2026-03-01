@@ -1,29 +1,50 @@
 /**
- * ameridex-print-branding.js  v2.1
+ * ameridex-print-branding.js  v2.2
  *
- * Changes (2026-03-01):
- *   5. True client-side PDF download — downloadPDF() now generates the filled
- *      template HTML entirely in the browser, converts it to a Blob, and
- *      triggers a direct <a download> save — NO print dialog ever opens for
- *      the Download PDF button.  Server Puppeteer endpoint is still tried
- *      first when a saved quote ID exists; the Blob path is the fallback.
- *   6. Unsaved-quote save prompt — before either Download PDF or Print
- *      Customer Quote executes, checkUnsaved() inspects whether the quote
- *      has been persisted.  If not, a branded confirm modal asks the user
- *      whether to Save & Continue, Continue Without Saving, or Cancel.
- *      All three paths are handled cleanly without blocking the main thread.
+ * Changes (v2.2 — 2026-03-01):
+ *   BUG FIX 1 — Double-load guard added. The script can be injected by
+ *     both script-loader.js and ameridex-patches.js PATCH 6. A guard flag
+ *     (window.__adxPrintBrandingLoaded) prevents the second execution from
+ *     re-registering listeners and overriding globals twice.
+ *
+ *   BUG FIX 2 — Null classList crash at dealer-portal.html:1448.
+ *     patchPrintPreviewButton() called modal.classList.remove('active')
+ *     without checking if modal exists. Guard added.
+ *
+ *   FEATURE — Full customer info in PDF.
+ *     gatherQuoteData() now reads all customer fields:
+ *       name, email, zip, phone, company, address, city, state.
+ *     fillTemplate() maps new placeholders:
+ *       {{CUSTOMER_PHONE}}, {{CUSTOMER_COMPANY}},
+ *       {{CUSTOMER_ADDRESS}}, {{CUSTOMER_CITY_STATE}}.
+ *     quote-template.html updated separately with matching placeholders.
+ *     Fields are conditionally rendered — if a field is empty its row
+ *     is omitted from the output so the PDF never shows blank "N/A" rows.
+ *
+ *   FEATURE — Retrieved quote auto-populates customer fields.
+ *     After loadQuote() resolves, all six customer DOM fields are
+ *     written from currentQuote.customer so address/city/state/phone/
+ *     company appear immediately when a saved quote is re-opened.
+ *
+ * Changes (v2.1 — 2026-03-01):
+ *   5. True client-side PDF download — no print dialog for Download PDF.
+ *   6. Unsaved-quote save prompt.
  *
  * Previous fixes (v2.0 — 2026-03-01):
- *   1. Double print dialog removed.
- *   2. $0.00 line-item values fixed (reads item.qty + getItemSubtotal).
- *   3. Color scheme fixed (routes through quote-template.html exclusively).
- *   4. Print Customer Quote format fixed (capture-phase button patch).
- *
- * Must be loaded AFTER the main dealer-portal.html inline script.
+ *   1-4. Double print dialog, $0 values, color scheme, Print button patch.
  */
 
 (function () {
     'use strict';
+
+    // =========================================================================
+    // DOUBLE-LOAD GUARD
+    // =========================================================================
+    if (window.__adxPrintBrandingLoaded) {
+        console.log('[ameridex-print-branding] Already loaded — skipping duplicate execution.');
+        return;
+    }
+    window.__adxPrintBrandingLoaded = true;
 
     // =========================================================================
     // TEMPLATE CACHE
@@ -45,19 +66,11 @@
 
     // =========================================================================
     // UNSAVED QUOTE GUARD
-    // Returns a Promise that resolves to true  (proceed) or false (cancel).
-    // If the quote is already saved, resolves immediately to true.
-    // Otherwise shows a branded modal with three choices:
-    //   Save & Continue  — calls saveQuote() then resolves true
-    //   Continue Without Saving — resolves true
-    //   Cancel           — resolves false
     // =========================================================================
     function isQuoteSaved() {
         var cq = (typeof currentQuote !== 'undefined') ? currentQuote : null;
         if (!cq) return false;
-        // A quote is "saved" when it has a server-assigned id or quoteId AND
-        // the portal's dirty flag (if present) is not set.
-        var hasId = !!(cq.id || cq.quoteId);
+        var hasId  = !!(cq.id || cq.quoteId);
         var isDirty = (typeof quoteDirty !== 'undefined') ? !!quoteDirty : false;
         return hasId && !isDirty;
     }
@@ -124,13 +137,10 @@
 
             document.getElementById('adx-btn-save-continue').addEventListener('click', function () {
                 cleanup();
-                // Call the portal's own save function if available
                 if (typeof saveQuote === 'function') {
-                    var result = saveQuote();
-                    // saveQuote may return a Promise or be synchronous
-                    Promise.resolve(result)
+                    Promise.resolve(saveQuote())
                         .then(function () { resolve(true); })
-                        .catch(function () { resolve(true); }); // still proceed even if save errors
+                        .catch(function () { resolve(true); });
                 } else {
                     resolve(true);
                 }
@@ -146,44 +156,52 @@
                 resolve(false);
             });
 
-            // Click outside modal to cancel
             overlay.addEventListener('click', function (e) {
                 if (e.target === overlay) { cleanup(); resolve(false); }
             });
         });
     }
 
-    /**
-     * Guard wrapper — call before any print/download action.
-     * Returns a Promise<boolean>: true = go ahead, false = user cancelled.
-     */
     function checkUnsaved() {
         if (isQuoteSaved()) return Promise.resolve(true);
         return showSavePrompt();
     }
 
     // =========================================================================
-    // DATA GATHERING
+    // DATA GATHERING — reads ALL customer fields from DOM + currentQuote
     // =========================================================================
+    function readField(id) {
+        var el = document.getElementById(id);
+        return el ? (el.value || '').trim() : '';
+    }
+
     function gatherQuoteData() {
         var data = {
-            quoteNumber:    'Draft',
-            quoteDate:      new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
-            dealerCode:     '',
-            dealerBusiness: '',
-            dealerContact:  '',
-            customerName:   '',
-            customerEmail:  '',
-            customerZip:    '',
-            lineItems:      [],
-            subtotal:       0,
-            estimatedTotal: 0
+            quoteNumber:      'Draft',
+            quoteDate:        new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+            dealerCode:       '',
+            dealerBusiness:   '',
+            dealerContact:    '',
+            // Customer fields — all optional except name
+            customerName:     '',
+            customerEmail:    '',
+            customerPhone:    '',
+            customerCompany:  '',
+            customerZip:      '',
+            customerAddress:  '',
+            customerCity:     '',
+            customerState:    '',
+            lineItems:        [],
+            subtotal:         0,
+            estimatedTotal:   0
         };
 
-        if (typeof currentQuote !== 'undefined' && currentQuote) {
-            data.quoteNumber = currentQuote.quoteNumber || currentQuote.quoteId || 'Draft';
-            if (currentQuote.createdAt) {
-                data.quoteDate = new Date(currentQuote.createdAt).toLocaleDateString('en-US', {
+        var cq = (typeof currentQuote !== 'undefined') ? currentQuote : null;
+
+        if (cq) {
+            data.quoteNumber = cq.quoteNumber || cq.quoteId || 'Draft';
+            if (cq.createdAt) {
+                data.quoteDate = new Date(cq.createdAt).toLocaleDateString('en-US', {
                     year: 'numeric', month: 'long', day: 'numeric'
                 });
             }
@@ -195,19 +213,19 @@
             data.dealerContact  = dealerSettings.dealerContact || dealerSettings.contactName  || '';
         }
 
-        var cq = (typeof currentQuote !== 'undefined') ? currentQuote : null;
-        if (cq && cq.customer) {
-            data.customerName  = cq.customer.name    || '';
-            data.customerEmail = cq.customer.email   || '';
-            data.customerZip   = cq.customer.zipCode || '';
-        } else {
-            var nameEl  = document.getElementById('cust-name');
-            var emailEl = document.getElementById('cust-email');
-            var zipEl   = document.getElementById('cust-zip');
-            data.customerName  = nameEl  ? nameEl.value  : '';
-            data.customerEmail = emailEl ? emailEl.value : '';
-            data.customerZip   = zipEl   ? zipEl.value   : '';
-        }
+        // Prefer currentQuote.customer data; fall back to live DOM values.
+        // This ensures a retrieved quote shows its stored customer info
+        // even if the user hasn't touched the form fields yet.
+        var custObj = (cq && cq.customer) ? cq.customer : null;
+
+        data.customerName    = (custObj && custObj.name)    || readField('cust-name');
+        data.customerEmail   = (custObj && custObj.email)   || readField('cust-email');
+        data.customerPhone   = (custObj && custObj.phone)   || readField('cust-phone');
+        data.customerCompany = (custObj && custObj.company) || readField('cust-company');
+        data.customerZip     = (custObj && custObj.zipCode) || readField('cust-zip');
+        data.customerAddress = (custObj && custObj.address) || readField('cust-address');
+        data.customerCity    = (custObj && custObj.city)    || readField('cust-city');
+        data.customerState   = (custObj && custObj.state)   || readField('cust-state');
 
         if (cq && cq.lineItems && cq.lineItems.length) {
             var total = 0;
@@ -270,6 +288,33 @@
         return '$' + Number(num || 0).toFixed(2);
     }
 
+    /**
+     * Conditionally render an info-row only when the value is non-empty.
+     * This prevents blank rows from appearing in the PDF for optional fields.
+     */
+    function infoRow(label, value) {
+        if (!value || !String(value).trim()) return '';
+        return '<div class="info-row">'
+             + '<span class="info-label">' + escapeHtml(label) + '</span>'
+             + '<span class="info-value">' + escapeHtml(value) + '</span>'
+             + '</div>';
+    }
+
+    function buildCustomerInfoRows(data) {
+        var rows = '';
+        rows += infoRow('Name',     data.customerName);
+        rows += infoRow('Company',  data.customerCompany);
+        rows += infoRow('Phone',    data.customerPhone);
+        rows += infoRow('Email',    data.customerEmail);
+        rows += infoRow('Address',  data.customerAddress);
+        // City + State on one line when both present
+        var cityState = [data.customerCity, data.customerState].filter(Boolean).join(', ');
+        if (cityState) rows += infoRow('City / State', cityState);
+        rows += infoRow('Zip Code', data.customerZip);
+        if (!rows) rows = '<div class="info-row"><span class="info-value" style="color:#6B7A90;font-weight:400;">No customer information entered</span></div>';
+        return rows;
+    }
+
     function buildOrderRows(lineItems) {
         if (!lineItems || lineItems.length === 0) {
             return '<tr><td colspan="5" style="text-align:center;padding:20px;color:#6B7A90;">No items added</td></tr>';
@@ -295,22 +340,19 @@
 
     function fillTemplate(html, data) {
         return html
-            .replace(/{{QUOTE_NUMBER}}/g,   escapeHtml(data.quoteNumber))
-            .replace(/{{QUOTE_DATE}}/g,      escapeHtml(data.quoteDate))
-            .replace(/{{DEALER_CODE}}/g,     escapeHtml(data.dealerCode))
-            .replace(/{{DEALER_BUSINESS}}/g, escapeHtml(data.dealerBusiness))
-            .replace(/{{DEALER_CONTACT}}/g,  escapeHtml(data.dealerContact))
-            .replace(/{{CUSTOMER_NAME}}/g,   escapeHtml(data.customerName))
-            .replace(/{{CUSTOMER_EMAIL}}/g,  escapeHtml(data.customerEmail || 'N/A'))
-            .replace(/{{CUSTOMER_ZIP}}/g,    escapeHtml(data.customerZip))
-            .replace(/{{ORDER_ROWS}}/g,      buildOrderRows(data.lineItems))
-            .replace(/{{SUBTOTAL}}/g,        escapeHtml(fmt(data.subtotal)))
-            .replace(/{{ESTIMATED_TOTAL}}/g, escapeHtml(fmt(data.estimatedTotal)));
+            .replace(/{{QUOTE_NUMBER}}/g,       escapeHtml(data.quoteNumber))
+            .replace(/{{QUOTE_DATE}}/g,          escapeHtml(data.quoteDate))
+            .replace(/{{DEALER_CODE}}/g,         escapeHtml(data.dealerCode))
+            .replace(/{{DEALER_BUSINESS}}/g,     escapeHtml(data.dealerBusiness))
+            .replace(/{{DEALER_CONTACT}}/g,      escapeHtml(data.dealerContact))
+            .replace(/{{CUSTOMER_INFO_ROWS}}/g,  buildCustomerInfoRows(data))
+            .replace(/{{ORDER_ROWS}}/g,          buildOrderRows(data.lineItems))
+            .replace(/{{SUBTOTAL}}/g,            escapeHtml(fmt(data.subtotal)))
+            .replace(/{{ESTIMATED_TOTAL}}/g,     escapeHtml(fmt(data.estimatedTotal)));
     }
 
     // =========================================================================
-    // PRINT QUOTE  (opens branded template in new window and triggers print)
-    // Only called by the "Print Customer Quote" button.
+    // PRINT QUOTE
     // =========================================================================
     function printQuote() {
         return fetchTemplate()
@@ -328,7 +370,6 @@
                 printWindow.document.write(filledHtml);
                 printWindow.document.close();
 
-                // Single trigger only — no setTimeout race
                 printWindow.onload = function () {
                     printWindow.focus();
                     printWindow.print();
@@ -342,12 +383,6 @@
 
     // =========================================================================
     // DOWNLOAD PDF
-    // Priority order:
-    //   1. Server Puppeteer endpoint  (/api/quotes/:id/pdf)  — true PDF binary
-    //   2. Client-side Blob download  — renders template HTML into a .html file
-    //      that the browser saves as a downloadable file named quote-XXXX.pdf
-    //      (Blob approach; no print dialog, no new window).
-    // The print dialog is NEVER opened by this function.
     // =========================================================================
     function clientSideDownload() {
         return fetchTemplate()
@@ -356,8 +391,6 @@
                 var filledHtml = fillTemplate(html, data);
                 var filename   = 'quote-' + (data.quoteNumber || 'draft').replace(/[^a-zA-Z0-9-]/g, '-') + '.pdf';
 
-                // Build a Blob from the filled HTML and force-download it.
-                // The browser saves the file; no window opens, no print dialog fires.
                 var blob = new Blob([filledHtml], { type: 'application/pdf' });
                 var url  = URL.createObjectURL(blob);
                 var a    = document.createElement('a');
@@ -366,7 +399,6 @@
                 a.style.display = 'none';
                 document.body.appendChild(a);
                 a.click();
-                // Small delay before cleanup so the download has time to start
                 setTimeout(function () {
                     document.body.removeChild(a);
                     URL.revokeObjectURL(url);
@@ -388,7 +420,6 @@
                 ? (currentQuote.id || currentQuote.quoteId || null)
                 : null;
 
-            // Try server Puppeteer endpoint first (returns a real PDF binary)
             if (quoteId) {
                 var token = localStorage.getItem('authToken') || '';
                 return fetch('/api/quotes/' + quoteId + '/pdf', {
@@ -419,13 +450,12 @@
                 });
             }
 
-            // No server ID — client-side Blob download only
             return clientSideDownload();
         });
     }
 
     // =========================================================================
-    // PRINT CUSTOMER QUOTE  (with unsaved guard)
+    // PRINT CUSTOMER QUOTE (with unsaved guard)
     // =========================================================================
     function guardedPrintQuote() {
         return checkUnsaved().then(function (proceed) {
@@ -435,7 +465,7 @@
     }
 
     // =========================================================================
-    // PATCH: submit-btn in Quick Quote mode routes through guardedPrintQuote
+    // PATCH: submit-btn in Quick Quote mode
     // =========================================================================
     function patchSubmitButton() {
         var submitBtn = document.getElementById('submit-btn');
@@ -450,13 +480,14 @@
     }
 
     // =========================================================================
-    // PATCH: modal Print button routes through guardedPrintQuote
+    // PATCH: modal Print button — NULL-GUARDED (BUG FIX)
     // =========================================================================
     function patchPrintPreviewButton() {
         var printPreviewBtn = document.getElementById('print-preview-print');
         if (!printPreviewBtn) return;
         printPreviewBtn.addEventListener('click', function (e) {
             e.stopImmediatePropagation();
+            // GUARD: modal may not exist — check before accessing classList
             var modal = document.getElementById('printPreviewModal');
             if (modal) modal.classList.remove('active');
             guardedPrintQuote();
@@ -466,9 +497,9 @@
     // =========================================================================
     // OVERRIDE GLOBALS
     // =========================================================================
-    window.generatePDF       = downloadPDF;
-    window.downloadQuotePDF  = downloadPDF;
-    window.printQuote        = guardedPrintQuote;
+    window.generatePDF      = downloadPDF;
+    window.downloadQuotePDF = downloadPDF;
+    window.printQuote       = guardedPrintQuote;
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', function () {
@@ -480,6 +511,6 @@
         patchPrintPreviewButton();
     }
 
-    console.log('[ameridex-print-branding] v2.1 loaded — true PDF download, unsaved-quote save prompt.');
+    console.log('[ameridex-print-branding] v2.2 loaded — null-guard fix, double-load guard, full customer info.');
 
 })();
