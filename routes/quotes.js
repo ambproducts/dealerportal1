@@ -23,6 +23,7 @@ const {
     generateId, getDealerPrice, recalcCustomerStats
 } = require('../lib/helpers');
 const { requireAuth, requireRole } = require('../middleware/auth');
+const { generateQuotePDF } = require('../lib/quote-pdf');
 
 router.use(requireAuth);
 
@@ -726,6 +727,45 @@ router.post('/:id/duplicate', (req, res) => {
 
     console.log('[Quotes] Duplicated: ' + original.quoteNumber + ' -> ' + dup.quoteNumber + (dup.dealerCode !== original.dealerCode ? ' (reassigned to ' + dup.dealerCode + ')' : ''));
     res.status(201).json(dup);
+});
+
+// =============================================================
+// GET /api/quotes/:id/pdf
+// Server-side PDF generation using Puppeteer
+// =============================================================
+router.get('/:id/pdf', async (req, res) => {
+    try {
+        const quotes = readJSON(QUOTES_FILE);
+        const quote = req.user.role === 'admin'
+            ? quotes.find(q => q.id === req.params.id && !q.deleted)
+            : quotes.find(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
+        
+        if (!quote) return res.status(404).json({ error: 'Quote not found' });
+
+        if (req.user.role === 'frontdesk' && quote.createdBy !== req.user.username) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+
+        // Get dealer and customer data
+        const dealer = req.dealer;
+        const customers = readJSON(CUSTOMERS_FILE);
+        const customer = customers.find(c => c.id === quote.customer.customerId) || quote.customer;
+
+        // Generate PDF
+        const pdfBuffer = await generateQuotePDF(quote, dealer, customer);
+
+        // Set headers and stream PDF
+        const filename = `${quote.quoteNumber}.pdf`;
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.setHeader('Content-Length', pdfBuffer.length);
+        res.send(pdfBuffer);
+
+        console.log('[Quotes] PDF generated: ' + quote.quoteNumber + ' by ' + req.user.username);
+    } catch (error) {
+        console.error('[Quotes] PDF generation error:', error);
+        res.status(500).json({ error: 'Failed to generate PDF', details: error.message });
+    }
 });
 
 module.exports = router;
