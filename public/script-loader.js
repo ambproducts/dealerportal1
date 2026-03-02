@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - Script Loader v2.2
+// AmeriDex Dealer Portal - Script Loader v2.3
 // File: script-loader.js
 // Date: 2026-03-02
 // ============================================================
@@ -48,49 +48,62 @@ if (typeof window.showQuotesView !== 'function') {
 
 // ============================================================
 // Load order:
-//   0. ameridex-addrow-fix.js            (DOM repair + missing function defs)
-//   1. ameridex-portal-nav.js            (Navigation system)
-//   2. ameridex-patches.js               (DOM patches and fixes)
-//   3. ameridex-idle-fix.js              (guard resetIdleTimer null crash)
-//   4. ameridex-api.js                   (API client and helpers)
-//   5. ameridex-pricing-fix.js           (Pricing resolution + getDisplayPrice)
-//   6. ameridex-overrides.js             (General UI overrides)
-//   7. ameridex-print-branding.js        (Branded print/preview output)
-//   8. ameridex-customer-address.js      (Address/City/State fields patch)
-//   9. ameridex-address-quote-prompt.js  (Prompt: update existing or new quote when address added)
-//  10. ameridex-customer-sync.js         (Customer history sync)
-//  11. ameridex-roles.js                 (GM/Frontdesk role system + override buttons)
-//  12. ameridex-admin.js                 (Admin panel)
-//  13. ameridex-admin-customers.js       (Admin customer management)
-//  14. ameridex-admin-delete.js          (Soft delete + undo + recently deleted)
-//  15. ameridex-admin-user-delete.js     (Delete users + dealers from Users tab)
-//  16. ameridex-admin-csv-fix.js         (CSV export formula injection prevention)
-//  17. ameridex-deck-calculator.js       (Advanced deck calc + board optimizer)
-//  18. ameridex-admin-patch.js           (Per-dealer pricing migration patch)
-//  19. ameridex-email-optional.js        (Email optional, name+zip required)
+//   0.  ameridex-addrow-fix.js            (DOM repair + missing function defs)
+//   1.  ameridex-portal-nav.js            (Navigation system)
+//   2.  ameridex-patches.js               (DOM patches and fixes)
+//   3.  ameridex-idle-fix.js              (Guard resetIdleTimer null crash)
+//   4.  ameridex-api.js                   (API client and helpers)
+//   5.  ameridex-pricing-fix.js           (Pricing resolution + getDisplayPrice)
+//   6.  ameridex-overrides.js             (General UI overrides)
+//   7.  ameridex-print-branding.js        (Branded print/preview output)
+//   8.  ameridex-customer-address.js      (Address/City/State fields injection)
+//   9.  ameridex-address-quote-prompt.js  (No-op stub — superseded by position 10)
+//  10.  ameridex-quote-editor.js          (Read-only lock, Edit button, autosave,
+//                                          syncQuoteFromDOM + restoreQuoteToDOM
+//                                          address field patches, classList null-guard)
+//  11.  ameridex-customer-sync.js         (Customer history sync)
+//  12.  ameridex-roles.js                 (GM/Frontdesk role system + override buttons)
+//  13.  ameridex-admin.js                 (Admin panel)
+//  14.  ameridex-admin-customers.js       (Admin customer management)
+//  15.  ameridex-admin-delete.js          (Soft delete + undo + recently deleted)
+//  16.  ameridex-admin-user-delete.js     (Delete users + dealers from Users tab)
+//  17.  ameridex-admin-csv-fix.js         (CSV export formula injection prevention)
+//  18.  ameridex-deck-calculator.js       (Advanced deck calc + board optimizer)
+//  19.  ameridex-admin-patch.js           (Per-dealer pricing migration patch)
+//  20.  ameridex-email-optional.js        (Email optional, name+zip required)
+//
+// v2.3 Changes (2026-03-02):
+//   - Added ameridex-quote-editor.js at position 10.
+//     Replaces the address-quote-prompt flow entirely.
+//     Responsibilities:
+//       - Read-only lock on all form fields when a quote is loaded.
+//         A sticky "Edit Quote" banner appears at the top of the form.
+//       - Clicking "Edit Quote" unlocks the form and starts an
+//         autosave session (1.5s debounce on any input/change event).
+//       - Clicking "Done Editing" forces an immediate save and re-locks.
+//       - "+ New Quote" button resets the form to a blank draft.
+//       - Patches syncQuoteFromDOM() to include cust-address, cust-city,
+//         cust-state so those fields are actually written to
+//         currentQuote.customer and reach the server payload on save.
+//       - Patches restoreQuoteToDOM() to populate address fields when
+//         loading a saved quote.
+//       - Injects null-safe stub nodes for #saved-quotes-section and
+//         #customers-section (removed by PATCH 0) to prevent the
+//         classList TypeError at dealer-portal.html:1448.
+//   - ameridex-address-quote-prompt.js (position 9) is now a silent
+//     no-op stub; its entry is kept to avoid 404s.
 //
 // v2.2 Changes (2026-03-02):
 //   - Added ameridex-address-quote-prompt.js at position 9.
-//     When a user retrieves an existing quote that had NO address
-//     previously saved, and then enters any address field, a modal
-//     dialog fires asking whether to:
-//       A) Update the existing quote with the new address, or
-//       B) Save the address as a brand-new separate draft quote.
-//       C) Cancel (clears the entered address).
-//     Must load immediately after ameridex-customer-address.js
-//     (position 8) so the address DOM fields and loadQuote patch
-//     are already in place when this script runs.
 //
 // v2.1 Changes (2026-02-28):
-//   - Added ameridex-email-optional.js at position 18 (now 19).
-//     Customer email is now optional on the quote form.
-//     Only Name and Zip Code are mandatory.
+//   - Added ameridex-email-optional.js.
 //
 // v2.0 Changes (2026-02-28):
-//   - Added ameridex-admin-patch.js at position 17 (now 18).
+//   - Added ameridex-admin-patch.js.
 //
 // v1.9 Changes (2026-02-28):
-//   - Added ameridex-deck-calculator.js at position 16 (now 17).
+//   - Added ameridex-deck-calculator.js.
 //
 // v1.8 Changes (2026-02-27):
 //   - REMOVED ameridex-global-scope-fix.js from load chain.
@@ -108,26 +121,27 @@ if (typeof window.showQuotesView !== 'function') {
     'use strict';
 
     const SCRIPTS = [
-        'ameridex-addrow-fix.js',
-        'ameridex-portal-nav.js',
-        'ameridex-patches.js',
-        'ameridex-idle-fix.js',
-        'ameridex-api.js',
-        'ameridex-pricing-fix.js',
-        'ameridex-overrides.js',
-        'ameridex-print-branding.js',
-        'ameridex-customer-address.js',
-        'ameridex-address-quote-prompt.js',
-        'ameridex-customer-sync.js',
-        'ameridex-roles.js',
-        'ameridex-admin.js',
-        'ameridex-admin-customers.js',
-        'ameridex-admin-delete.js',
-        'ameridex-admin-user-delete.js',
-        'ameridex-admin-csv-fix.js',
-        'ameridex-deck-calculator.js',
-        'ameridex-admin-patch.js',
-        'ameridex-email-optional.js'
+        'ameridex-addrow-fix.js',           //  0
+        'ameridex-portal-nav.js',           //  1
+        'ameridex-patches.js',              //  2
+        'ameridex-idle-fix.js',             //  3
+        'ameridex-api.js',                  //  4
+        'ameridex-pricing-fix.js',          //  5
+        'ameridex-overrides.js',            //  6
+        'ameridex-print-branding.js',       //  7
+        'ameridex-customer-address.js',     //  8
+        'ameridex-address-quote-prompt.js', //  9  (no-op stub)
+        'ameridex-quote-editor.js',         // 10  <-- NEW
+        'ameridex-customer-sync.js',        // 11
+        'ameridex-roles.js',                // 12
+        'ameridex-admin.js',                // 13
+        'ameridex-admin-customers.js',      // 14
+        'ameridex-admin-delete.js',         // 15
+        'ameridex-admin-user-delete.js',    // 16
+        'ameridex-admin-csv-fix.js',        // 17
+        'ameridex-deck-calculator.js',      // 18
+        'ameridex-admin-patch.js',          // 19
+        'ameridex-email-optional.js'        // 20
     ];
 
     let loaded = 0;
