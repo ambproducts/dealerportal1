@@ -2,6 +2,18 @@
 // routes/quotes.js - Quote CRUD with per-dealer pricing
 // Date: 2026-03-02
 // ============================================================
+// v3.7 (2026-03-02):
+//   FIX: All :id endpoints now resolve by EITHER q.id (UUID)
+//        OR q.quoteNumber (e.g. Q260228-OOD9).
+//        The frontend quotes-customers.html page and
+//        loadQuoteFromUrlParam() pass quoteNumber as the :id
+//        URL parameter. Previously every route only matched
+//        q.id, returning 404 for every quote opened from the
+//        Quotes & Customers page.
+//   Added shared helpers: findQuoteByParam(),
+//        findQuoteIndexByParam().
+//   Applied to all 11 :id routes (GET, PUT, PATCH, POST, DELETE).
+//
 // v3.6 (2026-03-02):
 //   FIX: POST and PUT now persist all frontend-sent fields:
 //        options, specialInstructions, internalNotes,
@@ -99,6 +111,42 @@ function buildLineItem(item, dealer) {
         priceOverride: existingOverride
     };
 }
+
+
+// =============================================================
+// SHARED HELPERS: Dual UUID / quoteNumber lookup  (v3.7)
+//
+// The :id parameter may be either:
+//   - A server UUID  (e.g. "a7f3b2c1-...")   matched against q.id
+//   - A quoteNumber  (e.g. "Q260228-OOD9")   matched against q.quoteNumber
+//
+// Both helpers respect role-based scoping:
+//   admin  -> any dealer
+//   others -> own dealerCode only
+// =============================================================
+
+function matchesParam(q, paramId) {
+    return q.id === paramId || q.quoteNumber === paramId;
+}
+
+function findQuoteByParam(quotes, paramId, user) {
+    if (user.role === 'admin') {
+        return quotes.find(q => matchesParam(q, paramId) && !q.deleted) || null;
+    }
+    return quotes.find(q =>
+        matchesParam(q, paramId) && q.dealerCode === user.dealerCode && !q.deleted
+    ) || null;
+}
+
+function findQuoteIndexByParam(quotes, paramId, user) {
+    if (user.role === 'admin') {
+        return quotes.findIndex(q => matchesParam(q, paramId) && !q.deleted);
+    }
+    return quotes.findIndex(q =>
+        matchesParam(q, paramId) && q.dealerCode === user.dealerCode && !q.deleted
+    );
+}
+
 
 function upsertCustomer(customerData, dealerCode, existingCustomerId) {
     if (!customerData || !customerData.name || !customerData.zipCode) {
@@ -381,13 +429,11 @@ router.get('/', (req, res) => {
 
 
 // =============================================================
-// GET /api/quotes/:id
+// GET /api/quotes/:id  (v3.7: dual UUID/quoteNumber lookup)
 // =============================================================
 router.get('/:id', (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
-    const quote  = req.user.role === 'admin'
-        ? quotes.find(q => q.id === req.params.id && !q.deleted)
-        : quotes.find(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
+    const quote  = findQuoteByParam(quotes, req.params.id, req.user);
     if (!quote) return res.status(404).json({ error: 'Quote not found' });
     res.json(quote);
 });
@@ -450,14 +496,14 @@ router.post('/', (req, res) => {
     writeJSON(QUOTES_FILE, quotes);
     recalcCustomerStats(customerSnapshot.customerId);
 
-    console.log('[Quotes v3.6] Created:', newQuote.quoteNumber, 'by', req.user.username,
+    console.log('[Quotes v3.7] Created:', newQuote.quoteNumber, 'by', req.user.username,
         '| Dealer:', req.user.dealerCode, '| Customer:', customerSnapshot.name);
     res.status(201).json(newQuote);
 });
 
 
 // =============================================================
-// PUT /api/quotes/:id  (v3.6: persists all frontend fields)
+// PUT /api/quotes/:id  (v3.7: dual lookup)
 //
 // Permission matrix:
 //   frontdesk / dealer : draft and revision only (own dealerCode)
@@ -474,9 +520,7 @@ router.put('/:id', async (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
     const isElevated = req.user.role === 'admin' || req.user.role === 'gm';
 
-    const idx = req.user.role === 'admin'
-        ? quotes.findIndex(q => q.id === req.params.id && !q.deleted)
-        : quotes.findIndex(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
+    const idx = findQuoteIndexByParam(quotes, req.params.id, req.user);
 
     if (idx === -1) return res.status(404).json({ error: 'Quote not found' });
 
@@ -543,7 +587,7 @@ router.put('/:id', async (req, res) => {
     if (newCustomerId) recalcCustomerStats(newCustomerId);
     if (oldCustomerId && oldCustomerId !== newCustomerId) recalcCustomerStats(oldCustomerId);
 
-    console.log('[Quotes v3.6] PUT:', quotes[idx].quoteNumber,
+    console.log('[Quotes v3.7] PUT:', quotes[idx].quoteNumber,
         '| status:', currentStatus,
         '| by:', req.user.username, '(' + req.user.role + ')');
 
@@ -556,7 +600,7 @@ router.put('/:id', async (req, res) => {
 
 
 // =============================================================
-// PATCH /api/quotes/:id/revision
+// PATCH /api/quotes/:id/revision  (v3.7: dual lookup)
 // GM or admin only. Sets status -> 'revision'.
 // If body.notify === true, emails AmeriDex via Formspree.
 // =============================================================
@@ -568,9 +612,7 @@ router.patch('/:id/revision', requireRole('admin', 'gm'), async (req, res) => {
     }
 
     const quotes = readJSON(QUOTES_FILE);
-    const idx = req.user.role === 'admin'
-        ? quotes.findIndex(q => q.id === req.params.id && !q.deleted)
-        : quotes.findIndex(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
+    const idx = findQuoteIndexByParam(quotes, req.params.id, req.user);
 
     if (idx === -1) return res.status(404).json({ error: 'Quote not found' });
 
@@ -590,7 +632,7 @@ router.patch('/:id/revision', requireRole('admin', 'gm'), async (req, res) => {
 
     writeJSON(QUOTES_FILE, quotes);
 
-    console.log('[Quotes] Revision requested:', quotes[idx].quoteNumber,
+    console.log('[Quotes v3.7] Revision requested:', quotes[idx].quoteNumber,
         'by', req.user.username, '| Reason:', reason.trim());
 
     res.json({ status: 'revision', quoteNumber: quotes[idx].quoteNumber });
@@ -602,14 +644,12 @@ router.patch('/:id/revision', requireRole('admin', 'gm'), async (req, res) => {
 
 
 // =============================================================
-// POST /api/quotes/:id/approve-revision  (v3.5)
+// POST /api/quotes/:id/approve-revision  (v3.7: dual lookup)
 // GM or admin only.
 // =============================================================
 router.post('/:id/approve-revision', requireRole('admin', 'gm'), async (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
-    const idx = req.user.role === 'admin'
-        ? quotes.findIndex(q => q.id === req.params.id && !q.deleted)
-        : quotes.findIndex(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
+    const idx = findQuoteIndexByParam(quotes, req.params.id, req.user);
 
     if (idx === -1) return res.status(404).json({ error: 'Quote not found' });
 
@@ -643,7 +683,7 @@ router.post('/:id/approve-revision', requireRole('admin', 'gm'), async (req, res
 
     writeJSON(QUOTES_FILE, quotes);
 
-    console.log('[Quotes v3.5] Revision approved:', quotes[idx].quoteNumber,
+    console.log('[Quotes v3.7] Revision approved:', quotes[idx].quoteNumber,
         'by', req.user.username, '(' + req.user.role + ')');
 
     res.json(quotes[idx]);
@@ -654,6 +694,7 @@ router.post('/:id/approve-revision', requireRole('admin', 'gm'), async (req, res
 
 // =============================================================
 // POST /api/quotes/:id/items/:itemIndex/request-override
+// (v3.7: dual lookup)
 // =============================================================
 router.post('/:id/items/:itemIndex/request-override', (req, res) => {
     const { requestedPrice, reason } = req.body;
@@ -670,7 +711,10 @@ router.post('/:id/items/:itemIndex/request-override', (req, res) => {
     }
 
     const quotes = readJSON(QUOTES_FILE);
-    const quote  = quotes.find(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
+    // request-override is dealer-scoped (not admin-global), use direct find with dual match
+    const quote = quotes.find(q =>
+        matchesParam(q, req.params.id) && q.dealerCode === req.user.dealerCode && !q.deleted
+    );
     if (!quote) return res.status(404).json({ error: 'Quote not found' });
     if (quote.status !== 'draft' && quote.status !== 'revision') {
         return res.status(400).json({ error: 'Price overrides can only be requested on draft or revision quotes' });
@@ -715,7 +759,7 @@ router.post('/:id/items/:itemIndex/request-override', (req, res) => {
     writeJSON(QUOTES_FILE, quotes);
 
     const action = isAutoApprover ? 'Override applied' : 'Override requested';
-    console.log('[Quotes]', action + ':', quote.quoteNumber, 'item #' + itemIdx,
+    console.log('[Quotes v3.7]', action + ':', quote.quoteNumber, 'item #' + itemIdx,
         '$' + item.tierPrice, '->', '$' + item.priceOverride.requestedPrice,
         'by', req.user.username, '(' + req.user.role + ')',
         '| Reason:', reason.trim());
@@ -726,10 +770,11 @@ router.post('/:id/items/:itemIndex/request-override', (req, res) => {
 
 // =============================================================
 // POST /api/quotes/:id/items/:itemIndex/approve-override
+// (v3.7: dual lookup)
 // =============================================================
 router.post('/:id/items/:itemIndex/approve-override', requireRole('admin', 'gm'), (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
-    const quote  = quotes.find(q => q.id === req.params.id && !q.deleted);
+    const quote  = findQuoteByParam(quotes, req.params.id, { role: 'admin', dealerCode: req.user.dealerCode });
     if (!quote) return res.status(404).json({ error: 'Quote not found' });
     if (req.user.role === 'gm' && quote.dealerCode !== req.user.dealerCode) {
         return res.status(403).json({ error: 'Access denied' });
@@ -760,7 +805,7 @@ router.post('/:id/items/:itemIndex/approve-override', requireRole('admin', 'gm')
     quotes[qIdx] = quote;
     writeJSON(QUOTES_FILE, quotes);
 
-    console.log('[Quotes] Override APPROVED:', quote.quoteNumber, 'item #' + itemIdx,
+    console.log('[Quotes v3.7] Override APPROVED:', quote.quoteNumber, 'item #' + itemIdx,
         '$' + item.priceOverride.originalTierPrice, '->', '$' + item.priceOverride.requestedPrice,
         'by', req.user.username, '(requested by', item.priceOverride.requestedBy + ')');
 
@@ -770,12 +815,13 @@ router.post('/:id/items/:itemIndex/approve-override', requireRole('admin', 'gm')
 
 // =============================================================
 // POST /api/quotes/:id/items/:itemIndex/reject-override
+// (v3.7: dual lookup)
 // =============================================================
 router.post('/:id/items/:itemIndex/reject-override', requireRole('admin', 'gm'), (req, res) => {
     const { rejectedReason } = req.body;
 
     const quotes = readJSON(QUOTES_FILE);
-    const quote  = quotes.find(q => q.id === req.params.id && !q.deleted);
+    const quote  = findQuoteByParam(quotes, req.params.id, { role: 'admin', dealerCode: req.user.dealerCode });
     if (!quote) return res.status(404).json({ error: 'Quote not found' });
     if (req.user.role === 'gm' && quote.dealerCode !== req.user.dealerCode) {
         return res.status(403).json({ error: 'Access denied' });
@@ -807,7 +853,7 @@ router.post('/:id/items/:itemIndex/reject-override', requireRole('admin', 'gm'),
     quotes[qIdx] = quote;
     writeJSON(QUOTES_FILE, quotes);
 
-    console.log('[Quotes] Override REJECTED:', quote.quoteNumber, 'item #' + itemIdx,
+    console.log('[Quotes v3.7] Override REJECTED:', quote.quoteNumber, 'item #' + itemIdx,
         'requested $' + item.priceOverride.requestedPrice,
         'by', req.user.username, '| Reason:', item.priceOverride.rejectedReason || 'none');
 
@@ -816,12 +862,13 @@ router.post('/:id/items/:itemIndex/reject-override', requireRole('admin', 'gm'),
 
 
 // =============================================================
-// POST /api/quotes/:id/submit
+// POST /api/quotes/:id/submit  (v3.7: dual lookup)
 // =============================================================
 router.post('/:id/submit', async (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
+    // submit is dealer-scoped (own quotes only)
     const idx = quotes.findIndex(q =>
-        q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted
+        matchesParam(q, req.params.id) && q.dealerCode === req.user.dealerCode && !q.deleted
     );
     if (idx === -1) return res.status(404).json({ error: 'Quote not found' });
 
@@ -847,7 +894,7 @@ router.post('/:id/submit', async (req, res) => {
     quotes[idx].updatedAt   = new Date().toISOString();
     writeJSON(QUOTES_FILE, quotes);
 
-    console.log('[Quotes] Submitted:', quotes[idx].quoteNumber, 'by', req.user.username);
+    console.log('[Quotes v3.7] Submitted:', quotes[idx].quoteNumber, 'by', req.user.username);
 
     res.json(quotes[idx]);
 
@@ -856,13 +903,11 @@ router.post('/:id/submit', async (req, res) => {
 
 
 // =============================================================
-// DELETE /api/quotes/:id
+// DELETE /api/quotes/:id  (v3.7: dual lookup)
 // =============================================================
 router.delete('/:id', requireRole('admin', 'gm'), (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
-    const idx = req.user.role === 'admin'
-        ? quotes.findIndex(q => q.id === req.params.id && !q.deleted)
-        : quotes.findIndex(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
+    const idx = findQuoteIndexByParam(quotes, req.params.id, req.user);
     if (idx === -1) return res.status(404).json({ error: 'Quote not found' });
 
     quotes[idx].deleted       = true;
@@ -875,19 +920,17 @@ router.delete('/:id', requireRole('admin', 'gm'), (req, res) => {
     const custId = quotes[idx].customer ? quotes[idx].customer.customerId : null;
     if (custId) recalcCustomerStats(custId);
 
-    console.log('[Quotes] Soft-deleted:', quotes[idx].quoteNumber, 'by', req.user.username, '(' + req.user.role + ')');
+    console.log('[Quotes v3.7] Soft-deleted:', quotes[idx].quoteNumber, 'by', req.user.username, '(' + req.user.role + ')');
     res.json({ message: 'Quote ' + quotes[idx].quoteNumber + ' deleted' });
 });
 
 
 // =============================================================
-// POST /api/quotes/:id/duplicate
+// POST /api/quotes/:id/duplicate  (v3.7: dual lookup)
 // =============================================================
 router.post('/:id/duplicate', (req, res) => {
     const quotes   = readJSON(QUOTES_FILE);
-    const original = req.user.role === 'admin'
-        ? quotes.find(q => q.id === req.params.id && !q.deleted)
-        : quotes.find(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
+    const original = findQuoteByParam(quotes, req.params.id, req.user);
     if (!original) return res.status(404).json({ error: 'Quote not found' });
 
     const dup = JSON.parse(JSON.stringify(original));
@@ -929,20 +972,18 @@ router.post('/:id/duplicate', (req, res) => {
     const custId = dup.customer ? dup.customer.customerId : null;
     if (custId) recalcCustomerStats(custId);
 
-    console.log('[Quotes] Duplicated:', original.quoteNumber, '->', dup.quoteNumber);
+    console.log('[Quotes v3.7] Duplicated:', original.quoteNumber, '->', dup.quoteNumber);
     res.status(201).json(dup);
 });
 
 
 // =============================================================
-// GET /api/quotes/:id/pdf
+// GET /api/quotes/:id/pdf  (v3.7: dual lookup)
 // =============================================================
 router.get('/:id/pdf', async (req, res) => {
     try {
         const quotes = readJSON(QUOTES_FILE);
-        const quote  = req.user.role === 'admin'
-            ? quotes.find(q => q.id === req.params.id && !q.deleted)
-            : quotes.find(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
+        const quote  = findQuoteByParam(quotes, req.params.id, req.user);
         if (!quote) return res.status(404).json({ error: 'Quote not found' });
 
         const dealer    = req.dealer;
@@ -956,9 +997,9 @@ router.get('/:id/pdf', async (req, res) => {
         res.setHeader('Content-Length', pdfBuffer.length);
         res.send(pdfBuffer);
 
-        console.log('[Quotes] PDF generated:', quote.quoteNumber, 'by', req.user.username);
+        console.log('[Quotes v3.7] PDF generated:', quote.quoteNumber, 'by', req.user.username);
     } catch (error) {
-        console.error('[Quotes] PDF generation error:', error);
+        console.error('[Quotes v3.7] PDF generation error:', error);
         res.status(500).json({ error: 'Failed to generate PDF', details: error.message });
     }
 });
