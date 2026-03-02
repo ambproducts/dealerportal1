@@ -2,15 +2,19 @@
 // routes/quotes.js - Quote CRUD with per-dealer pricing
 // Date: 2026-03-02
 // ============================================================
+// v3.5 (2026-03-02):
+//   FIX: Removed all createdBy row-level guards for frontdesk.
+//        frontdesk sees all quotes scoped to their dealerCode.
+//        Affected: GET /, GET /:id, PUT /:id, POST /:id/submit,
+//        POST /:id/items/:idx/request-override, GET /:id/pdf.
+//   FEAT: POST /api/quotes/:id/approve-revision (gm/admin only)
+//        GM approves a revision-status quote and re-submits it
+//        on behalf of the dealer staff. Fires Formspree submit
+//        notification with approvedBy field. Records:
+//        revisionApprovedBy, revisionApprovedAt.
+//
 // v3.4 (2026-03-02):
-//   FEAT: gm/admin can now PUT-edit submitted, reviewed, or
-//   approved quotes without going through the revision flow.
-//   After saving, fires notifyGmEditViaFormspree() to
-//   FORMSPREE_REVISION_FORM_ID (fire-and-forget) so AmeriDex
-//   is notified the submitted quote was modified.
-//   admin findIndex now spans all dealers.
-//   dealer/frontdesk still blocked on non-draft/revision quotes.
-//   New fields written: editedBy, editedByRole, gmEditedAt.
+//   FEAT: gm/admin PUT-edit on submitted/reviewed/approved quotes.
 //
 // v3.3 (2026-03-02):
 //   FEAT: Server-side Formspree on quote submission.
@@ -209,7 +213,6 @@ async function notifyRevisionViaFormspree(quote, reason, requestedBy) {
 }
 
 async function notifyGmEditViaFormspree(quote, editedBy, editedByRole, previousStatus) {
-    // Reuses FORMSPREE_REVISION_FORM_ID - same inbox at AmeriDex, different subject.
     const formId = process.env.FORMSPREE_REVISION_FORM_ID;
     const customerName = quote.customer ? (quote.customer.name || '(no name)') : '(no customer)';
     await postToFormspree(formId, {
@@ -228,9 +231,9 @@ async function notifyGmEditViaFormspree(quote, editedBy, editedByRole, previousS
     }, 'GmEdit');
 }
 
-async function notifySubmissionViaFormspree(quote, submittedBy) {
+async function notifySubmissionViaFormspree(quote, submittedBy, approvedBy) {
     const formId = process.env.FORMSPREE_SUBMIT_FORM_ID;
-    const customerName = quote.customer ? (quote.customer.name || '(no name)') : '(no customer)';
+    const customerName  = quote.customer ? (quote.customer.name  || '(no name)') : '(no customer)';
     const customerEmail = quote.customer ? (quote.customer.email || '') : '';
     const customerPhone = quote.customer ? (quote.customer.phone || '') : '';
     const customerZip   = quote.customer ? (quote.customer.zipCode || '') : '';
@@ -240,6 +243,8 @@ async function notifySubmissionViaFormspree(quote, submittedBy) {
         quoteNumber:   quote.quoteNumber,
         dealerCode:    quote.dealerCode,
         submittedBy:   submittedBy,
+        // approvedBy is only present when a GM approves a revision on behalf of staff
+        ...(approvedBy ? { approvedBy } : {}),
         customer:      customerName,
         customerEmail: customerEmail,
         customerPhone: customerPhone,
@@ -305,11 +310,8 @@ router.get('/', (req, res) => {
     } else if (req.user.role === 'admin' && scopeDealerCode) {
         mine = quotes.filter(q => q.dealerCode === scopeDealerCode && !q.deleted);
     } else {
+        // frontdesk, dealer, gm: all quotes for their dealerCode
         mine = quotes.filter(q => q.dealerCode === req.user.dealerCode && !q.deleted);
-    }
-
-    if (req.user.role === 'frontdesk') {
-        mine = mine.filter(q => q.createdBy === req.user.username);
     }
 
     const statusFilter = (req.query.status || '').trim().toLowerCase();
@@ -383,9 +385,6 @@ router.get('/:id', (req, res) => {
         ? quotes.find(q => q.id === req.params.id && !q.deleted)
         : quotes.find(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
     if (!quote) return res.status(404).json({ error: 'Quote not found' });
-    if (req.user.role === 'frontdesk' && quote.createdBy !== req.user.username) {
-        return res.status(403).json({ error: 'Access denied' });
-    }
     res.json(quote);
 });
 
@@ -442,45 +441,37 @@ router.post('/', (req, res) => {
 
 
 // =============================================================
-// PUT /api/quotes/:id  (v3.4)
+// PUT /api/quotes/:id  (v3.4+)
 //
 // Permission matrix:
-//   dealer / frontdesk : only draft or revision quotes
-//   gm                 : draft, revision, submitted, reviewed, approved
-//                        (own dealerCode only)
-//   admin              : draft, revision, submitted, reviewed, approved
-//                        (any dealerCode)
+//   frontdesk / dealer : draft and revision only (own dealerCode)
+//   gm                 : draft, revision, submitted, reviewed,
+//                        approved (own dealerCode only)
+//   admin              : all statuses, all dealers
 //
-// When a gm or admin edits a post-submission quote, the status
-// is left unchanged (stays 'submitted'/'reviewed'/'approved') and
-// a fire-and-forget Formspree email is sent to AmeriDex via
-// notifyGmEditViaFormspree(). The record gains:
-//   editedBy, editedByRole, gmEditedAt
+// gm/admin editing a post-submission quote:
+//   - status is left unchanged
+//   - stamps editedBy, editedByRole, gmEditedAt
+//   - fires notifyGmEditViaFormspree() fire-and-forget
 // =============================================================
 router.put('/:id', async (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
     const isElevated = req.user.role === 'admin' || req.user.role === 'gm';
 
-    // admin can see across all dealers; everyone else is scoped to their own
     const idx = req.user.role === 'admin'
         ? quotes.findIndex(q => q.id === req.params.id && !q.deleted)
         : quotes.findIndex(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
 
     if (idx === -1) return res.status(404).json({ error: 'Quote not found' });
 
-    // frontdesk can only touch their own quotes
-    if (req.user.role === 'frontdesk' && quotes[idx].createdBy !== req.user.username) {
-        return res.status(403).json({ error: 'Access denied' });
-    }
-
-    const currentStatus = quotes[idx].status;
-    const editableByAll = currentStatus === 'draft' || currentStatus === 'revision';
+    const currentStatus  = quotes[idx].status;
+    const editableByAll      = currentStatus === 'draft' || currentStatus === 'revision';
     const editableByElevated = ['submitted', 'reviewed', 'approved'].includes(currentStatus);
 
     if (!editableByAll && !(isElevated && editableByElevated)) {
         return res.status(400).json({
             error: 'Only draft or revision quotes can be edited',
-            tip: isElevated ? null : 'Contact your GM to request a revision'
+            tip:   'Contact your GM to request a revision'
         });
     }
 
@@ -511,7 +502,6 @@ router.put('/:id', async (req, res) => {
         );
     }
 
-    // If an elevated user is touching a post-submission quote, stamp it
     if (isElevated && editableByElevated) {
         quotes[idx].editedBy     = req.user.username;
         quotes[idx].editedByRole = req.user.role;
@@ -525,14 +515,12 @@ router.put('/:id', async (req, res) => {
     if (newCustomerId) recalcCustomerStats(newCustomerId);
     if (oldCustomerId && oldCustomerId !== newCustomerId) recalcCustomerStats(oldCustomerId);
 
-    console.log('[Quotes v3.4] PUT:', quotes[idx].quoteNumber,
+    console.log('[Quotes v3.5] PUT:', quotes[idx].quoteNumber,
         '| status:', currentStatus,
         '| by:', req.user.username, '(' + req.user.role + ')');
 
-    // Respond immediately before firing Formspree
     res.json(quotes[idx]);
 
-    // Fire-and-forget: notify AmeriDex that an elevated user modified a post-submission quote
     if (isElevated && editableByElevated) {
         notifyGmEditViaFormspree(quotes[idx], req.user.username, req.user.role, currentStatus);
     }
@@ -540,9 +528,8 @@ router.put('/:id', async (req, res) => {
 
 
 // =============================================================
-// PATCH /api/quotes/:id/revision  (v3.2)
-// GM or admin only.
-// Sets status -> 'revision', records reason + who requested it.
+// PATCH /api/quotes/:id/revision
+// GM or admin only. Sets status -> 'revision'.
 // If body.notify === true, emails AmeriDex via Formspree.
 // =============================================================
 router.patch('/:id/revision', requireRole('admin', 'gm'), async (req, res) => {
@@ -587,6 +574,68 @@ router.patch('/:id/revision', requireRole('admin', 'gm'), async (req, res) => {
 
 
 // =============================================================
+// POST /api/quotes/:id/approve-revision  (v3.5)
+// GM or admin only.
+// The GM reviews a revision-status quote edited by dealer staff
+// and approves it, re-submitting it to AmeriDex on their behalf.
+//
+// - Quote must be in 'revision' status
+// - Status is set back to 'submitted'
+// - submittedAt is refreshed to now
+// - revisionApprovedBy + revisionApprovedAt stamped on record
+// - Fires notifySubmissionViaFormspree() with approvedBy field
+//   so AmeriDex knows a GM signed off rather than the staff user
+// =============================================================
+router.post('/:id/approve-revision', requireRole('admin', 'gm'), async (req, res) => {
+    const quotes = readJSON(QUOTES_FILE);
+    const idx = req.user.role === 'admin'
+        ? quotes.findIndex(q => q.id === req.params.id && !q.deleted)
+        : quotes.findIndex(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
+
+    if (idx === -1) return res.status(404).json({ error: 'Quote not found' });
+
+    if (quotes[idx].status !== 'revision') {
+        return res.status(400).json({
+            error: 'Only revision-status quotes can be approved',
+            currentStatus: quotes[idx].status
+        });
+    }
+
+    if (!quotes[idx].lineItems || quotes[idx].lineItems.length === 0) {
+        return res.status(400).json({ error: 'Cannot submit a quote with no line items' });
+    }
+
+    const pendingCount = quotes[idx].lineItems.filter(
+        i => i.priceOverride && i.priceOverride.status === 'pending'
+    ).length;
+    if (pendingCount > 0) {
+        return res.status(400).json({
+            error: `Cannot approve revision with ${pendingCount} pending price override(s). Resolve overrides first.`,
+            pendingOverrides: pendingCount
+        });
+    }
+
+    const now = new Date().toISOString();
+    quotes[idx].status               = 'submitted';
+    quotes[idx].submittedAt          = now;
+    quotes[idx].revisionApprovedBy   = req.user.username;
+    quotes[idx].revisionApprovedAt   = now;
+    quotes[idx].updatedAt            = now;
+
+    writeJSON(QUOTES_FILE, quotes);
+
+    console.log('[Quotes v3.5] Revision approved:', quotes[idx].quoteNumber,
+        'by', req.user.username, '(' + req.user.role + ')');
+
+    res.json(quotes[idx]);
+
+    // Fire-and-forget: AmeriDex gets the standard submit email
+    // with an extra approvedBy field so they know the GM signed off
+    notifySubmissionViaFormspree(quotes[idx], quotes[idx].createdBy, req.user.username);
+});
+
+
+// =============================================================
 // POST /api/quotes/:id/items/:itemIndex/request-override
 // =============================================================
 router.post('/:id/items/:itemIndex/request-override', (req, res) => {
@@ -613,9 +662,6 @@ router.post('/:id/items/:itemIndex/request-override', (req, res) => {
     const itemIdx = parseInt(req.params.itemIndex);
     if (isNaN(itemIdx) || itemIdx < 0 || itemIdx >= quote.lineItems.length) {
         return res.status(404).json({ error: 'Line item not found at index ' + req.params.itemIndex });
-    }
-    if (req.user.role === 'frontdesk' && quote.createdBy !== req.user.username) {
-        return res.status(403).json({ error: 'Access denied' });
     }
 
     const item = quote.lineItems[itemIdx];
@@ -753,7 +799,7 @@ router.post('/:id/items/:itemIndex/reject-override', requireRole('admin', 'gm'),
 
 
 // =============================================================
-// POST /api/quotes/:id/submit  (v3.3)
+// POST /api/quotes/:id/submit
 // =============================================================
 router.post('/:id/submit', async (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
@@ -761,9 +807,7 @@ router.post('/:id/submit', async (req, res) => {
         q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted
     );
     if (idx === -1) return res.status(404).json({ error: 'Quote not found' });
-    if (req.user.role === 'frontdesk' && quotes[idx].createdBy !== req.user.username) {
-        return res.status(403).json({ error: 'Access denied' });
-    }
+
     if (quotes[idx].status !== 'draft' && quotes[idx].status !== 'revision') {
         return res.status(400).json({ error: 'Only draft or revision quotes can be submitted' });
     }
@@ -790,7 +834,7 @@ router.post('/:id/submit', async (req, res) => {
 
     res.json(quotes[idx]);
 
-    notifySubmissionViaFormspree(quotes[idx], req.user.username);
+    notifySubmissionViaFormspree(quotes[idx], req.user.username, null);
 });
 
 
@@ -841,9 +885,11 @@ router.post('/:id/duplicate', (req, res) => {
     dup.reviewedAt     = null;
     dup.approvedAt     = null;
     dup.pricingModel   = 'per-dealer';
-    dup.revisionReason      = null;
-    dup.revisionRequestedBy = null;
-    dup.revisionRequestedAt = null;
+    dup.revisionReason        = null;
+    dup.revisionRequestedBy   = null;
+    dup.revisionRequestedAt   = null;
+    dup.revisionApprovedBy    = null;
+    dup.revisionApprovedAt    = null;
     dup.editedBy     = null;
     dup.editedByRole = null;
     dup.gmEditedAt   = null;
@@ -881,9 +927,6 @@ router.get('/:id/pdf', async (req, res) => {
             ? quotes.find(q => q.id === req.params.id && !q.deleted)
             : quotes.find(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
         if (!quote) return res.status(404).json({ error: 'Quote not found' });
-        if (req.user.role === 'frontdesk' && quote.createdBy !== req.user.username) {
-            return res.status(403).json({ error: 'Access denied' });
-        }
 
         const dealer    = req.dealer;
         const customers = readJSON(CUSTOMERS_FILE);
