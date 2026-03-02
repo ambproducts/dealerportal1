@@ -1,21 +1,20 @@
 // ============================================================
-// AmeriDex Dealer Portal - API Integration Patch v2.20
+// AmeriDex Dealer Portal - API Integration Patch v2.21
 // Date: 2026-03-02
 // ============================================================
 // REQUIRES: ameridex-patches.js (v1.0+) loaded first
 //
+// v2.21 Changes (2026-03-02):
+//   - CLEANUP: Removed client-side Formspree fallback from
+//     sendFormalRequest (section 11).
+//     The server now handles all Formspree notification via
+//     POST /api/quotes/:id/submit -> notifySubmissionViaFormspree().
+//     The fallback path now shows a clear user-facing error
+//     instead of silently attempting a browser-side email.
+//     No Formspree form ID is ever present in the browser.
+//
 // v2.20 Changes (2026-03-02):
 //   - FEAT: window.requestQuoteRevision() added.
-//     Exposed so ameridex-quote-editor.js can call the
-//     PATCH /api/quotes/:id/revision endpoint directly via
-//     ameridexAPI(). The endpoint payload is:
-//       { reason: string, notify: boolean }
-//     Server is expected to:
-//       1. Set quote.status = 'revision'
-//       2. If notify=true, email the AmeriDex team with the
-//          quote number, dealer code, and revision reason
-//     The frontend updates local status immediately on success.
-//     No change to saveCurrentQuote or syncQuoteToServer.
 //
 // v2.19 Changes (2026-03-02):
 //   - FIX: mapServerCustomerToFrontend() now includes address,
@@ -486,7 +485,7 @@
                 }
 
                 saveToStorage();
-                console.log('[Quotes v2.20] Loaded', window.savedQuotes.length, 'quotes (address + all fields mapped)');
+                console.log('[Quotes v2.21] Loaded', window.savedQuotes.length, 'quotes (address + all fields mapped)');
                 return window.savedQuotes;
             })
             .catch(function () {
@@ -651,28 +650,47 @@
 
 
     // ----------------------------------------------------------
-    // 11. SUBMIT FORMAL REQUEST
+    // 11. SUBMIT FORMAL REQUEST  (v2.21)
+    //
+    // The server now handles all Formspree notification via
+    // POST /api/quotes/:id/submit -> notifySubmissionViaFormspree().
+    //
+    // The old _origSendFormalRequest fallback used to fire a
+    // client-side Formspree POST from the browser, which exposed
+    // the form ID in JS and could fire even when the quote was
+    // not yet saved to the server. That path is removed.
+    //
+    // Fallback behavior (server unreachable or no _serverId):
+    //   Show a clear user-facing error. No silent email attempt.
+    //   The user should try again once connectivity is restored.
     // ----------------------------------------------------------
-    var _origSendFormalRequest = window.sendFormalRequest;
     window.sendFormalRequest = function () {
         var quoteId = saveCurrentQuote();
         var quote = window.savedQuotes.find(function (q) { return q.quoteId === quoteId; });
+
         if (quote && quote._serverId && _authToken) {
             api('POST', '/api/quotes/' + quote._serverId + '/submit')
-                .then(function () {
+                .then(function (updatedQuote) {
                     quote.status = 'submitted';
                     saveToStorage();
                     document.getElementById('reviewModal').classList.remove('active');
                     document.getElementById('success-order-number').textContent = quoteId;
                     document.getElementById('success-confirmation').classList.add('visible');
-                    console.log('[Submit] Quote', quoteId, 'submitted to server');
+                    console.log('[Submit v2.21] Quote', quoteId, 'submitted to server. Formspree handled server-side.');
                 })
                 .catch(function (err) {
-                    console.warn('[Submit] Server submit failed, falling back to email:', err.message);
-                    if (typeof _origSendFormalRequest === 'function') _origSendFormalRequest();
+                    // Server returned an error (e.g. pending overrides, already submitted)
+                    var msg = err.message || 'Submission failed. Please try again.';
+                    console.warn('[Submit v2.21] Server submit failed:', msg);
+                    alert('Could not submit quote: ' + msg);
                 });
         } else {
-            if (typeof _origSendFormalRequest === 'function') _origSendFormalRequest();
+            // No server ID means the quote has not synced yet, or auth has lapsed
+            var reason = !_authToken
+                ? 'Your session has expired. Please log in again and retry.'
+                : 'This quote has not synced to the server yet. Please wait a moment and try again.';
+            console.warn('[Submit v2.21] Cannot submit:', reason);
+            alert(reason);
         }
     };
 
@@ -846,7 +864,7 @@
     // ----------------------------------------------------------
     window.loadQuote = function (idx) {
         if (idx < 0 || idx >= window.savedQuotes.length) {
-            console.warn('[v2.20] loadQuote: invalid index', idx);
+            console.warn('[v2.21] loadQuote: invalid index', idx);
             return;
         }
         if (window.currentQuote.lineItems.length > 0) {
@@ -855,7 +873,7 @@
         var source = window.savedQuotes[idx];
         window.currentQuote = JSON.parse(JSON.stringify(source));
         restoreQuoteToDOM(window.currentQuote);
-        console.log('[v2.20] loadQuote(' + idx + '): "' + (window.currentQuote.quoteId || 'Draft') + '" restored (incl. address). Status:', window.currentQuote.status);
+        console.log('[v2.21] loadQuote(' + idx + '): "' + (window.currentQuote.quoteId || 'Draft') + '" restored (incl. address). Status:', window.currentQuote.status);
     };
 
 
@@ -955,7 +973,7 @@
             window.currentQuote.deliveryDate        = sq.deliveryDate        || '';
 
             restoreQuoteToDOM(window.currentQuote);
-            console.log('[v2.20] Loaded from URL param:', window.currentQuote.quoteId || serverId, '| status:', window.currentQuote.status);
+            console.log('[v2.21] Loaded from URL param:', window.currentQuote.quoteId || serverId, '| status:', window.currentQuote.status);
 
             try { window.history.replaceState(null, '', window.location.pathname); } catch (e) {}
         }
@@ -964,12 +982,12 @@
             api('GET', '/api/quotes/' + serverId)
                 .then(applyQuoteToDOM)
                 .catch(function (err) {
-                    console.warn('[v2.20] Server fetch failed for', serverId, err.message);
+                    console.warn('[v2.21] Server fetch failed for', serverId, err.message);
                     var found = window.savedQuotes.find(function (q) {
                         return String(q._serverId) === String(serverId) || String(q.quoteId) === String(serverId);
                     });
                     if (found) applyQuoteToDOM(found);
-                    else console.error('[v2.20] Quote not found:', serverId);
+                    else console.error('[v2.21] Quote not found:', serverId);
                 });
         }
 
@@ -990,5 +1008,5 @@
     if (_authToken) tryResumeSession();
     loadQuoteFromUrlParam();
 
-    console.log('[AmeriDex API] v2.20 loaded.');
+    console.log('[AmeriDex API] v2.21 loaded.');
 })();
