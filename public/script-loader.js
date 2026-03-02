@@ -1,7 +1,7 @@
 // ============================================================
-// AmeriDex Dealer Portal - Script Loader v2.1
+// AmeriDex Dealer Portal - Script Loader v2.2
 // File: script-loader.js
-// Date: 2026-02-28
+// Date: 2026-03-02
 // ============================================================
 // CRITICAL: Function stubs below MUST execute synchronously
 // before DOMContentLoaded fires. They are intentionally placed
@@ -57,75 +57,51 @@ if (typeof window.showQuotesView !== 'function') {
 //   6. ameridex-overrides.js             (General UI overrides)
 //   7. ameridex-print-branding.js        (Branded print/preview output)
 //   8. ameridex-customer-address.js      (Address/City/State fields patch)
-//   9. ameridex-customer-sync.js         (Customer history sync)
-//  10. ameridex-roles.js                 (GM/Frontdesk role system + override buttons)
-//  11. ameridex-admin.js                 (Admin panel)
-//  12. ameridex-admin-customers.js       (Admin customer management)
-//  13. ameridex-admin-delete.js          (Soft delete + undo + recently deleted)
-//  14. ameridex-admin-user-delete.js     (Delete users + dealers from Users tab)
-//  15. ameridex-admin-csv-fix.js         (CSV export formula injection prevention)
-//  16. ameridex-deck-calculator.js       (Advanced deck calc + board optimizer)
-//  17. ameridex-admin-patch.js           (Per-dealer pricing migration patch)
-//  18. ameridex-email-optional.js        (Email optional, name+zip required)
+//   9. ameridex-address-quote-prompt.js  (Prompt: update existing or new quote when address added)
+//  10. ameridex-customer-sync.js         (Customer history sync)
+//  11. ameridex-roles.js                 (GM/Frontdesk role system + override buttons)
+//  12. ameridex-admin.js                 (Admin panel)
+//  13. ameridex-admin-customers.js       (Admin customer management)
+//  14. ameridex-admin-delete.js          (Soft delete + undo + recently deleted)
+//  15. ameridex-admin-user-delete.js     (Delete users + dealers from Users tab)
+//  16. ameridex-admin-csv-fix.js         (CSV export formula injection prevention)
+//  17. ameridex-deck-calculator.js       (Advanced deck calc + board optimizer)
+//  18. ameridex-admin-patch.js           (Per-dealer pricing migration patch)
+//  19. ameridex-email-optional.js        (Email optional, name+zip required)
+//
+// v2.2 Changes (2026-03-02):
+//   - Added ameridex-address-quote-prompt.js at position 9.
+//     When a user retrieves an existing quote that had NO address
+//     previously saved, and then enters any address field, a modal
+//     dialog fires asking whether to:
+//       A) Update the existing quote with the new address, or
+//       B) Save the address as a brand-new separate draft quote.
+//       C) Cancel (clears the entered address).
+//     Must load immediately after ameridex-customer-address.js
+//     (position 8) so the address DOM fields and loadQuote patch
+//     are already in place when this script runs.
 //
 // v2.1 Changes (2026-02-28):
-//   - Added ameridex-email-optional.js at position 18.
+//   - Added ameridex-email-optional.js at position 18 (now 19).
 //     Customer email is now optional on the quote form.
 //     Only Name and Zip Code are mandatory.
-//     Overrides updateCustomerProgress, validateRequired,
-//     searchCustomers, showCustomerLookup,
-//     updateCustomerHistory, showReviewModal.
-//     Patches DOM to remove required attr from email input
-//     and update the label to "Email (optional)".
 //
 // v2.0 Changes (2026-02-28):
-//   - Added ameridex-admin-patch.js at position 17.
-//     Phase 1: Removes legacy tier UI from admin panel
-//     (tier dropdowns, tier columns, tier exempt fields).
-//     Phase 2: Per-dealer pricing editor (TBD).
-//     Loads after all admin scripts so DOM elements exist.
+//   - Added ameridex-admin-patch.js at position 17 (now 18).
 //
 // v1.9 Changes (2026-02-28):
-//   - Added ameridex-deck-calculator.js at position 16.
-//     Replaces basic calculator with multi-option board optimizer,
-//     custom length recommendations, and auto screw/plug line items.
-//     Fixes critical waste percentage bug (inverted ternary).
+//   - Added ameridex-deck-calculator.js at position 16 (now 17).
 //
 // v1.8 Changes (2026-02-27):
 //   - REMOVED ameridex-global-scope-fix.js from load chain.
-//     dealer-portal.html now uses var (not let) for all 15 state
-//     variables, so they live directly on window. The eval-based
-//     proxy was silently breaking setter calls from patch scripts.
-//   - Renumbered all positions (0-15 instead of 0-16).
 //
 // v1.7 Changes (2026-02-27):
-//   - Moved renderCustomersList, updateCustomerProgress, and
-//     showQuotesView stubs from ameridex-global-scope-fix.js into
-//     this file. The stubs must be defined SYNCHRONOUSLY before
-//     DOMContentLoaded fires. script-loader.js runs synchronously
-//     as a <script src> tag; ameridex-global-scope-fix.js loads
-//     asynchronously via dynamic script injection (too late).
+//   - Moved renderCustomersList stubs into this file.
 //
 // v1.6 Changes (2026-02-27):
-//   - Added ameridex-global-scope-fix.js at position 0.
-//   - Added ameridex-idle-fix.js at position 4.
-//   - Added ameridex-customer-address.js at position 9.
-//   - Added ameridex-customer-sync.js at position 10.
+//   - Added customer-address.js, customer-sync.js, idle-fix.js.
 //
-// v1.5 Changes (2026-02-27):
-//   - Added ameridex-admin-user-delete.js
-//
-// v1.4 Changes (2026-02-27):
-//   - Added ameridex-admin-delete.js
-//
-// v1.3 Changes (2026-02-26):
-//   - Added ameridex-addrow-fix.js as FIRST script in load chain
-//
-// v1.2 Changes (2026-02-25):
-//   - Added ameridex-admin-csv-fix.js
-//
-// v1.1 Changes (2026-02-25):
-//   - Added ameridex-print-branding.js to load chain
+// v1.5 - v1.1: Earlier incremental additions.
 // ============================================================
 
 (function () {
@@ -141,6 +117,7 @@ if (typeof window.showQuotesView !== 'function') {
         'ameridex-overrides.js',
         'ameridex-print-branding.js',
         'ameridex-customer-address.js',
+        'ameridex-address-quote-prompt.js',
         'ameridex-customer-sync.js',
         'ameridex-roles.js',
         'ameridex-admin.js',
