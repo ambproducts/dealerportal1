@@ -2,14 +2,15 @@
 // routes/quotes.js - Quote CRUD with per-dealer pricing
 // Date: 2026-03-02
 // ============================================================
+// v3.3 (2026-03-02):
+//   FEAT: Server-side Formspree on quote submission.
+//   POST /api/quotes/:id/submit now fires notifySubmissionViaFormspree()
+//   after responding to the client. Uses FORMSPREE_SUBMIT_FORM_ID.
+//   Client-side Formspree call can now be safely removed from the frontend.
+//
 // v3.2 (2026-03-02):
 //   FEAT: PATCH /api/quotes/:id/revision
-//   Restricted to gm and admin roles.
-//   Sets quote.status = 'revision', writes revisionReason,
-//   revisionRequestedBy, revisionRequestedAt.
-//   If req.body.notify === true, POSTs to Formspree using
-//   FORMSPREE_REVISION_FORM_ID from env (server-side fetch).
-//   No new npm dep required — uses native fetch (Node 18+).
+//   Restricted to gm/admin. Notifies via FORMSPREE_REVISION_FORM_ID.
 //
 // v3.1: Customer email optional. name + zip required.
 // v3.0: Per-dealer pricing replaces tier multiplier.
@@ -94,11 +95,11 @@ function upsertCustomer(customerData, dealerCode, existingCustomerId) {
         return customerData || {};
     }
 
-    const customers      = readJSON(CUSTOMERS_FILE);
+    const customers       = readJSON(CUSTOMERS_FILE);
     const normalizedEmail = (customerData.email || '').toLowerCase().trim();
-    const trimmedName    = customerData.name.trim();
-    const trimmedZip     = customerData.zipCode.trim();
-    const now            = new Date().toISOString();
+    const trimmedName     = customerData.name.trim();
+    const trimmedZip      = customerData.zipCode.trim();
+    const now             = new Date().toISOString();
 
     let existing = null;
     if (existingCustomerId) existing = customers.find(c => c.id === existingCustomerId);
@@ -153,60 +154,76 @@ function upsertCustomer(customerData, dealerCode, existingCustomerId) {
 
 
 // =============================================================
-// FORMSPREE NOTIFY HELPER
-// Called by the /revision endpoint when notify=true.
-// Uses FORMSPREE_REVISION_FORM_ID from .env
-// (e.g. "xpwzabcd" -> posts to https://formspree.io/f/xpwzabcd)
-// No npm dep needed — Node 18+ has native fetch.
+// FORMSPREE HELPERS  (server-side, fire-and-forget)
+// Node 18+ native fetch. No npm dependency.
 // =============================================================
-async function notifyRevisionViaFormspree(quote, reason, requestedBy) {
-    const formId = process.env.FORMSPREE_REVISION_FORM_ID;
+
+function buildLineItemSummary(lineItems) {
+    return (lineItems || []).map((li, i) =>
+        `  ${i + 1}. ${li.productName || li.productId || li.type || 'Item'} x${li.quantity} @ $${li.price}`
+    ).join('\n') || '(none)';
+}
+
+async function postToFormspree(formId, payload, logLabel) {
     if (!formId) {
-        console.warn('[Revision] FORMSPREE_REVISION_FORM_ID not set — skipping email notification.');
+        console.warn(`[${logLabel}] Formspree form ID not set, skipping notification.`);
         return;
     }
-
-    const customerName = quote.customer
-        ? (quote.customer.name || '(no name)')
-        : '(no customer)';
-
-    const lineItemSummary = (quote.lineItems || []).map((li, i) =>
-        `  ${i + 1}. ${li.productName || li.productId || li.type || 'Item'} x${li.quantity} @ $${li.price}`
-    ).join('\n');
-
-    const body = {
-        // Formspree maps these keys into the email it sends
-        _subject:      `[AmeriDex Portal] Revision Requested - ${quote.quoteNumber}`,
-        quoteNumber:   quote.quoteNumber,
-        dealerCode:    quote.dealerCode,
-        customer:      customerName,
-        requestedBy:   requestedBy,
-        totalAmount:   `$${(quote.totalAmount || 0).toFixed(2)}`,
-        reason:        reason,
-        lineItems:     lineItemSummary || '(none)',
-        timestamp:     new Date().toISOString()
-    };
-
     try {
         const res = await fetch(`https://formspree.io/f/${formId}`, {
             method:  'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Accept':       'application/json'
-            },
-            body: JSON.stringify(body)
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body:    JSON.stringify(payload)
         });
-
         if (!res.ok) {
             const errText = await res.text().catch(() => res.status.toString());
-            console.warn('[Revision] Formspree responded with error:', errText);
+            console.warn(`[${logLabel}] Formspree error:`, errText);
         } else {
-            console.log('[Revision] Formspree notification sent for', quote.quoteNumber, '(requested by', requestedBy + ')');
+            console.log(`[${logLabel}] Formspree notification sent:`, payload._subject || '(no subject)');
         }
     } catch (err) {
-        // Non-fatal: the status change already succeeded, we just log the failure
-        console.warn('[Revision] Formspree fetch failed (non-fatal):', err.message);
+        console.warn(`[${logLabel}] Formspree fetch failed (non-fatal):`, err.message);
     }
+}
+
+async function notifyRevisionViaFormspree(quote, reason, requestedBy) {
+    const formId = process.env.FORMSPREE_REVISION_FORM_ID;
+    const customerName = quote.customer ? (quote.customer.name || '(no name)') : '(no customer)';
+    await postToFormspree(formId, {
+        _subject:    `[AmeriDex Portal] Revision Requested - ${quote.quoteNumber}`,
+        quoteNumber: quote.quoteNumber,
+        dealerCode:  quote.dealerCode,
+        customer:    customerName,
+        requestedBy: requestedBy,
+        totalAmount: `$${(quote.totalAmount || 0).toFixed(2)}`,
+        reason:      reason,
+        lineItems:   buildLineItemSummary(quote.lineItems),
+        timestamp:   new Date().toISOString()
+    }, 'Revision');
+}
+
+async function notifySubmissionViaFormspree(quote, submittedBy) {
+    const formId = process.env.FORMSPREE_SUBMIT_FORM_ID;
+    const customerName = quote.customer ? (quote.customer.name || '(no name)') : '(no customer)';
+    const customerEmail = quote.customer ? (quote.customer.email || '') : '';
+    const customerPhone = quote.customer ? (quote.customer.phone || '') : '';
+    const customerZip   = quote.customer ? (quote.customer.zipCode || '') : '';
+
+    await postToFormspree(formId, {
+        _subject:      `[AmeriDex Portal] Quote Submitted - ${quote.quoteNumber}`,
+        quoteNumber:   quote.quoteNumber,
+        dealerCode:    quote.dealerCode,
+        submittedBy:   submittedBy,
+        customer:      customerName,
+        customerEmail: customerEmail,
+        customerPhone: customerPhone,
+        customerZip:   customerZip,
+        totalAmount:   `$${(quote.totalAmount || 0).toFixed(2)}`,
+        itemCount:     `${(quote.lineItems || []).length} line item(s)`,
+        lineItems:     buildLineItemSummary(quote.lineItems),
+        notes:         quote.notes || '(none)',
+        timestamp:     new Date().toISOString()
+    }, 'Submit');
 }
 
 
@@ -224,18 +241,18 @@ router.get('/pending-overrides', requireRole('admin', 'gm'), (req, res) => {
         (q.lineItems || []).forEach((item, idx) => {
             if (item.priceOverride && item.priceOverride.status === 'pending') {
                 results.push({
-                    quoteId:       q.id,
-                    quoteNumber:   q.quoteNumber,
-                    dealerCode:    q.dealerCode,
-                    customerName:  q.customer ? (q.customer.name || q.customer.firstName || '') : '',
-                    itemIndex:     idx,
-                    productName:   item.productName || '',
-                    tierPrice:     item.tierPrice || item.price,
+                    quoteId:        q.id,
+                    quoteNumber:    q.quoteNumber,
+                    dealerCode:     q.dealerCode,
+                    customerName:   q.customer ? (q.customer.name || q.customer.firstName || '') : '',
+                    itemIndex:      idx,
+                    productName:    item.productName || '',
+                    tierPrice:      item.tierPrice || item.price,
                     requestedPrice: item.priceOverride.requestedPrice,
-                    reason:        item.priceOverride.reason,
-                    requestedBy:   item.priceOverride.requestedBy,
-                    requestedAt:   item.priceOverride.requestedAt,
-                    quoteStatus:   q.status,
+                    reason:         item.priceOverride.reason,
+                    requestedBy:    item.priceOverride.requestedBy,
+                    requestedAt:    item.priceOverride.requestedAt,
+                    quoteStatus:    q.status,
                     quoteCreatedBy: q.createdBy
                 });
             }
@@ -253,7 +270,7 @@ router.get('/pending-overrides', requireRole('admin', 'gm'), (req, res) => {
 router.get('/', (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
 
-    const scopeParam     = (req.query.scope      || '').trim().toLowerCase();
+    const scopeParam      = (req.query.scope      || '').trim().toLowerCase();
     const scopeDealerCode = (req.query.dealerCode || '').trim().toUpperCase();
     let mine;
 
@@ -359,9 +376,9 @@ router.post('/', (req, res) => {
     const upsertedCustomer = upsertCustomer(customer, req.user.dealerCode, null);
 
     const customerSnapshot = {
-        customerId: upsertedCustomer.id   || null,
-        name:       upsertedCustomer.name || (customer && customer.name)    || '',
-        email:      upsertedCustomer.email || (customer && customer.email)  || '',
+        customerId: upsertedCustomer.id    || null,
+        name:       upsertedCustomer.name  || (customer && customer.name)    || '',
+        email:      upsertedCustomer.email || (customer && customer.email)   || '',
         company:    upsertedCustomer.company || (customer && customer.company) || '',
         phone:      upsertedCustomer.phone   || (customer && customer.phone)   || '',
         zipCode:    upsertedCustomer.zipCode || (customer && customer.zipCode) || ''
@@ -456,8 +473,7 @@ router.put('/:id', (req, res) => {
 // PATCH /api/quotes/:id/revision  (v3.2)
 // GM or admin only.
 // Sets status -> 'revision', records reason + who requested it.
-// If body.notify === true, emails AmeriDex via Formspree
-// (server-side POST so the API key stays on the server).
+// If body.notify === true, emails AmeriDex via Formspree.
 // =============================================================
 router.patch('/:id/revision', requireRole('admin', 'gm'), async (req, res) => {
     const { reason, notify } = req.body;
@@ -492,10 +508,8 @@ router.patch('/:id/revision', requireRole('admin', 'gm'), async (req, res) => {
     console.log('[Quotes] Revision requested:', quotes[idx].quoteNumber,
         'by', req.user.username, '| Reason:', reason.trim());
 
-    // Respond immediately so the UI unlocks without waiting for Formspree
     res.json({ status: 'revision', quoteNumber: quotes[idx].quoteNumber });
 
-    // Fire-and-forget Formspree notification (after response sent)
     if (notify === true || notify === 'true') {
         notifyRevisionViaFormspree(quotes[idx], reason.trim(), req.user.username);
     }
@@ -669,9 +683,13 @@ router.post('/:id/items/:itemIndex/reject-override', requireRole('admin', 'gm'),
 
 
 // =============================================================
-// POST /api/quotes/:id/submit
+// POST /api/quotes/:id/submit  (v3.3)
+// Now async. Fires Formspree submission notification after
+// responding to the client (fire-and-forget, same pattern as
+// the revision endpoint). Uses FORMSPREE_SUBMIT_FORM_ID.
+// The frontend client-side Formspree call can now be removed.
 // =============================================================
-router.post('/:id/submit', (req, res) => {
+router.post('/:id/submit', async (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
     const idx = quotes.findIndex(q =>
         q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted
@@ -703,7 +721,12 @@ router.post('/:id/submit', (req, res) => {
     writeJSON(QUOTES_FILE, quotes);
 
     console.log('[Quotes] Submitted:', quotes[idx].quoteNumber, 'by', req.user.username);
+
+    // Respond immediately so the UI transitions without waiting for Formspree
     res.json(quotes[idx]);
+
+    // Fire-and-forget: email AmeriDex with the full quote details
+    notifySubmissionViaFormspree(quotes[idx], req.user.username);
 });
 
 
@@ -754,7 +777,6 @@ router.post('/:id/duplicate', (req, res) => {
     dup.reviewedAt     = null;
     dup.approvedAt     = null;
     dup.pricingModel   = 'per-dealer';
-    // Clear revision metadata
     dup.revisionReason      = null;
     dup.revisionRequestedBy = null;
     dup.revisionRequestedAt = null;
