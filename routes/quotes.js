@@ -2,26 +2,26 @@
 // routes/quotes.js - Quote CRUD with per-dealer pricing
 // Date: 2026-03-02
 // ============================================================
+// v3.6 (2026-03-02):
+//   FIX: POST and PUT now persist all frontend-sent fields:
+//        options, specialInstructions, internalNotes,
+//        shippingAddress, deliveryDate.
+//   FIX: Customer snapshot in POST and PUT now includes
+//        address, city, state.
+//   FIX: upsertCustomer() now persists address, city, state
+//        on the customer record in customers.json.
+//   Previously these fields were silently dropped, causing
+//   edits to appear saved within the session (localStorage)
+//   but vanish after logout/login or page refresh when
+//   loadServerQuotes() rebuilt savedQuotes from the server.
+//
 // v3.5 (2026-03-02):
 //   FIX: Removed all createdBy row-level guards for frontdesk.
-//        frontdesk sees all quotes scoped to their dealerCode.
-//        Affected: GET /, GET /:id, PUT /:id, POST /:id/submit,
-//        POST /:id/items/:idx/request-override, GET /:id/pdf.
 //   FEAT: POST /api/quotes/:id/approve-revision (gm/admin only)
-//        GM approves a revision-status quote and re-submits it
-//        on behalf of the dealer staff. Fires Formspree submit
-//        notification with approvedBy field. Records:
-//        revisionApprovedBy, revisionApprovedAt.
 //
-// v3.4 (2026-03-02):
-//   FEAT: gm/admin PUT-edit on submitted/reviewed/approved quotes.
-//
-// v3.3 (2026-03-02):
-//   FEAT: Server-side Formspree on quote submission.
-//
-// v3.2 (2026-03-02):
-//   FEAT: PATCH /api/quotes/:id/revision. GM/admin only.
-//
+// v3.4: gm/admin PUT-edit on submitted/reviewed/approved quotes.
+// v3.3: Server-side Formspree on quote submission.
+// v3.2: PATCH /api/quotes/:id/revision. GM/admin only.
 // v3.1: Customer email optional. name + zip required.
 // v3.0: Per-dealer pricing replaces tier multiplier.
 // ============================================================
@@ -132,6 +132,9 @@ function upsertCustomer(customerData, dealerCode, existingCustomerId) {
         if (normalizedEmail) existing.email = normalizedEmail;
         if (customerData.company !== undefined) existing.company = customerData.company;
         if (customerData.phone   !== undefined) existing.phone   = customerData.phone;
+        if (customerData.address !== undefined) existing.address = customerData.address;
+        if (customerData.city    !== undefined) existing.city    = customerData.city;
+        if (customerData.state   !== undefined) existing.state   = customerData.state;
         existing.zipCode = trimmedZip;
         if (!existing.dealers) existing.dealers = [];
         if (!existing.dealers.includes(dealerCode)) existing.dealers.push(dealerCode);
@@ -147,6 +150,9 @@ function upsertCustomer(customerData, dealerCode, existingCustomerId) {
         email:        normalizedEmail,
         company:      customerData.company || '',
         phone:        customerData.phone   || '',
+        address:      customerData.address || '',
+        city:         customerData.city    || '',
+        state:        customerData.state   || '',
         zipCode:      trimmedZip,
         dealers:      [dealerCode],
         quoteCount:   0,
@@ -243,7 +249,6 @@ async function notifySubmissionViaFormspree(quote, submittedBy, approvedBy) {
         quoteNumber:   quote.quoteNumber,
         dealerCode:    quote.dealerCode,
         submittedBy:   submittedBy,
-        // approvedBy is only present when a GM approves a revision on behalf of staff
         ...(approvedBy ? { approvedBy } : {}),
         customer:      customerName,
         customerEmail: customerEmail,
@@ -310,7 +315,6 @@ router.get('/', (req, res) => {
     } else if (req.user.role === 'admin' && scopeDealerCode) {
         mine = quotes.filter(q => q.dealerCode === scopeDealerCode && !q.deleted);
     } else {
-        // frontdesk, dealer, gm: all quotes for their dealerCode
         mine = quotes.filter(q => q.dealerCode === req.user.dealerCode && !q.deleted);
     }
 
@@ -390,10 +394,14 @@ router.get('/:id', (req, res) => {
 
 
 // =============================================================
-// POST /api/quotes
+// POST /api/quotes  (v3.6: persists all frontend fields)
 // =============================================================
 router.post('/', (req, res) => {
-    const { customer, lineItems, notes } = req.body;
+    const {
+        customer, lineItems, notes,
+        options, specialInstructions, internalNotes,
+        shippingAddress, deliveryDate
+    } = req.body;
     const dealer = req.dealer;
 
     const items       = (lineItems || []).map(item => buildLineItem(item, dealer));
@@ -401,32 +409,40 @@ router.post('/', (req, res) => {
     const upsertedCustomer = upsertCustomer(customer, req.user.dealerCode, null);
 
     const customerSnapshot = {
-        customerId: upsertedCustomer.id    || null,
-        name:       upsertedCustomer.name  || (customer && customer.name)    || '',
-        email:      upsertedCustomer.email || (customer && customer.email)   || '',
+        customerId: upsertedCustomer.id      || null,
+        name:       upsertedCustomer.name    || (customer && customer.name)    || '',
+        email:      upsertedCustomer.email   || (customer && customer.email)   || '',
         company:    upsertedCustomer.company || (customer && customer.company) || '',
         phone:      upsertedCustomer.phone   || (customer && customer.phone)   || '',
+        address:    upsertedCustomer.address || (customer && customer.address) || '',
+        city:       upsertedCustomer.city    || (customer && customer.city)    || '',
+        state:      upsertedCustomer.state   || (customer && customer.state)   || '',
         zipCode:    upsertedCustomer.zipCode || (customer && customer.zipCode) || ''
     };
 
     const newQuote = {
-        id:              generateId(),
-        quoteNumber:     generateQuoteNumber(),
-        dealerCode:      req.user.dealerCode,
-        createdBy:       req.user.username,
-        createdByRole:   req.user.role,
-        customer:        customerSnapshot,
-        lineItems:       items,
-        notes:           notes || '',
-        pricingModel:    'per-dealer',
-        totalAmount:     Math.round(totalAmount * 100) / 100,
+        id:                  generateId(),
+        quoteNumber:         generateQuoteNumber(),
+        dealerCode:          req.user.dealerCode,
+        createdBy:           req.user.username,
+        createdByRole:       req.user.role,
+        customer:            customerSnapshot,
+        lineItems:           items,
+        notes:               notes || '',
+        options:             options || { pictureFrame: false, stairs: false },
+        specialInstructions: specialInstructions || '',
+        internalNotes:       internalNotes       || '',
+        shippingAddress:     shippingAddress     || '',
+        deliveryDate:        deliveryDate        || '',
+        pricingModel:        'per-dealer',
+        totalAmount:         Math.round(totalAmount * 100) / 100,
         hasPendingOverrides: false,
-        status:          'draft',
-        createdAt:       new Date().toISOString(),
-        updatedAt:       new Date().toISOString(),
-        submittedAt:     null,
-        reviewedAt:      null,
-        approvedAt:      null
+        status:              'draft',
+        createdAt:           new Date().toISOString(),
+        updatedAt:           new Date().toISOString(),
+        submittedAt:         null,
+        reviewedAt:          null,
+        approvedAt:          null
     };
 
     const quotes = readJSON(QUOTES_FILE);
@@ -434,14 +450,14 @@ router.post('/', (req, res) => {
     writeJSON(QUOTES_FILE, quotes);
     recalcCustomerStats(customerSnapshot.customerId);
 
-    console.log('[Quotes] Created:', newQuote.quoteNumber, 'by', req.user.username,
+    console.log('[Quotes v3.6] Created:', newQuote.quoteNumber, 'by', req.user.username,
         '| Dealer:', req.user.dealerCode, '| Customer:', customerSnapshot.name);
     res.status(201).json(newQuote);
 });
 
 
 // =============================================================
-// PUT /api/quotes/:id  (v3.4+)
+// PUT /api/quotes/:id  (v3.6: persists all frontend fields)
 //
 // Permission matrix:
 //   frontdesk / dealer : draft and revision only (own dealerCode)
@@ -475,7 +491,11 @@ router.put('/:id', async (req, res) => {
         });
     }
 
-    const { customer, lineItems, notes } = req.body;
+    const {
+        customer, lineItems, notes,
+        options, specialInstructions, internalNotes,
+        shippingAddress, deliveryDate
+    } = req.body;
     const oldCustomerId = quotes[idx].customer ? quotes[idx].customer.customerId : null;
 
     if (customer) {
@@ -487,11 +507,19 @@ router.put('/:id', async (req, res) => {
             email:      upsertedCustomer.email   || customer.email   || '',
             company:    upsertedCustomer.company || customer.company || '',
             phone:      upsertedCustomer.phone   || customer.phone   || '',
+            address:    upsertedCustomer.address || customer.address || '',
+            city:       upsertedCustomer.city    || customer.city    || '',
+            state:      upsertedCustomer.state   || customer.state   || '',
             zipCode:    upsertedCustomer.zipCode || customer.zipCode || ''
         };
     }
 
-    if (notes !== undefined) quotes[idx].notes = notes;
+    if (notes !== undefined)               quotes[idx].notes               = notes;
+    if (options !== undefined)              quotes[idx].options             = options;
+    if (specialInstructions !== undefined)  quotes[idx].specialInstructions = specialInstructions;
+    if (internalNotes !== undefined)        quotes[idx].internalNotes       = internalNotes;
+    if (shippingAddress !== undefined)      quotes[idx].shippingAddress     = shippingAddress;
+    if (deliveryDate !== undefined)         quotes[idx].deliveryDate        = deliveryDate;
 
     if (lineItems) {
         const dealer = req.dealer;
@@ -515,7 +543,7 @@ router.put('/:id', async (req, res) => {
     if (newCustomerId) recalcCustomerStats(newCustomerId);
     if (oldCustomerId && oldCustomerId !== newCustomerId) recalcCustomerStats(oldCustomerId);
 
-    console.log('[Quotes v3.5] PUT:', quotes[idx].quoteNumber,
+    console.log('[Quotes v3.6] PUT:', quotes[idx].quoteNumber,
         '| status:', currentStatus,
         '| by:', req.user.username, '(' + req.user.role + ')');
 
@@ -576,15 +604,6 @@ router.patch('/:id/revision', requireRole('admin', 'gm'), async (req, res) => {
 // =============================================================
 // POST /api/quotes/:id/approve-revision  (v3.5)
 // GM or admin only.
-// The GM reviews a revision-status quote edited by dealer staff
-// and approves it, re-submitting it to AmeriDex on their behalf.
-//
-// - Quote must be in 'revision' status
-// - Status is set back to 'submitted'
-// - submittedAt is refreshed to now
-// - revisionApprovedBy + revisionApprovedAt stamped on record
-// - Fires notifySubmissionViaFormspree() with approvedBy field
-//   so AmeriDex knows a GM signed off rather than the staff user
 // =============================================================
 router.post('/:id/approve-revision', requireRole('admin', 'gm'), async (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
@@ -629,8 +648,6 @@ router.post('/:id/approve-revision', requireRole('admin', 'gm'), async (req, res
 
     res.json(quotes[idx]);
 
-    // Fire-and-forget: AmeriDex gets the standard submit email
-    // with an extra approvedBy field so they know the GM signed off
     notifySubmissionViaFormspree(quotes[idx], quotes[idx].createdBy, req.user.username);
 });
 
