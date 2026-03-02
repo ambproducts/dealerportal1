@@ -1,12 +1,23 @@
 // ============================================================
-// AmeriDex Dealer Portal - API Integration Patch v2.18
-// Date: 2026-03-01
+// AmeriDex Dealer Portal - API Integration Patch v2.19
+// Date: 2026-03-02
 // ============================================================
 // REQUIRES: ameridex-patches.js (v1.0+) loaded first
 //
 // Load order in dealer-portal.html (before </body>):
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
+//
+// v2.19 Changes (2026-03-02):
+//   - FIX: mapServerCustomerToFrontend() now includes address,
+//     city, and state fields. These were added to the DOM by
+//     ameridex-customer-address.js but the mapping function only
+//     returned the original 5 fields (name, email, zipCode,
+//     company, phone). On every server load, address/city/state
+//     were silently stripped from the customer object, making it
+//     impossible to round-trip address data through the server.
+//   - FIX: restoreQuoteToDOM() is now exposed on window so
+//     ameridex-quote-editor.js can extend it if needed.
 //
 // v2.18 Changes (2026-03-01):
 //   - CRITICAL FIX: saveCurrentQuote() (Section 7) no longer creates
@@ -217,10 +228,8 @@
 
     // ----------------------------------------------------------
     // SHARED HELPER: Restore a quote object to the DOM (v2.15)
-    // ----------------------------------------------------------
-    // Used by both loadQuote() (Section 14b) and
-    // applyQuoteToDOM() (Section 18) so all fields are
-    // restored consistently in every code path.
+    // v2.19: Now also restores address/city/state fields.
+    //        Exposed on window so external scripts can extend.
     // ----------------------------------------------------------
     function restoreQuoteToDOM(quoteObj) {
         // Customer fields
@@ -230,6 +239,14 @@
         document.getElementById('cust-zip').value     = c.zipCode || '';
         document.getElementById('cust-company').value = c.company || '';
         document.getElementById('cust-phone').value   = c.phone   || '';
+
+        // v2.19: Address fields (injected by ameridex-customer-address.js)
+        var addrEl  = document.getElementById('cust-address');
+        var cityEl  = document.getElementById('cust-city');
+        var stateEl = document.getElementById('cust-state');
+        if (addrEl)  addrEl.value  = c.address || '';
+        if (cityEl)  cityEl.value  = c.city    || '';
+        if (stateEl) stateEl.value = c.state   || '';
 
         // Options checkboxes
         var opts = quoteObj.options || { pictureFrame: false, stairs: false };
@@ -252,6 +269,9 @@
         updateTotalAndFasteners();
         if (typeof updateCustomerProgress === 'function') updateCustomerProgress();
     }
+
+    // v2.19: Expose on window so external scripts can patch/extend
+    window.restoreQuoteToDOM = restoreQuoteToDOM;
 
 
     // ----------------------------------------------------------
@@ -519,10 +539,6 @@
     // ----------------------------------------------------------
     // 5. TIER PRICING: Fetch and apply (v2.17)
     // ----------------------------------------------------------
-    // v2.17: Now stores both price (dealer-specific) and basePrice
-    // (catalog) on each PRODUCTS entry. syncQuoteToServer() reads
-    // basePrice to send the true catalog price in saved quotes.
-    // ----------------------------------------------------------
     function isValidPrice(val) {
         if (val === undefined || val === null) return false;
         var n = Number(val);
@@ -577,11 +593,17 @@
 
 
     // ----------------------------------------------------------
-    // 6a. SERVER-TO-FRONTEND MAPPING HELPERS (v2.9)
+    // 6a. SERVER-TO-FRONTEND MAPPING HELPERS (v2.19)
+    // ----------------------------------------------------------
+    // v2.19: mapServerCustomerToFrontend now includes address,
+    // city, and state. Without these, every loadServerQuotes()
+    // and loadQuoteFromUrlParam() call silently stripped the
+    // address data that was saved to the server, making it
+    // impossible to round-trip address information.
     // ----------------------------------------------------------
     function mapServerCustomerToFrontend(serverCustomer) {
         if (!serverCustomer) {
-            return { name: '', email: '', zipCode: '', company: '', phone: '' };
+            return { name: '', email: '', zipCode: '', company: '', phone: '', address: '', city: '', state: '' };
         }
         var c = serverCustomer;
         return {
@@ -589,7 +611,10 @@
             email:   c.email || c.customerEmail || c.customer_email || '',
             zipCode: c.zipCode || c.zipcode || c.zip_code || c.zip || '',
             company: c.company || c.companyName || c.company_name || '',
-            phone:   c.phone || c.phoneNumber || c.phone_number || ''
+            phone:   c.phone || c.phoneNumber || c.phone_number || '',
+            address: c.address || c.streetAddress || c.street_address || '',
+            city:    c.city || '',
+            state:   c.state || ''
         };
     }
 
@@ -658,21 +683,7 @@
     // ----------------------------------------------------------
     // 6b. QUOTE SYNC: Server with localStorage fallback (v2.18)
     // ----------------------------------------------------------
-    // v2.18: loadServerQuotes() now re-links currentQuote to its
-    // matching savedQuotes[] entry after rebuilding, preventing
-    // the findIndex miss that caused duplicate creation.
-    //
-    // v2.18: syncQuoteToServer() now refuses to POST if quote.quoteId
-    // matches server quote number format (Q######-XXXX), which means
-    // the quote was loaded from the server and should never be re-created.
-    //
-    // v2.17: syncQuoteToServer() now reads prod.basePrice directly
-    // instead of dividing by tier multiplier. The multiplier is
-    // always 1.0 under per-dealer pricing, which caused basePrice
-    // and price to be identical in saved quotes.
-    // ----------------------------------------------------------
     function loadServerQuotes() {
-        // v2.18: Snapshot currentQuote identity before rebuilding
         var activeServerId = window.currentQuote ? window.currentQuote._serverId : null;
         var activeQuoteId = window.currentQuote ? window.currentQuote.quoteId : null;
 
@@ -713,20 +724,18 @@
                 });
 
                 // v2.18: Re-link currentQuote to its savedQuotes[] entry
-                // so that saveCurrentQuote()'s findIndex() will match.
                 if (activeServerId && window.currentQuote && window.currentQuote._serverId === activeServerId) {
                     var matchIdx = window.savedQuotes.findIndex(function (q) {
                         return String(q._serverId) === String(activeServerId);
                     });
                     if (matchIdx >= 0) {
-                        // Adopt the server quoteId so findIndex matches on both fields
                         window.currentQuote.quoteId = window.savedQuotes[matchIdx].quoteId;
                         console.log('[v2.18] Re-linked currentQuote to savedQuotes[' + matchIdx + '] (_serverId=' + activeServerId + ', quoteId=' + window.currentQuote.quoteId + ')');
                     }
                 }
 
                 saveToStorage();
-                console.log('[Quotes v2.18] Loaded ' + window.savedQuotes.length + ' quotes with reverse-mapped line items');
+                console.log('[Quotes v2.19] Loaded ' + window.savedQuotes.length + ' quotes with reverse-mapped line items (address fields included)');
                 return window.savedQuotes;
             })
             .catch(function () {
@@ -801,10 +810,6 @@
                     return null;
                 });
         } else {
-            // v2.18: Safety guard - if the quoteId looks like a server-generated
-            // quote number (Q######-XXXX), this quote came from the server and
-            // should NOT be re-created via POST. This catches edge cases where
-            // _serverId was lost during savedQuotes[] rebuild.
             if (isServerQuoteNumber(quote.quoteId)) {
                 console.error('[Sync v2.18] BLOCKED POST for server-originated quote ' + quote.quoteId
                     + '. _serverId is missing but quoteId is server format. Skipping to prevent duplicate.');
@@ -828,12 +833,6 @@
     // ----------------------------------------------------------
     // 7. OVERRIDE: saveCurrentQuote (server + local) (v2.18)
     // ----------------------------------------------------------
-    // v2.18: Complete rewrite of the matching logic. If currentQuote
-    // has _serverId set, it is ALWAYS treated as an existing quote.
-    // We search by _serverId first, then quoteId. If neither matches
-    // (e.g. savedQuotes was rebuilt), we force-insert into savedQuotes
-    // with _serverId preserved, ensuring syncQuoteToServer uses PUT.
-    // ----------------------------------------------------------
     var _origSaveCurrentQuote = window.saveCurrentQuote;
     window.saveCurrentQuote = function () {
         if (typeof window.syncQuoteFromDOM === 'function') {
@@ -844,17 +843,14 @@
             window.currentQuote.quoteId = generateQuoteNumber();
         }
 
-        // v2.18: Three-tier matching strategy
         var existingIdx = -1;
 
-        // Tier 1: Match by _serverId (most reliable, server-assigned)
         if (window.currentQuote._serverId) {
             existingIdx = window.savedQuotes.findIndex(function (q) {
                 return q._serverId && String(q._serverId) === String(window.currentQuote._serverId);
             });
         }
 
-        // Tier 2: Match by quoteId (client-assigned quote number)
         if (existingIdx < 0 && window.currentQuote.quoteId) {
             existingIdx = window.savedQuotes.findIndex(function (q) {
                 return q.quoteId && q.quoteId === window.currentQuote.quoteId;
@@ -865,22 +861,16 @@
         quoteData.updatedAt = new Date().toISOString();
 
         if (existingIdx >= 0) {
-            // Preserve _serverId from either direction
             if (!quoteData._serverId && window.savedQuotes[existingIdx]._serverId) {
                 quoteData._serverId = window.savedQuotes[existingIdx]._serverId;
             }
             window.savedQuotes[existingIdx] = quoteData;
         } else if (window.currentQuote._serverId) {
-            // v2.18: _serverId exists but no match found in savedQuotes[].
-            // This happens when savedQuotes was rebuilt by loadServerQuotes()
-            // and the quote's quoteId format didn't match. Force-insert
-            // WITH _serverId so syncQuoteToServer uses PUT, not POST.
             console.warn('[v2.18] saveCurrentQuote: _serverId=' + window.currentQuote._serverId
                 + ' not found in savedQuotes[]. Force-inserting to prevent duplicate POST.');
             window.savedQuotes.push(quoteData);
             existingIdx = window.savedQuotes.length - 1;
         } else {
-            // Genuinely new quote with no server identity
             quoteData.createdAt = new Date().toISOString();
             window.savedQuotes.push(quoteData);
             existingIdx = window.savedQuotes.length - 1;
@@ -1262,12 +1252,13 @@
         var source = window.savedQuotes[idx];
         window.currentQuote = JSON.parse(JSON.stringify(source));
 
-        // Restore all 11 DOM fields via the shared helper
+        // Restore all DOM fields via the shared helper
+        // v2.19: restoreQuoteToDOM now includes address/city/state
         restoreQuoteToDOM(window.currentQuote);
 
-        console.log('[v2.15] loadQuote(' + idx + '): Loaded "'
+        console.log('[v2.19] loadQuote(' + idx + '): Loaded "'
             + (window.currentQuote.quoteId || 'Draft') + '" with '
-            + window.currentQuote.lineItems.length + ' line items, all fields restored.');
+            + window.currentQuote.lineItems.length + ' line items, all fields restored (incl. address).');
     };
 
 
@@ -1282,7 +1273,7 @@
         window.currentQuote = {
             quoteId: null,
             status: 'draft',
-            customer: { name: '', email: '', zipCode: '', company: '', phone: '' },
+            customer: { name: '', email: '', zipCode: '', company: '', phone: '', address: '', city: '', state: '' },
             lineItems: JSON.parse(JSON.stringify(original.lineItems)),
             options: JSON.parse(JSON.stringify(original.options || { pictureFrame: false, stairs: false })),
             specialInstructions: original.specialInstructions || '',
@@ -1390,12 +1381,12 @@
             window.currentQuote.shippingAddress     = sq.shippingAddress || '';
             window.currentQuote.deliveryDate        = sq.deliveryDate || '';
 
-            // v2.15: Use shared helper for full DOM restoration
+            // v2.19: restoreQuoteToDOM now includes address/city/state
             restoreQuoteToDOM(window.currentQuote);
 
-            console.log('[v2.16] Loaded quote from URL param: '
+            console.log('[v2.19] Loaded quote from URL param: '
                 + (window.currentQuote.quoteId || serverId)
-                + ' | ' + frontendLineItems.length + ' line items (mapped and restored)');
+                + ' | ' + frontendLineItems.length + ' line items (mapped and restored, incl. address)');
 
             try {
                 var cleanUrl = window.location.pathname;
@@ -1448,5 +1439,5 @@
 
     loadQuoteFromUrlParam();
 
-    console.log('[AmeriDex API] v2.18 loaded: Auth + API integration active.');
+    console.log('[AmeriDex API] v2.19 loaded: Auth + API integration active.');
 })();
