@@ -1,8 +1,18 @@
 // ============================================================
-// AmeriDex Dealer Portal - API Integration Patch v2.21
+// AmeriDex Dealer Portal - API Integration Patch v2.22
 // Date: 2026-03-02
 // ============================================================
 // REQUIRES: ameridex-patches.js (v1.0+) loaded first
+//
+// v2.22 Changes (2026-03-02):
+//   - FIX: loadQuoteFromUrlParam() now ALWAYS waits for the
+//     'ameridex-login' event before fetching. Previously, if
+//     _authToken existed in sessionStorage, doLoad() fired
+//     immediately, racing with tryResumeSession() which had
+//     not yet finished hydrating _currentUser, _currentDealer,
+//     or the dealer middleware. This caused 401/404 errors and
+//     stale state when opening a quote via URL.
+//   - Added 10-second safety timeout for the login listener.
 //
 // v2.21 Changes (2026-03-02):
 //   - CLEANUP: Removed client-side Formspree fallback from
@@ -485,7 +495,7 @@
                 }
 
                 saveToStorage();
-                console.log('[Quotes v2.21] Loaded', window.savedQuotes.length, 'quotes (address + all fields mapped)');
+                console.log('[Quotes v2.22] Loaded', window.savedQuotes.length, 'quotes (address + all fields mapped)');
                 return window.savedQuotes;
             })
             .catch(function () {
@@ -676,20 +686,18 @@
                     document.getElementById('reviewModal').classList.remove('active');
                     document.getElementById('success-order-number').textContent = quoteId;
                     document.getElementById('success-confirmation').classList.add('visible');
-                    console.log('[Submit v2.21] Quote', quoteId, 'submitted to server. Formspree handled server-side.');
+                    console.log('[Submit v2.22] Quote', quoteId, 'submitted to server. Formspree handled server-side.');
                 })
                 .catch(function (err) {
-                    // Server returned an error (e.g. pending overrides, already submitted)
                     var msg = err.message || 'Submission failed. Please try again.';
-                    console.warn('[Submit v2.21] Server submit failed:', msg);
+                    console.warn('[Submit v2.22] Server submit failed:', msg);
                     alert('Could not submit quote: ' + msg);
                 });
         } else {
-            // No server ID means the quote has not synced yet, or auth has lapsed
             var reason = !_authToken
                 ? 'Your session has expired. Please log in again and retry.'
                 : 'This quote has not synced to the server yet. Please wait a moment and try again.';
-            console.warn('[Submit v2.21] Cannot submit:', reason);
+            console.warn('[Submit v2.22] Cannot submit:', reason);
             alert(reason);
         }
     };
@@ -864,7 +872,7 @@
     // ----------------------------------------------------------
     window.loadQuote = function (idx) {
         if (idx < 0 || idx >= window.savedQuotes.length) {
-            console.warn('[v2.21] loadQuote: invalid index', idx);
+            console.warn('[v2.22] loadQuote: invalid index', idx);
             return;
         }
         if (window.currentQuote.lineItems.length > 0) {
@@ -873,7 +881,7 @@
         var source = window.savedQuotes[idx];
         window.currentQuote = JSON.parse(JSON.stringify(source));
         restoreQuoteToDOM(window.currentQuote);
-        console.log('[v2.21] loadQuote(' + idx + '): "' + (window.currentQuote.quoteId || 'Draft') + '" restored (incl. address). Status:', window.currentQuote.status);
+        console.log('[v2.22] loadQuote(' + idx + '): "' + (window.currentQuote.quoteId || 'Draft') + '" restored (incl. address). Status:', window.currentQuote.status);
     };
 
 
@@ -948,7 +956,30 @@
 
 
     // ----------------------------------------------------------
-    // 18. LOAD QUOTE FROM URL PARAM (v2.16)
+    // 18. LOAD QUOTE FROM URL PARAM (v2.22)
+    //
+    // CRITICAL FIX: Always wait for 'ameridex-login' before
+    // fetching. Previously, when _authToken existed in
+    // sessionStorage, doLoad() fired immediately. But
+    // tryResumeSession() is async and had not yet finished
+    // hydrating _currentUser, _currentDealer, or the server-side
+    // dealer middleware. This caused 401/404 errors and stale
+    // state when opening a quote from the Quotes & Customers
+    // page (which navigates to ?quoteId=Q260228-OOD9).
+    //
+    // Flow now:
+    //   1. loadQuoteFromUrlParam() always registers a one-shot
+    //      listener on 'ameridex-login'.
+    //   2. tryResumeSession() dispatches 'ameridex-login' AFTER
+    //      auth is verified, tier pricing is loaded, and
+    //      loadServerQuotes() has finished.
+    //   3. handleServerLogin() dispatches 'ameridex-login' after
+    //      the same full-hydration sequence.
+    //   4. Either way, doLoad() runs only when the session is
+    //      fully ready.
+    //   5. A 10-second safety timeout cleans up the listener
+    //      if login never fires (e.g. expired token + user
+    //      does not re-login).
     // ----------------------------------------------------------
     function loadQuoteFromUrlParam() {
         var urlParams = new URLSearchParams(window.location.search);
@@ -973,7 +1004,7 @@
             window.currentQuote.deliveryDate        = sq.deliveryDate        || '';
 
             restoreQuoteToDOM(window.currentQuote);
-            console.log('[v2.21] Loaded from URL param:', window.currentQuote.quoteId || serverId, '| status:', window.currentQuote.status);
+            console.log('[v2.22] Loaded from URL param:', window.currentQuote.quoteId || serverId, '| status:', window.currentQuote.status);
 
             try { window.history.replaceState(null, '', window.location.pathname); } catch (e) {}
         }
@@ -982,20 +1013,33 @@
             api('GET', '/api/quotes/' + serverId)
                 .then(applyQuoteToDOM)
                 .catch(function (err) {
-                    console.warn('[v2.21] Server fetch failed for', serverId, err.message);
+                    console.warn('[v2.22] Server fetch failed for', serverId, err.message);
                     var found = window.savedQuotes.find(function (q) {
                         return String(q._serverId) === String(serverId) || String(q.quoteId) === String(serverId);
                     });
                     if (found) applyQuoteToDOM(found);
-                    else console.error('[v2.21] Quote not found:', serverId);
+                    else console.error('[v2.22] Quote not found:', serverId);
                 });
         }
 
-        if (_authToken) doLoad();
-        else window.addEventListener('ameridex-login', function onLogin() {
+        // v2.22: ALWAYS wait for the login event, even if _authToken
+        // already exists. tryResumeSession() is async; the token in
+        // sessionStorage does NOT mean the session is hydrated yet.
+        var loginTimeout;
+        function onLogin() {
             window.removeEventListener('ameridex-login', onLogin);
+            clearTimeout(loginTimeout);
+            console.log('[v2.22] ameridex-login received, loading quote from URL param:', serverId);
             doLoad();
-        });
+        }
+        window.addEventListener('ameridex-login', onLogin);
+
+        // Safety: clean up listener after 10s if login never fires
+        // (e.g. expired token and user doesn't re-login)
+        loginTimeout = setTimeout(function () {
+            window.removeEventListener('ameridex-login', onLogin);
+            console.warn('[v2.22] Timed out waiting for ameridex-login. Quote URL param "' + serverId + '" abandoned.');
+        }, 10000);
     }
 
 
@@ -1008,5 +1052,5 @@
     if (_authToken) tryResumeSession();
     loadQuoteFromUrlParam();
 
-    console.log('[AmeriDex API] v2.21 loaded.');
+    console.log('[AmeriDex API] v2.22 loaded.');
 })();
