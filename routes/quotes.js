@@ -2,15 +2,21 @@
 // routes/quotes.js - Quote CRUD with per-dealer pricing
 // Date: 2026-03-02
 // ============================================================
+// v3.4 (2026-03-02):
+//   FEAT: gm/admin can now PUT-edit submitted, reviewed, or
+//   approved quotes without going through the revision flow.
+//   After saving, fires notifyGmEditViaFormspree() to
+//   FORMSPREE_REVISION_FORM_ID (fire-and-forget) so AmeriDex
+//   is notified the submitted quote was modified.
+//   admin findIndex now spans all dealers.
+//   dealer/frontdesk still blocked on non-draft/revision quotes.
+//   New fields written: editedBy, editedByRole, gmEditedAt.
+//
 // v3.3 (2026-03-02):
 //   FEAT: Server-side Formspree on quote submission.
-//   POST /api/quotes/:id/submit now fires notifySubmissionViaFormspree()
-//   after responding to the client. Uses FORMSPREE_SUBMIT_FORM_ID.
-//   Client-side Formspree call can now be safely removed from the frontend.
 //
 // v3.2 (2026-03-02):
-//   FEAT: PATCH /api/quotes/:id/revision
-//   Restricted to gm/admin. Notifies via FORMSPREE_REVISION_FORM_ID.
+//   FEAT: PATCH /api/quotes/:id/revision. GM/admin only.
 //
 // v3.1: Customer email optional. name + zip required.
 // v3.0: Per-dealer pricing replaces tier multiplier.
@@ -200,6 +206,26 @@ async function notifyRevisionViaFormspree(quote, reason, requestedBy) {
         lineItems:   buildLineItemSummary(quote.lineItems),
         timestamp:   new Date().toISOString()
     }, 'Revision');
+}
+
+async function notifyGmEditViaFormspree(quote, editedBy, editedByRole, previousStatus) {
+    // Reuses FORMSPREE_REVISION_FORM_ID - same inbox at AmeriDex, different subject.
+    const formId = process.env.FORMSPREE_REVISION_FORM_ID;
+    const customerName = quote.customer ? (quote.customer.name || '(no name)') : '(no customer)';
+    await postToFormspree(formId, {
+        _subject:       `[AmeriDex Portal] Submitted Quote Edited - ${quote.quoteNumber}`,
+        quoteNumber:    quote.quoteNumber,
+        dealerCode:     quote.dealerCode,
+        customer:       customerName,
+        editedBy:       editedBy,
+        editedByRole:   editedByRole,
+        previousStatus: previousStatus,
+        newStatus:      quote.status,
+        totalAmount:    `$${(quote.totalAmount || 0).toFixed(2)}`,
+        lineItems:      buildLineItemSummary(quote.lineItems),
+        note:           `This quote was edited directly by ${editedByRole} ${editedBy} after it was already ${previousStatus}.`,
+        timestamp:      new Date().toISOString()
+    }, 'GmEdit');
 }
 
 async function notifySubmissionViaFormspree(quote, submittedBy) {
@@ -416,19 +442,46 @@ router.post('/', (req, res) => {
 
 
 // =============================================================
-// PUT /api/quotes/:id
+// PUT /api/quotes/:id  (v3.4)
+//
+// Permission matrix:
+//   dealer / frontdesk : only draft or revision quotes
+//   gm                 : draft, revision, submitted, reviewed, approved
+//                        (own dealerCode only)
+//   admin              : draft, revision, submitted, reviewed, approved
+//                        (any dealerCode)
+//
+// When a gm or admin edits a post-submission quote, the status
+// is left unchanged (stays 'submitted'/'reviewed'/'approved') and
+// a fire-and-forget Formspree email is sent to AmeriDex via
+// notifyGmEditViaFormspree(). The record gains:
+//   editedBy, editedByRole, gmEditedAt
 // =============================================================
-router.put('/:id', (req, res) => {
+router.put('/:id', async (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
-    const idx = quotes.findIndex(q =>
-        q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted
-    );
+    const isElevated = req.user.role === 'admin' || req.user.role === 'gm';
+
+    // admin can see across all dealers; everyone else is scoped to their own
+    const idx = req.user.role === 'admin'
+        ? quotes.findIndex(q => q.id === req.params.id && !q.deleted)
+        : quotes.findIndex(q => q.id === req.params.id && q.dealerCode === req.user.dealerCode && !q.deleted);
+
     if (idx === -1) return res.status(404).json({ error: 'Quote not found' });
+
+    // frontdesk can only touch their own quotes
     if (req.user.role === 'frontdesk' && quotes[idx].createdBy !== req.user.username) {
         return res.status(403).json({ error: 'Access denied' });
     }
-    if (quotes[idx].status !== 'draft' && quotes[idx].status !== 'revision') {
-        return res.status(400).json({ error: 'Only draft or revision quotes can be edited' });
+
+    const currentStatus = quotes[idx].status;
+    const editableByAll = currentStatus === 'draft' || currentStatus === 'revision';
+    const editableByElevated = ['submitted', 'reviewed', 'approved'].includes(currentStatus);
+
+    if (!editableByAll && !(isElevated && editableByElevated)) {
+        return res.status(400).json({
+            error: 'Only draft or revision quotes can be edited',
+            tip: isElevated ? null : 'Contact your GM to request a revision'
+        });
     }
 
     const { customer, lineItems, notes } = req.body;
@@ -436,7 +489,7 @@ router.put('/:id', (req, res) => {
 
     if (customer) {
         const existingCustomerId = (quotes[idx].customer && quotes[idx].customer.customerId) || null;
-        const upsertedCustomer   = upsertCustomer(customer, req.user.dealerCode, existingCustomerId);
+        const upsertedCustomer   = upsertCustomer(customer, quotes[idx].dealerCode, existingCustomerId);
         quotes[idx].customer = {
             customerId: upsertedCustomer.id      || null,
             name:       upsertedCustomer.name    || customer.name    || '',
@@ -458,6 +511,13 @@ router.put('/:id', (req, res) => {
         );
     }
 
+    // If an elevated user is touching a post-submission quote, stamp it
+    if (isElevated && editableByElevated) {
+        quotes[idx].editedBy     = req.user.username;
+        quotes[idx].editedByRole = req.user.role;
+        quotes[idx].gmEditedAt   = new Date().toISOString();
+    }
+
     quotes[idx].updatedAt = new Date().toISOString();
     writeJSON(QUOTES_FILE, quotes);
 
@@ -465,7 +525,17 @@ router.put('/:id', (req, res) => {
     if (newCustomerId) recalcCustomerStats(newCustomerId);
     if (oldCustomerId && oldCustomerId !== newCustomerId) recalcCustomerStats(oldCustomerId);
 
+    console.log('[Quotes v3.4] PUT:', quotes[idx].quoteNumber,
+        '| status:', currentStatus,
+        '| by:', req.user.username, '(' + req.user.role + ')');
+
+    // Respond immediately before firing Formspree
     res.json(quotes[idx]);
+
+    // Fire-and-forget: notify AmeriDex that an elevated user modified a post-submission quote
+    if (isElevated && editableByElevated) {
+        notifyGmEditViaFormspree(quotes[idx], req.user.username, req.user.role, currentStatus);
+    }
 });
 
 
@@ -684,10 +754,6 @@ router.post('/:id/items/:itemIndex/reject-override', requireRole('admin', 'gm'),
 
 // =============================================================
 // POST /api/quotes/:id/submit  (v3.3)
-// Now async. Fires Formspree submission notification after
-// responding to the client (fire-and-forget, same pattern as
-// the revision endpoint). Uses FORMSPREE_SUBMIT_FORM_ID.
-// The frontend client-side Formspree call can now be removed.
 // =============================================================
 router.post('/:id/submit', async (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
@@ -722,10 +788,8 @@ router.post('/:id/submit', async (req, res) => {
 
     console.log('[Quotes] Submitted:', quotes[idx].quoteNumber, 'by', req.user.username);
 
-    // Respond immediately so the UI transitions without waiting for Formspree
     res.json(quotes[idx]);
 
-    // Fire-and-forget: email AmeriDex with the full quote details
     notifySubmissionViaFormspree(quotes[idx], req.user.username);
 });
 
@@ -780,6 +844,9 @@ router.post('/:id/duplicate', (req, res) => {
     dup.revisionReason      = null;
     dup.revisionRequestedBy = null;
     dup.revisionRequestedAt = null;
+    dup.editedBy     = null;
+    dup.editedByRole = null;
+    dup.gmEditedAt   = null;
 
     if (req.user.role === 'admin' && dup.dealerCode !== req.user.dealerCode) {
         dup.dealerCode = req.user.dealerCode;
