@@ -1,31 +1,34 @@
 // ============================================================
 // routes/quotes.js - Quote CRUD with per-dealer pricing
-// Date: 2026-03-02
+// Date: 2026-03-03
 // ============================================================
+// v3.8 (2026-03-03):
+//   FEAT: Pending Actions system for GM approval flow.
+//   - POST /api/quotes/:id/request-action
+//       Any role can call. Stores pendingAction on the quote.
+//       Types: 'delete' | 'revision'
+//       Sends Formspree email to GM (FORMSPREE_ACTIONS_FORM_ID).
+//       Sets quote status to 'pending-delete' or 'pending-revision'.
+//   - POST /api/quotes/:id/resolve-action
+//       GM/admin only. Body: { approved: true|false }
+//       approved=true + delete  -> soft-deletes the quote.
+//       approved=true + revision-> sets status to 'revision'.
+//       approved=false          -> clears pendingAction, restores
+//                                  previousStatus.
+//   - GET  /api/quotes/pending-actions
+//       GM/admin only. Returns all quotes at caller's dealer
+//       (or all dealers for admin) that have a pendingAction set.
+//       Response: { count, items: [...] }
+//
 // v3.7 (2026-03-02):
 //   FIX: All :id endpoints now resolve by EITHER q.id (UUID)
 //        OR q.quoteNumber (e.g. Q260228-OOD9).
-//        The frontend quotes-customers.html page and
-//        loadQuoteFromUrlParam() pass quoteNumber as the :id
-//        URL parameter. Previously every route only matched
-//        q.id, returning 404 for every quote opened from the
-//        Quotes & Customers page.
 //   Added shared helpers: findQuoteByParam(),
 //        findQuoteIndexByParam().
-//   Applied to all 11 :id routes (GET, PUT, PATCH, POST, DELETE).
+//   Applied to all 11 :id routes.
 //
 // v3.6 (2026-03-02):
-//   FIX: POST and PUT now persist all frontend-sent fields:
-//        options, specialInstructions, internalNotes,
-//        shippingAddress, deliveryDate.
-//   FIX: Customer snapshot in POST and PUT now includes
-//        address, city, state.
-//   FIX: upsertCustomer() now persists address, city, state
-//        on the customer record in customers.json.
-//   Previously these fields were silently dropped, causing
-//   edits to appear saved within the session (localStorage)
-//   but vanish after logout/login or page refresh when
-//   loadServerQuotes() rebuilt savedQuotes from the server.
+//   FIX: POST and PUT now persist all frontend-sent fields.
 //
 // v3.5 (2026-03-02):
 //   FIX: Removed all createdBy row-level guards for frontdesk.
@@ -115,14 +118,6 @@ function buildLineItem(item, dealer) {
 
 // =============================================================
 // SHARED HELPERS: Dual UUID / quoteNumber lookup  (v3.7)
-//
-// The :id parameter may be either:
-//   - A server UUID  (e.g. "a7f3b2c1-...")   matched against q.id
-//   - A quoteNumber  (e.g. "Q260228-OOD9")   matched against q.quoteNumber
-//
-// Both helpers respect role-based scoping:
-//   admin  -> any dealer
-//   others -> own dealerCode only
 // =============================================================
 
 function matchesParam(q, paramId) {
@@ -219,7 +214,6 @@ function upsertCustomer(customerData, dealerCode, existingCustomerId) {
 
 // =============================================================
 // FORMSPREE HELPERS  (server-side, fire-and-forget)
-// Node 18+ native fetch. No npm dependency.
 // =============================================================
 
 function buildLineItemSummary(lineItems) {
@@ -310,6 +304,29 @@ async function notifySubmissionViaFormspree(quote, submittedBy, approvedBy) {
     }, 'Submit');
 }
 
+// =============================================================
+// FORMSPREE: Pending Action notification to GM  (v3.8)
+// Uses FORMSPREE_ACTIONS_FORM_ID env var.
+// =============================================================
+async function notifyPendingActionViaFormspree(quote, actionType, requestedBy, note) {
+    const formId = process.env.FORMSPREE_ACTIONS_FORM_ID;
+    const customerName = quote.customer ? (quote.customer.name || '(no name)') : '(no customer)';
+    const actionLabel  = actionType === 'delete' ? 'Delete Request' : 'Revision Request';
+    await postToFormspree(formId, {
+        _subject:    `[AmeriDex Portal] GM Action Required: ${actionLabel} - ${quote.quoteNumber}`,
+        actionType:  actionLabel,
+        quoteNumber: quote.quoteNumber,
+        dealerCode:  quote.dealerCode,
+        customer:    customerName,
+        requestedBy: requestedBy,
+        note:        note || '(no note)',
+        totalAmount: `$${(quote.totalAmount || 0).toFixed(2)}`,
+        status:      quote.status,
+        message:     `${requestedBy} has requested a ${actionLabel.toLowerCase()} on Quote ${quote.quoteNumber}. Please log in to the dealer portal to approve or deny this request.`,
+        timestamp:   new Date().toISOString()
+    }, 'PendingAction');
+}
+
 
 // =============================================================
 // GET /api/quotes/pending-overrides
@@ -345,6 +362,173 @@ router.get('/pending-overrides', requireRole('admin', 'gm'), (req, res) => {
 
     results.sort((a, b) => (b.requestedAt || '').localeCompare(a.requestedAt || ''));
     res.json({ pending: results, count: results.length });
+});
+
+
+// =============================================================
+// GET /api/quotes/pending-actions  (v3.8)
+// GM/admin only. Returns quotes with a pendingAction set.
+// GM is scoped to own dealerCode. Admin sees all.
+// Response shape:
+//   { count: N, items: [{ id, quoteNumber, dealerCode,
+//     customerName, status, pendingAction }] }
+// =============================================================
+router.get('/pending-actions', requireRole('admin', 'gm'), (req, res) => {
+    const quotes  = readJSON(QUOTES_FILE);
+    const results = [];
+
+    quotes.forEach(q => {
+        if (q.deleted) return;
+        if (!q.pendingAction) return;
+        if (req.user.role === 'gm' && q.dealerCode !== req.user.dealerCode) return;
+
+        results.push({
+            id:           q.id,
+            quoteNumber:  q.quoteNumber,
+            dealerCode:   q.dealerCode,
+            customerName: q.customer ? (q.customer.name || '') : '',
+            status:       q.status,
+            totalAmount:  q.totalAmount || 0,
+            pendingAction: q.pendingAction   // { type, requestedBy, requestedAt, note, previousStatus }
+        });
+    });
+
+    results.sort((a, b) =>
+        (b.pendingAction.requestedAt || '').localeCompare(a.pendingAction.requestedAt || '')
+    );
+
+    res.json({ count: results.length, items: results });
+});
+
+
+// =============================================================
+// POST /api/quotes/:id/request-action  (v3.8)
+// Any authenticated role. Stores a pendingAction on the quote
+// and fires a Formspree email to the GM.
+// Body: { type: 'delete'|'revision', note?: string }
+// =============================================================
+router.post('/:id/request-action', async (req, res) => {
+    const { type, note } = req.body;
+
+    if (!type || !['delete', 'revision'].includes(type)) {
+        return res.status(400).json({ error: 'type must be "delete" or "revision"' });
+    }
+
+    const quotes = readJSON(QUOTES_FILE);
+    const idx    = findQuoteIndexByParam(quotes, req.params.id, req.user);
+    if (idx === -1) return res.status(404).json({ error: 'Quote not found' });
+
+    // Prevent stacking a second pending action on top of an existing one
+    if (quotes[idx].pendingAction) {
+        return res.status(409).json({
+            error: 'This quote already has a pending action awaiting GM approval',
+            existing: quotes[idx].pendingAction
+        });
+    }
+
+    const previousStatus = quotes[idx].status;
+
+    quotes[idx].pendingAction = {
+        type:           type,
+        requestedBy:    req.user.username,
+        requestedByRole: req.user.role,
+        requestedAt:    new Date().toISOString(),
+        note:           (note || '').trim(),
+        previousStatus: previousStatus
+    };
+
+    // Set a visual status so the quote table can show a badge
+    quotes[idx].status    = type === 'delete' ? 'pending-delete' : 'pending-revision';
+    quotes[idx].updatedAt = new Date().toISOString();
+
+    writeJSON(QUOTES_FILE, quotes);
+
+    console.log('[Quotes v3.8] Action requested:', quotes[idx].quoteNumber,
+        '| type:', type, '| by:', req.user.username, '(' + req.user.role + ')');
+
+    res.json({
+        message:     `${type === 'delete' ? 'Delete' : 'Revision'} request submitted. Awaiting GM approval.`,
+        quoteNumber: quotes[idx].quoteNumber,
+        status:      quotes[idx].status,
+        pendingAction: quotes[idx].pendingAction
+    });
+
+    // Fire-and-forget Formspree notification to GM
+    notifyPendingActionViaFormspree(quotes[idx], type, req.user.username, note || '');
+});
+
+
+// =============================================================
+// POST /api/quotes/:id/resolve-action  (v3.8)
+// GM/admin only.
+// Body: { approved: true|false }
+//   approved=true  + type=delete   -> soft-delete the quote
+//   approved=true  + type=revision -> set status to 'revision'
+//   approved=false                 -> restore previousStatus,
+//                                     clear pendingAction
+// =============================================================
+router.post('/:id/resolve-action', requireRole('admin', 'gm'), async (req, res) => {
+    const { approved } = req.body;
+
+    if (approved === undefined || approved === null) {
+        return res.status(400).json({ error: '"approved" (true or false) is required' });
+    }
+
+    const quotes = readJSON(QUOTES_FILE);
+    const idx    = findQuoteIndexByParam(quotes, req.params.id, req.user);
+    if (idx === -1) return res.status(404).json({ error: 'Quote not found' });
+
+    const action = quotes[idx].pendingAction;
+    if (!action) {
+        return res.status(400).json({ error: 'No pending action on this quote' });
+    }
+
+    const now        = new Date().toISOString();
+    const isApproved = approved === true || approved === 'true';
+    const actionType = action.type;
+
+    if (isApproved) {
+        if (actionType === 'delete') {
+            quotes[idx].deleted       = true;
+            quotes[idx].deletedBy     = req.user.username;
+            quotes[idx].deletedByRole = req.user.role;
+            quotes[idx].deletedAt     = now;
+            quotes[idx].status        = 'deleted';
+        } else if (actionType === 'revision') {
+            quotes[idx].status              = 'revision';
+            quotes[idx].revisionReason      = action.note || 'Revision approved by GM';
+            quotes[idx].revisionRequestedBy = action.requestedBy;
+            quotes[idx].revisionRequestedAt = action.requestedAt;
+            quotes[idx].revisionApprovedBy  = req.user.username;
+            quotes[idx].revisionApprovedAt  = now;
+        }
+    } else {
+        // Denied: restore the status that existed before the request
+        quotes[idx].status = action.previousStatus || 'draft';
+    }
+
+    // Always clear the pending action after resolution
+    quotes[idx].pendingAction = null;
+    quotes[idx].updatedAt     = now;
+
+    writeJSON(QUOTES_FILE, quotes);
+
+    const custId = quotes[idx].customer ? quotes[idx].customer.customerId : null;
+    if (isApproved && actionType === 'delete' && custId) {
+        recalcCustomerStats(custId);
+    }
+
+    const outcome = isApproved ? 'APPROVED' : 'DENIED';
+    console.log('[Quotes v3.8] Action', outcome + ':', quotes[idx].quoteNumber,
+        '| type:', actionType, '| by GM:', req.user.username);
+
+    res.json({
+        message:     `Action ${outcome.toLowerCase()} successfully`,
+        quoteNumber: quotes[idx].quoteNumber,
+        approved:    isApproved,
+        actionType:  actionType,
+        status:      quotes[idx].status
+    });
 });
 
 
@@ -483,6 +667,7 @@ router.post('/', (req, res) => {
         pricingModel:        'per-dealer',
         totalAmount:         Math.round(totalAmount * 100) / 100,
         hasPendingOverrides: false,
+        pendingAction:       null,
         status:              'draft',
         createdAt:           new Date().toISOString(),
         updatedAt:           new Date().toISOString(),
@@ -496,7 +681,7 @@ router.post('/', (req, res) => {
     writeJSON(QUOTES_FILE, quotes);
     recalcCustomerStats(customerSnapshot.customerId);
 
-    console.log('[Quotes v3.7] Created:', newQuote.quoteNumber, 'by', req.user.username,
+    console.log('[Quotes v3.8] Created:', newQuote.quoteNumber, 'by', req.user.username,
         '| Dealer:', req.user.dealerCode, '| Customer:', customerSnapshot.name);
     res.status(201).json(newQuote);
 });
@@ -504,17 +689,6 @@ router.post('/', (req, res) => {
 
 // =============================================================
 // PUT /api/quotes/:id  (v3.7: dual lookup)
-//
-// Permission matrix:
-//   frontdesk / dealer : draft and revision only (own dealerCode)
-//   gm                 : draft, revision, submitted, reviewed,
-//                        approved (own dealerCode only)
-//   admin              : all statuses, all dealers
-//
-// gm/admin editing a post-submission quote:
-//   - status is left unchanged
-//   - stamps editedBy, editedByRole, gmEditedAt
-//   - fires notifyGmEditViaFormspree() fire-and-forget
 // =============================================================
 router.put('/:id', async (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
@@ -587,7 +761,7 @@ router.put('/:id', async (req, res) => {
     if (newCustomerId) recalcCustomerStats(newCustomerId);
     if (oldCustomerId && oldCustomerId !== newCustomerId) recalcCustomerStats(oldCustomerId);
 
-    console.log('[Quotes v3.7] PUT:', quotes[idx].quoteNumber,
+    console.log('[Quotes v3.8] PUT:', quotes[idx].quoteNumber,
         '| status:', currentStatus,
         '| by:', req.user.username, '(' + req.user.role + ')');
 
@@ -602,7 +776,6 @@ router.put('/:id', async (req, res) => {
 // =============================================================
 // PATCH /api/quotes/:id/revision  (v3.7: dual lookup)
 // GM or admin only. Sets status -> 'revision'.
-// If body.notify === true, emails AmeriDex via Formspree.
 // =============================================================
 router.patch('/:id/revision', requireRole('admin', 'gm'), async (req, res) => {
     const { reason, notify } = req.body;
@@ -632,7 +805,7 @@ router.patch('/:id/revision', requireRole('admin', 'gm'), async (req, res) => {
 
     writeJSON(QUOTES_FILE, quotes);
 
-    console.log('[Quotes v3.7] Revision requested:', quotes[idx].quoteNumber,
+    console.log('[Quotes v3.8] Revision requested:', quotes[idx].quoteNumber,
         'by', req.user.username, '| Reason:', reason.trim());
 
     res.json({ status: 'revision', quoteNumber: quotes[idx].quoteNumber });
@@ -683,7 +856,7 @@ router.post('/:id/approve-revision', requireRole('admin', 'gm'), async (req, res
 
     writeJSON(QUOTES_FILE, quotes);
 
-    console.log('[Quotes v3.7] Revision approved:', quotes[idx].quoteNumber,
+    console.log('[Quotes v3.8] Revision approved:', quotes[idx].quoteNumber,
         'by', req.user.username, '(' + req.user.role + ')');
 
     res.json(quotes[idx]);
@@ -694,7 +867,6 @@ router.post('/:id/approve-revision', requireRole('admin', 'gm'), async (req, res
 
 // =============================================================
 // POST /api/quotes/:id/items/:itemIndex/request-override
-// (v3.7: dual lookup)
 // =============================================================
 router.post('/:id/items/:itemIndex/request-override', (req, res) => {
     const { requestedPrice, reason } = req.body;
@@ -711,7 +883,6 @@ router.post('/:id/items/:itemIndex/request-override', (req, res) => {
     }
 
     const quotes = readJSON(QUOTES_FILE);
-    // request-override is dealer-scoped (not admin-global), use direct find with dual match
     const quote = quotes.find(q =>
         matchesParam(q, req.params.id) && q.dealerCode === req.user.dealerCode && !q.deleted
     );
@@ -759,7 +930,7 @@ router.post('/:id/items/:itemIndex/request-override', (req, res) => {
     writeJSON(QUOTES_FILE, quotes);
 
     const action = isAutoApprover ? 'Override applied' : 'Override requested';
-    console.log('[Quotes v3.7]', action + ':', quote.quoteNumber, 'item #' + itemIdx,
+    console.log('[Quotes v3.8]', action + ':', quote.quoteNumber, 'item #' + itemIdx,
         '$' + item.tierPrice, '->', '$' + item.priceOverride.requestedPrice,
         'by', req.user.username, '(' + req.user.role + ')',
         '| Reason:', reason.trim());
@@ -770,7 +941,6 @@ router.post('/:id/items/:itemIndex/request-override', (req, res) => {
 
 // =============================================================
 // POST /api/quotes/:id/items/:itemIndex/approve-override
-// (v3.7: dual lookup)
 // =============================================================
 router.post('/:id/items/:itemIndex/approve-override', requireRole('admin', 'gm'), (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
@@ -805,7 +975,7 @@ router.post('/:id/items/:itemIndex/approve-override', requireRole('admin', 'gm')
     quotes[qIdx] = quote;
     writeJSON(QUOTES_FILE, quotes);
 
-    console.log('[Quotes v3.7] Override APPROVED:', quote.quoteNumber, 'item #' + itemIdx,
+    console.log('[Quotes v3.8] Override APPROVED:', quote.quoteNumber, 'item #' + itemIdx,
         '$' + item.priceOverride.originalTierPrice, '->', '$' + item.priceOverride.requestedPrice,
         'by', req.user.username, '(requested by', item.priceOverride.requestedBy + ')');
 
@@ -815,7 +985,6 @@ router.post('/:id/items/:itemIndex/approve-override', requireRole('admin', 'gm')
 
 // =============================================================
 // POST /api/quotes/:id/items/:itemIndex/reject-override
-// (v3.7: dual lookup)
 // =============================================================
 router.post('/:id/items/:itemIndex/reject-override', requireRole('admin', 'gm'), (req, res) => {
     const { rejectedReason } = req.body;
@@ -853,7 +1022,7 @@ router.post('/:id/items/:itemIndex/reject-override', requireRole('admin', 'gm'),
     quotes[qIdx] = quote;
     writeJSON(QUOTES_FILE, quotes);
 
-    console.log('[Quotes v3.7] Override REJECTED:', quote.quoteNumber, 'item #' + itemIdx,
+    console.log('[Quotes v3.8] Override REJECTED:', quote.quoteNumber, 'item #' + itemIdx,
         'requested $' + item.priceOverride.requestedPrice,
         'by', req.user.username, '| Reason:', item.priceOverride.rejectedReason || 'none');
 
@@ -866,7 +1035,6 @@ router.post('/:id/items/:itemIndex/reject-override', requireRole('admin', 'gm'),
 // =============================================================
 router.post('/:id/submit', async (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
-    // submit is dealer-scoped (own quotes only)
     const idx = quotes.findIndex(q =>
         matchesParam(q, req.params.id) && q.dealerCode === req.user.dealerCode && !q.deleted
     );
@@ -894,7 +1062,7 @@ router.post('/:id/submit', async (req, res) => {
     quotes[idx].updatedAt   = new Date().toISOString();
     writeJSON(QUOTES_FILE, quotes);
 
-    console.log('[Quotes v3.7] Submitted:', quotes[idx].quoteNumber, 'by', req.user.username);
+    console.log('[Quotes v3.8] Submitted:', quotes[idx].quoteNumber, 'by', req.user.username);
 
     res.json(quotes[idx]);
 
@@ -904,6 +1072,7 @@ router.post('/:id/submit', async (req, res) => {
 
 // =============================================================
 // DELETE /api/quotes/:id  (v3.7: dual lookup)
+// GM/admin only — direct delete (no pending action required)
 // =============================================================
 router.delete('/:id', requireRole('admin', 'gm'), (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
@@ -914,13 +1083,14 @@ router.delete('/:id', requireRole('admin', 'gm'), (req, res) => {
     quotes[idx].deletedBy     = req.user.username;
     quotes[idx].deletedByRole = req.user.role;
     quotes[idx].deletedAt     = new Date().toISOString();
+    quotes[idx].pendingAction = null;
     quotes[idx].updatedAt     = new Date().toISOString();
     writeJSON(QUOTES_FILE, quotes);
 
     const custId = quotes[idx].customer ? quotes[idx].customer.customerId : null;
     if (custId) recalcCustomerStats(custId);
 
-    console.log('[Quotes v3.7] Soft-deleted:', quotes[idx].quoteNumber, 'by', req.user.username, '(' + req.user.role + ')');
+    console.log('[Quotes v3.8] Soft-deleted:', quotes[idx].quoteNumber, 'by', req.user.username, '(' + req.user.role + ')');
     res.json({ message: 'Quote ' + quotes[idx].quoteNumber + ' deleted' });
 });
 
@@ -945,6 +1115,7 @@ router.post('/:id/duplicate', (req, res) => {
     dup.reviewedAt     = null;
     dup.approvedAt     = null;
     dup.pricingModel   = 'per-dealer';
+    dup.pendingAction  = null;
     dup.revisionReason        = null;
     dup.revisionRequestedBy   = null;
     dup.revisionRequestedAt   = null;
@@ -972,7 +1143,7 @@ router.post('/:id/duplicate', (req, res) => {
     const custId = dup.customer ? dup.customer.customerId : null;
     if (custId) recalcCustomerStats(custId);
 
-    console.log('[Quotes v3.7] Duplicated:', original.quoteNumber, '->', dup.quoteNumber);
+    console.log('[Quotes v3.8] Duplicated:', original.quoteNumber, '->', dup.quoteNumber);
     res.status(201).json(dup);
 });
 
@@ -997,9 +1168,9 @@ router.get('/:id/pdf', async (req, res) => {
         res.setHeader('Content-Length', pdfBuffer.length);
         res.send(pdfBuffer);
 
-        console.log('[Quotes v3.7] PDF generated:', quote.quoteNumber, 'by', req.user.username);
+        console.log('[Quotes v3.8] PDF generated:', quote.quoteNumber, 'by', req.user.username);
     } catch (error) {
-        console.error('[Quotes v3.7] PDF generation error:', error);
+        console.error('[Quotes v3.8] PDF generation error:', error);
         res.status(500).json({ error: 'Failed to generate PDF', details: error.message });
     }
 });
