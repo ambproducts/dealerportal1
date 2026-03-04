@@ -1,30 +1,25 @@
 // ============================================================
-// AmeriDex Dealer Portal - Role-Based UI v3.1
-// Date: 2026-02-26
+// AmeriDex Dealer Portal - Role-Based UI v3.2
+// Date: 2026-03-04
 // ============================================================
+// v3.2 Changes (2026-03-04):
+//   - FEAT: Floating "Pending Actions" bubble for GM/admin
+//     Fixed position bottom-right, shows unified count of:
+//       1. Pending delete/revision requests
+//       2. Pending price overrides
+//     Polls /api/quotes/pending-actions every 60s.
+//     Clicking opens a slide-up tray with approve/deny buttons.
+//     Tray dismisses on outside click or Escape.
+//     Bubble auto-hides when count is zero.
+//
 // v3.1 Changes (2026-02-26):
 //   - FIX: Prevent duplicate Admin Panel button in header.
 //     Root cause: injectRoleButtons() was called twice (once on
 //     DOMContentLoaded and again on 'ameridex-login' event).
-//     The two setTimeout calls could race, causing both to
-//     append buttons before the cleanup selector ran.
-//     Fix: Added debounce via _roleButtonsPending timer ID so
-//     only the latest call wins, plus a DOM guard check.
+//     Fix: Added debounce via _roleButtonsPending timer ID.
 //
 // v3.0 Changes (2026-02-16):
 //   - RESTORE full GM team management in My Team modal
-//   - GM can add frontdesk users, disable/enable, reset passwords
-//   - All calls go to /api/users (GM-scoped endpoints)
-//   - GM can only manage frontdesk at their own dealer code
-//   - Removed read-only restriction and 'contact admin' note
-//   - Admin Panel button unchanged
-//
-// v2.0 Changes (2026-02-16):
-//   - (reverted) Made My Team modal read-only
-//
-// v1.x Changes (prior):
-//   - Role-based nav buttons (admin panel, team management)
-//   - GM could manage frontdesk users from portal
 // ============================================================
 
 (function () {
@@ -34,7 +29,6 @@
     // ROLE BUTTON INJECTION
     // ----------------------------------------------------------
 
-    // Debounce timer ID to prevent duplicate calls
     var _roleButtonsPending = null;
 
     function injectRoleButtons() {
@@ -44,11 +38,8 @@
         var nav = document.querySelector('.header-actions') || document.querySelector('nav');
         if (!nav) return;
 
-        // Remove any previously injected role buttons
         nav.querySelectorAll('.role-injected').forEach(function (el) { el.remove(); });
 
-        // Admin: show Admin Panel button
-    
         // GM: show My Team button (full management)
         if (dealer.role === 'gm') {
             var teamBtn = document.createElement('button');
@@ -62,11 +53,6 @@
         }
     }
 
-    /**
-     * Schedule role button injection with debounce.
-     * If called multiple times (e.g. DOMContentLoaded + ameridex-login),
-     * only the last scheduled call executes, preventing duplicates.
-     */
     function scheduleInjectRoleButtons(delayMs) {
         if (_roleButtonsPending) {
             clearTimeout(_roleButtonsPending);
@@ -79,10 +65,11 @@
 
 
     // ----------------------------------------------------------
-    // STYLES
+    // STYLES (Team Modal + Pending Actions Bubble)
     // ----------------------------------------------------------
-    var teamModalStyle = document.createElement('style');
-    teamModalStyle.textContent = '' +
+    var roleStyles = document.createElement('style');
+    roleStyles.textContent = '' +
+        // Team Modal styles
         '#team-modal { display:none; position:fixed; inset:0; background:rgba(15,23,42,0.6); ' +
             'z-index:1500; justify-content:center; align-items:flex-start; padding:2rem 1rem; overflow-y:auto; }' +
         '#team-modal.active { display:flex; }' +
@@ -129,12 +116,59 @@
         '.team-btn-primary { background:#2563eb; color:#fff; padding:0.45rem 0.9rem; border-radius:6px; border:none; font-size:0.82rem; font-weight:600; cursor:pointer; }' +
         '.team-btn-primary:hover { background:#1d4ed8; }' +
         '.team-divider { border:none; border-top:1px solid #e5e7eb; margin:1rem 0; }' +
-        '@media (max-width:640px) { .team-form-row { grid-template-columns:1fr; } .team-stats { grid-template-columns:1fr 1fr; } }';
-    document.head.appendChild(teamModalStyle);
+        '@media (max-width:640px) { .team-form-row { grid-template-columns:1fr; } .team-stats { grid-template-columns:1fr 1fr; } }' +
+
+        // Pending Actions Bubble
+        '#pending-actions-bubble { position:fixed; bottom:1.5rem; right:1.5rem; z-index:9999; ' +
+            'background:linear-gradient(135deg, #dc2626, #991b1b); color:#fff; ' +
+            'border-radius:12px; padding:0.75rem 1rem; box-shadow:0 8px 24px rgba(220,38,38,0.35); ' +
+            'cursor:pointer; display:none; align-items:center; gap:0.65rem; ' +
+            'font-size:0.88rem; font-weight:600; transition:transform 0.2s, box-shadow 0.2s; ' +
+            'user-select:none; }' +
+        '#pending-actions-bubble.visible { display:flex; }' +
+        '#pending-actions-bubble:hover { transform:translateY(-2px); box-shadow:0 12px 28px rgba(220,38,38,0.45); }' +
+        '#pending-actions-count { background:rgba(255,255,255,0.95); color:#dc2626; ' +
+            'border-radius:999px; padding:0.15rem 0.5rem; font-size:0.8rem; font-weight:700; }' +
+
+        // Pending Actions Tray
+        '#pending-actions-tray { position:fixed; bottom:5rem; right:1.5rem; z-index:9998; ' +
+            'background:#fff; border-radius:14px; box-shadow:0 20px 50px rgba(0,0,0,0.25); ' +
+            'width:420px; max-height:500px; display:none; flex-direction:column; overflow:hidden; }' +
+        '#pending-actions-tray.active { display:flex; }' +
+        '.tray-header { background:linear-gradient(135deg, #dc2626, #991b1b); color:#fff; ' +
+            'padding:1rem 1.25rem; display:flex; justify-content:space-between; align-items:center; }' +
+        '.tray-header h3 { margin:0; font-size:1.05rem; font-weight:600; }' +
+        '.tray-close { background:none; border:none; color:#fff; font-size:1.5rem; cursor:pointer; ' +
+            'padding:0 0.5rem; opacity:0.8; line-height:1; }' +
+        '.tray-close:hover { opacity:1; }' +
+        '.tray-body { overflow-y:auto; flex:1; padding:1rem; }' +
+        '.tray-empty { text-align:center; padding:2rem 1rem; color:#6b7280; font-size:0.88rem; }' +
+        '.tray-item { background:#f9fafb; border-radius:10px; padding:0.85rem 1rem; margin-bottom:0.75rem; ' +
+            'border:1px solid #e5e7eb; }' +
+        '.tray-item:last-child { margin-bottom:0; }' +
+        '.tray-item-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:0.5rem; }' +
+        '.tray-item-title { font-size:0.92rem; font-weight:600; color:#111827; }' +
+        '.tray-item-meta { font-size:0.78rem; color:#6b7280; margin-bottom:0.5rem; }' +
+        '.tray-item-note { font-size:0.82rem; color:#374151; background:#fff; border-radius:6px; ' +
+            'padding:0.5rem 0.65rem; margin-bottom:0.65rem; border-left:3px solid #d1d5db; }' +
+        '.tray-item-actions { display:flex; gap:0.5rem; }' +
+        '.tray-btn { padding:0.4rem 0.75rem; border-radius:6px; border:none; font-size:0.8rem; ' +
+            'font-weight:600; cursor:pointer; transition:all 0.15s; }' +
+        '.tray-btn-approve { background:#dcfce7; color:#16a34a; }' +
+        '.tray-btn-approve:hover { background:#bbf7d0; }' +
+        '.tray-btn-deny { background:#fee2e2; color:#dc2626; }' +
+        '.tray-btn-deny:hover { background:#fecaca; }' +
+        '.tray-badge { display:inline-block; padding:0.2rem 0.5rem; border-radius:6px; ' +
+            'font-size:0.7rem; font-weight:600; text-transform:uppercase; }' +
+        '.tray-badge-delete { background:#fee2e2; color:#dc2626; }' +
+        '.tray-badge-revision { background:#fef3c7; color:#92400e; }' +
+        '.tray-badge-override { background:#dbeafe; color:#1d4ed8; }' +
+        '@media (max-width:480px) { #pending-actions-tray { width:calc(100vw - 3rem); right:1.5rem; } }';
+    document.head.appendChild(roleStyles);
 
 
     // ----------------------------------------------------------
-    // MODAL HTML
+    // TEAM MODAL HTML
     // ----------------------------------------------------------
     var teamModal = document.createElement('div');
     teamModal.id = 'team-modal';
@@ -149,8 +183,6 @@
             '<div class="team-body">' +
                 '<div id="team-stats" class="team-stats"></div>' +
                 '<div id="team-alert"></div>' +
-
-                // Add user form
                 '<details id="team-add-details">' +
                     '<summary style="cursor:pointer;font-weight:600;color:#2563eb;margin-bottom:0.75rem;font-size:0.92rem;">+ Add Frontdesk User</summary>' +
                     '<div class="team-form" id="team-add-form">' +
@@ -179,17 +211,12 @@
                         '</div>' +
                     '</div>' +
                 '</details>' +
-
                 '<hr class="team-divider">' +
                 '<div id="team-list"><div class="team-empty">Loading...</div></div>' +
             '</div>' +
         '</div>';
     document.body.appendChild(teamModal);
 
-
-    // ----------------------------------------------------------
-    // MODAL OPEN/CLOSE
-    // ----------------------------------------------------------
     document.getElementById('team-close-btn').addEventListener('click', function () {
         teamModal.classList.remove('active');
     });
@@ -204,11 +231,58 @@
 
 
     // ----------------------------------------------------------
+    // PENDING ACTIONS BUBBLE + TRAY HTML
+    // ----------------------------------------------------------
+    var bubble = document.createElement('div');
+    bubble.id = 'pending-actions-bubble';
+    bubble.innerHTML = '<span>Pending Actions</span><span id="pending-actions-count">0</span>';
+    document.body.appendChild(bubble);
+
+    var tray = document.createElement('div');
+    tray.id = 'pending-actions-tray';
+    tray.innerHTML = '' +
+        '<div class="tray-header">' +
+            '<h3>Pending Actions</h3>' +
+            '<button class="tray-close" id="tray-close-btn" aria-label="Close">&times;</button>' +
+        '</div>' +
+        '<div class="tray-body" id="tray-body">' +
+            '<div class="tray-empty">Loading...</div>' +
+        '</div>';
+    document.body.appendChild(tray);
+
+    bubble.addEventListener('click', function () {
+        if (!tray.classList.contains('active')) {
+            tray.classList.add('active');
+            loadPendingActions();
+        } else {
+            tray.classList.remove('active');
+        }
+    });
+
+    document.getElementById('tray-close-btn').addEventListener('click', function () {
+        tray.classList.remove('active');
+    });
+
+    document.addEventListener('click', function (e) {
+        if (!bubble.contains(e.target) && !tray.contains(e.target)) {
+            tray.classList.remove('active');
+        }
+    });
+
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && tray.classList.contains('active')) {
+            tray.classList.remove('active');
+        }
+    });
+
+
+    // ----------------------------------------------------------
     // HELPERS
     // ----------------------------------------------------------
     var _api = null;
     var _teamUsers = [];
     var _currentDealer = null;
+    var _pollInterval = null;
 
     function getApi() {
         if (!_api) _api = window.ameridexAPI;
@@ -231,7 +305,137 @@
 
 
     // ----------------------------------------------------------
-    // OPEN MODAL + LOAD TEAM
+    // PENDING ACTIONS POLLING
+    // ----------------------------------------------------------
+    function updatePendingActionsBadge(count) {
+        var countEl = document.getElementById('pending-actions-count');
+        if (countEl) countEl.textContent = count;
+        if (count > 0) {
+            bubble.classList.add('visible');
+        } else {
+            bubble.classList.remove('visible');
+            tray.classList.remove('active');
+        }
+    }
+
+    function loadPendingActions() {
+        var api = getApi();
+        if (!api) return;
+
+        var trayBody = document.getElementById('tray-body');
+        if (!trayBody) return;
+
+        api('GET', '/api/quotes/pending-actions')
+            .then(function (data) {
+                var items = data.items || [];
+                updatePendingActionsBadge(data.count || 0);
+
+                if (items.length === 0) {
+                    trayBody.innerHTML = '<div class="tray-empty">No pending actions at this time.</div>';
+                    return;
+                }
+
+                var html = '';
+                items.forEach(function (item) {
+                    if (item.kind === 'action') {
+                        var badge = item.actionType === 'delete' ? 'tray-badge-delete' : 'tray-badge-revision';
+                        var label = item.actionType === 'delete' ? 'DELETE' : 'REVISION';
+                        html += '<div class="tray-item">' +
+                            '<div class="tray-item-header">' +
+                                '<div class="tray-item-title">' + esc(item.quoteNumber) + '</div>' +
+                                '<span class="tray-badge ' + badge + '">' + label + '</span>' +
+                            '</div>' +
+                            '<div class="tray-item-meta">' +
+                                esc(item.customerName || 'No customer') + ' &bull; ' +
+                                'Requested by ' + esc(item.requestedBy) +
+                            '</div>' +
+                            (item.note ? '<div class="tray-item-note">' + esc(item.note) + '</div>' : '') +
+                            '<div class="tray-item-actions">' +
+                                '<button class="tray-btn tray-btn-approve" data-action="approve" data-id="' + item.quoteId + '" data-kind="action">Approve</button>' +
+                                '<button class="tray-btn tray-btn-deny" data-action="deny" data-id="' + item.quoteId + '" data-kind="action">Deny</button>' +
+                            '</div>' +
+                        '</div>';
+                    } else if (item.kind === 'override') {
+                        html += '<div class="tray-item">' +
+                            '<div class="tray-item-header">' +
+                                '<div class="tray-item-title">' + esc(item.quoteNumber) + ' &bull; ' + esc(item.productName) + '</div>' +
+                                '<span class="tray-badge tray-badge-override">PRICE</span>' +
+                            '</div>' +
+                            '<div class="tray-item-meta">' +
+                                esc(item.customerName || 'No customer') + ' &bull; ' +
+                                'Requested by ' + esc(item.requestedBy) + '<br>' +
+                                'Tier: $' + (item.tierPrice || 0).toFixed(2) + ' &rarr; Requested: $' + (item.requestedPrice || 0).toFixed(2) +
+                            '</div>' +
+                            '<div class="tray-item-note">' + esc(item.reason || 'No reason') + '</div>' +
+                            '<div class="tray-item-actions">' +
+                                '<button class="tray-btn tray-btn-approve" data-action="approve" data-id="' + item.quoteId + '" data-kind="override" data-index="' + item.itemIndex + '">Approve</button>' +
+                                '<button class="tray-btn tray-btn-deny" data-action="deny" data-id="' + item.quoteId + '" data-kind="override" data-index="' + item.itemIndex + '">Deny</button>' +
+                            '</div>' +
+                        '</div>';
+                    }
+                });
+
+                trayBody.innerHTML = html;
+
+                trayBody.querySelectorAll('[data-action]').forEach(function (btn) {
+                    btn.addEventListener('click', function () {
+                        var action = btn.getAttribute('data-action');
+                        var id = btn.getAttribute('data-id');
+                        var kind = btn.getAttribute('data-kind');
+                        var index = btn.getAttribute('data-index');
+                        handleAction(action, id, kind, index);
+                    });
+                });
+            })
+            .catch(function (err) {
+                console.error('[Pending Actions] Load error:', err);
+                trayBody.innerHTML = '<div class="tray-empty">Failed to load pending actions.</div>';
+            });
+    }
+
+    function handleAction(action, quoteId, kind, itemIndex) {
+        var api = getApi();
+        if (!api) return;
+
+        var approved = action === 'approve';
+
+        if (kind === 'action') {
+            api('POST', '/api/quotes/' + quoteId + '/resolve-action', { approved: approved })
+                .then(function () {
+                    loadPendingActions();
+                })
+                .catch(function (err) {
+                    alert('Error: ' + (err.message || 'Failed to resolve action'));
+                });
+        } else if (kind === 'override') {
+            var endpoint = approved
+                ? '/api/quotes/' + quoteId + '/items/' + itemIndex + '/approve-override'
+                : '/api/quotes/' + quoteId + '/items/' + itemIndex + '/reject-override';
+            api('POST', endpoint, {})
+                .then(function () {
+                    loadPendingActions();
+                })
+                .catch(function (err) {
+                    alert('Error: ' + (err.message || 'Failed to resolve override'));
+                });
+        }
+    }
+
+    function startPendingActionsPolling() {
+        var dealer = window.getCurrentDealer ? window.getCurrentDealer() : null;
+        if (!dealer || (dealer.role !== 'gm' && dealer.role !== 'admin')) return;
+
+        if (_pollInterval) clearInterval(_pollInterval);
+
+        loadPendingActions();
+        _pollInterval = setInterval(function () {
+            loadPendingActions();
+        }, 60000);
+    }
+
+
+    // ----------------------------------------------------------
+    // TEAM MODAL FUNCTIONS
     // ----------------------------------------------------------
     function openTeamModal(dealer) {
         _currentDealer = dealer;
@@ -260,10 +464,6 @@
             });
     }
 
-
-    // ----------------------------------------------------------
-    // STATS
-    // ----------------------------------------------------------
     function renderTeamStats() {
         var total = _teamUsers.length;
         var active = _teamUsers.filter(function (u) { return u.status === 'active'; }).length;
@@ -275,10 +475,6 @@
             '<div class="team-stat"><div class="team-stat-value">' + frontdesk + '</div><div class="team-stat-label">Frontdesk</div></div>';
     }
 
-
-    // ----------------------------------------------------------
-    // USER TABLE WITH ACTIONS
-    // ----------------------------------------------------------
     function renderTeamTable() {
         var container = document.getElementById('team-list');
 
@@ -297,7 +493,6 @@
             var dateStr = 'Never';
             if (u.lastLogin) { try { dateStr = new Date(u.lastLogin).toLocaleDateString(); } catch(e) {} }
 
-            // GM can only manage frontdesk users, not themselves or other GMs
             var isFrontdesk = u.role === 'frontdesk';
             var isSelf = _currentDealer && u.username === _currentDealer.username;
 
@@ -330,7 +525,6 @@
         html += '</tbody></table>';
         container.innerHTML = html;
 
-        // Wire up action buttons
         container.querySelectorAll('[data-action]').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 var action = btn.getAttribute('data-action');
@@ -342,10 +536,6 @@
         });
     }
 
-
-    // ----------------------------------------------------------
-    // CREATE FRONTDESK USER
-    // ----------------------------------------------------------
     document.getElementById('team-create-btn').addEventListener('click', function () {
         var username = document.getElementById('team-new-username').value.trim().toLowerCase();
         var displayName = document.getElementById('team-new-display').value.trim();
@@ -385,10 +575,6 @@
             });
     });
 
-
-    // ----------------------------------------------------------
-    // DISABLE / ENABLE
-    // ----------------------------------------------------------
     function disableTeamUser(id) {
         var user = _teamUsers.find(function (u) { return u.id === id; });
         if (!user) return;
@@ -420,10 +606,6 @@
             });
     }
 
-
-    // ----------------------------------------------------------
-    // RESET PASSWORD
-    // ----------------------------------------------------------
     function resetTeamUserPassword(id) {
         var user = _teamUsers.find(function (u) { return u.id === id; });
         if (!user) return;
@@ -446,26 +628,22 @@
 
 
     // ----------------------------------------------------------
-    // INIT (v3.1: debounced to prevent duplicate buttons)
+    // INIT
     // ----------------------------------------------------------
-    // The 'ameridex-login' event is the authoritative trigger
-    // (fires after successful login when dealer data is ready).
-    // The DOMContentLoaded/immediate call is a fallback for
-    // page refreshes where the user is already authenticated.
-    // scheduleInjectRoleButtons debounces both so only the
-    // last-scheduled call actually executes.
-
     window.addEventListener('ameridex-login', function () {
         scheduleInjectRoleButtons(100);
+        startPendingActionsPolling();
     });
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', function () {
             scheduleInjectRoleButtons(500);
+            startPendingActionsPolling();
         });
     } else {
         scheduleInjectRoleButtons(500);
+        startPendingActionsPolling();
     }
 
-    console.log('[AmeriDex Roles] v3.1 loaded (duplicate button fix).');
+    console.log('[AmeriDex Roles] v3.2 loaded (Pending Actions bubble + tray).');
 })();
