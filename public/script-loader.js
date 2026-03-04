@@ -1,7 +1,7 @@
 // ============================================================
-// AmeriDex Dealer Portal - Script Loader v2.3
+// AmeriDex Dealer Portal - Script Loader v2.4
 // File: script-loader.js
-// Date: 2026-03-02
+// Date: 2026-03-04
 // ============================================================
 // CRITICAL: Function stubs below MUST execute synchronously
 // before DOMContentLoaded fires. They are intentionally placed
@@ -57,10 +57,8 @@ if (typeof window.showQuotesView !== 'function') {
 //   6.  ameridex-overrides.js             (General UI overrides)
 //   7.  ameridex-print-branding.js        (Branded print/preview output)
 //   8.  ameridex-customer-address.js      (Address/City/State fields injection)
-//   9.  ameridex-address-quote-prompt.js  (No-op stub — superseded by position 10)
-//  10.  ameridex-quote-editor.js          (Read-only lock, Edit button, autosave,
-//                                          syncQuoteFromDOM + restoreQuoteToDOM
-//                                          address field patches, classList null-guard)
+//   9.  ameridex-address-quote-prompt.js  (No-op stub - superseded by position 10)
+//  10.  ameridex-quote-editor.js          (Read-only lock, Edit button, autosave)
 //  11.  ameridex-customer-sync.js         (Customer history sync)
 //  12.  ameridex-roles.js                 (GM/Frontdesk role system + override buttons)
 //  13.  ameridex-admin.js                 (Admin panel)
@@ -71,27 +69,15 @@ if (typeof window.showQuotesView !== 'function') {
 //  18.  ameridex-deck-calculator.js       (Advanced deck calc + board optimizer)
 //  19.  ameridex-admin-patch.js           (Per-dealer pricing migration patch)
 //  20.  ameridex-email-optional.js        (Email optional, name+zip required)
+//  21.  ameridex-version.js               (Version badge bottom-left corner)
+//
+// v2.4 Changes (2026-03-04):
+//   - Added ameridex-version.js at position 21.
+//     Fetches /api/version and renders a subtle version badge
+//     in the bottom-left corner of the portal window.
 //
 // v2.3 Changes (2026-03-02):
 //   - Added ameridex-quote-editor.js at position 10.
-//     Replaces the address-quote-prompt flow entirely.
-//     Responsibilities:
-//       - Read-only lock on all form fields when a quote is loaded.
-//         A sticky "Edit Quote" banner appears at the top of the form.
-//       - Clicking "Edit Quote" unlocks the form and starts an
-//         autosave session (1.5s debounce on any input/change event).
-//       - Clicking "Done Editing" forces an immediate save and re-locks.
-//       - "+ New Quote" button resets the form to a blank draft.
-//       - Patches syncQuoteFromDOM() to include cust-address, cust-city,
-//         cust-state so those fields are actually written to
-//         currentQuote.customer and reach the server payload on save.
-//       - Patches restoreQuoteToDOM() to populate address fields when
-//         loading a saved quote.
-//       - Injects null-safe stub nodes for #saved-quotes-section and
-//         #customers-section (removed by PATCH 0) to prevent the
-//         classList TypeError at dealer-portal.html:1448.
-//   - ameridex-address-quote-prompt.js (position 9) is now a silent
-//     no-op stub; its entry is kept to avoid 404s.
 //
 // v2.2 Changes (2026-03-02):
 //   - Added ameridex-address-quote-prompt.js at position 9.
@@ -131,7 +117,7 @@ if (typeof window.showQuotesView !== 'function') {
         'ameridex-print-branding.js',       //  7
         'ameridex-customer-address.js',     //  8
         'ameridex-address-quote-prompt.js', //  9  (no-op stub)
-        'ameridex-quote-editor.js',         // 10  <-- NEW
+        'ameridex-quote-editor.js',         // 10
         'ameridex-customer-sync.js',        // 11
         'ameridex-roles.js',                // 12
         'ameridex-admin.js',                // 13
@@ -141,7 +127,8 @@ if (typeof window.showQuotesView !== 'function') {
         'ameridex-admin-csv-fix.js',        // 17
         'ameridex-deck-calculator.js',      // 18
         'ameridex-admin-patch.js',          // 19
-        'ameridex-email-optional.js'        // 20
+        'ameridex-email-optional.js',       // 20
+        'ameridex-version.js'               // 21
     ];
 
     let loaded = 0;
