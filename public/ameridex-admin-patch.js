@@ -1,60 +1,35 @@
 // ============================================================
-// AmeriDex Admin Panel Patch v2.2 - Per-Dealer Pricing Migration
+// AmeriDex Admin Panel Patch v2.3 - GM Account Password
 // Date: 2026-03-04
 // ============================================================
 // REQUIRES: ameridex-admin.js (v1.8+) loaded first
 //
-// Load order (via script-loader.js position 17):
-//   ... ameridex-admin.js (position 11) ...
-//   ... ameridex-admin-patch.js (position 17)
+// v2.3 Changes (2026-03-04):
+//   - RENAME: "Change Password" section -> "Change GM Account Password"
+//   - ADD: On dealer edit open, fetch GET /api/admin/users and display
+//     all gm-role users for that dealer's dealerCode in a read-only
+//     info block. If multiple GMs exist, a <select> lets admin choose
+//     which account to change the password for.
+//   - FIX: saveDealerPassword() now routes to
+//     POST /api/admin/users/:gmUserId/reset-password (the user record)
+//     instead of the legacy POST /api/admin/dealers/:id/change-password
+//     (which only changed the dealer record's own passwordHash, not the
+//     GM user account in users.json).
+//   - REMOVE: Standalone "Reset PW" button from dealers table rows,
+//     since the inline edit form now fully covers this functionality.
 //
 // v2.2 Changes (2026-03-04):
 //   - REPLACE: Prompt-based dealer edit (section 5) with full
-//     inline edit form. Clicking "Edit" on a dealer row now
-//     expands an admin-inline-edit card with:
-//       - Dealer Name, Contact Person, Email, Phone, Role,
-//         Active status (all submitted via PUT /api/admin/dealers/:id)
-//       - Separate "Change Password" section that calls
-//         POST /api/admin/dealers/:id/change-password
-//     Only one dealer edit card is open at a time. Cancel and
-//     Save buttons dismiss/submit as expected.
+//     inline edit form covering all profile fields + password.
 //
 // v2.1 Changes (2026-02-28):
-//   - FIX: saveDealerPrices() sends { pricing: {...} } instead of
-//     { prices: {...} } to match backend PUT contract.
-//   - FIX: onDealerSelected() parses GET response data.products[]
-//     array into flat { productId: price } map.
-//   - FIX: copyDealerPrices() re-fetches dealer pricing after copy.
-//   - FIX: Fallback copy path also uses parsePricingResponse().
-//   - ADD: parsePricingResponse() helper for consistent parsing.
+//   - FIX: Per-dealer pricing API fixes.
 //
 // v2.0 Phase 2 (2026-02-28):
-//   - REPLACE: Phase 1 placeholder with full per-dealer pricing editor
-//   - ADD: Dealer selector dropdown in pricing tab
-//   - ADD: Editable product price table per dealer
-//   - ADD: Visual diff showing base vs dealer price with % change
-//   - ADD: "Pricing" button in dealers table for quick navigation
-//   - ADD: Copy pricing from another dealer
-//   - ADD: Reset all overrides to catalog defaults
-//   - ADD: Graceful 404 fallback if backend not deployed
-//   - ADD: Stats bar (total products, overrides count, avg discount)
+//   - REPLACE: Pricing tab with full per-dealer pricing editor.
 //
 // v1.0 Phase 1 (2026-02-28):
-//   - RENAME: "Pricing Tiers" tab -> "Dealer Pricing"
-//   - HIDE: Pricing Tier dropdown from Add Dealer form
-//   - HIDE: "Exempt from Tier Discounts" from Add/Edit Product forms
-//   - REMOVE: Tier column from dealers table (MutationObserver)
-//   - REMOVE: Tier Exempt column from products table (MutationObserver)
-//   - REMOVE: "Tier Exempt" stat card from products stats
-//   - OVERRIDE: editDealer() to skip tier prompt (capture-phase)
-//
-// Backend endpoints consumed:
-//   GET  /api/admin/dealers/:id/pricing
-//   PUT  /api/admin/dealers/:id/pricing
-//   POST /api/admin/dealers/:id/pricing/copy-from/:sourceId
-//   POST /api/admin/dealers/:id/pricing/reset
-//   PUT  /api/admin/dealers/:id
-//   POST /api/admin/dealers/:id/change-password
+//   - Surgical removals: tier column, tier exemption, pricing tab rename.
 // ============================================================
 
 (function () {
@@ -89,8 +64,6 @@
         return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
-    // v2.1: Parse GET /api/admin/dealers/:id/pricing response into
-    // a flat { productId: price } map containing only overrides.
     function parsePricingResponse(data) {
         var map = {};
         if (data && data.products && Array.isArray(data.products)) {
@@ -146,6 +119,19 @@
         '.dealer-edit-slot { padding:0.5rem 0.75rem 0.75rem; }' +
         '.dealer-pw-section { border-top:1px solid #e5e7eb; margin-top:1rem; padding-top:1rem; }' +
         '.dealer-pw-section h5 { margin:0 0 0.75rem; font-size:0.88rem; font-weight:700; color:#374151; }' +
+        // v2.3: GM user info card inside edit form
+        '.dealer-gm-info { background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px; ' +
+            'padding:0.75rem 1rem; margin-bottom:1rem; font-size:0.85rem; }' +
+        '.dealer-gm-info-title { font-weight:700; color:#374151; margin-bottom:0.5rem; font-size:0.82rem; ' +
+            'text-transform:uppercase; letter-spacing:0.04em; }' +
+        '.dealer-gm-row { display:flex; align-items:center; gap:1.5rem; flex-wrap:wrap; padding:0.35rem 0; ' +
+            'border-bottom:1px solid #f3f4f6; }' +
+        '.dealer-gm-row:last-child { border-bottom:none; }' +
+        '.dealer-gm-username { font-weight:700; color:#1e40af; }' +
+        '.dealer-gm-detail { color:#6b7280; font-size:0.82rem; }' +
+        '.dealer-gm-status-active { color:#16a34a; font-size:0.75rem; font-weight:700; }' +
+        '.dealer-gm-status-inactive { color:#dc2626; font-size:0.75rem; font-weight:700; }' +
+        '.dealer-gm-no-users { color:#6b7280; font-style:italic; font-size:0.85rem; }' +
         '';
     document.head.appendChild(patchStyle);
 
@@ -185,13 +171,14 @@
         if (flatField) flatField.style.display = 'none';
     }
 
-    // 4. DEALERS TABLE: Remove Tier Column + Add Pricing Button
+    // 4. DEALERS TABLE: Remove Tier Column + "Reset PW" Button + Add Pricing Button
     function patchDealersTable() {
         var container = document.getElementById('admin-dealers-list');
         if (!container) return;
         var table = container.querySelector('.admin-table');
         if (!table) return;
 
+        // Remove Tier column header
         var headers = table.querySelectorAll('thead th');
         var tierIdx = -1;
         headers.forEach(function (th, i) {
@@ -210,6 +197,13 @@
         table.querySelectorAll('tbody tr[data-dealer-id]').forEach(function (row) {
             var actionsCell = row.querySelector('.admin-actions');
             if (!actionsCell) return;
+
+            // v2.3: Remove the standalone "Reset PW" button - now handled inside inline edit
+            actionsCell.querySelectorAll('[data-action="reset-pw"]').forEach(function (btn) {
+                btn.remove();
+            });
+
+            // Add Pricing button if not already present
             if (actionsCell.querySelector('[data-action="pricing"]')) return;
             var dealerId = row.getAttribute('data-dealer-id');
             if (!dealerId) return;
@@ -234,10 +228,9 @@
 
 
     // ===========================================================
-    // 5. INLINE DEALER EDIT (v2.2 replacement)
+    // 5. INLINE DEALER EDIT (v2.3 update)
     // ===========================================================
 
-    // Returns the edit slot <tr> for a dealer row, creating it if needed.
     function getDealerEditRow(dealerRow) {
         var existingNext = dealerRow.nextElementSibling;
         if (existingNext && existingNext.classList.contains('dealer-edit-row')) {
@@ -256,7 +249,6 @@
         return slotRow;
     }
 
-    // Close any open dealer edit forms.
     function closeAllDealerEditForms() {
         document.querySelectorAll('.dealer-edit-row').forEach(function (row) {
             row.style.display = 'none';
@@ -265,16 +257,76 @@
         });
     }
 
-    // Render the full inline edit form for a dealer.
+    // Render the GM users info block HTML.
+    // gmUsers: array of user objects with role === 'gm' for this dealer.
+    // eid: escaped dealer id used for input IDs.
+    function buildGmUsersBlock(gmUsers, eid) {
+        var html = '<div class="dealer-gm-info">' +
+            '<div class="dealer-gm-info-title">GM Account' + (gmUsers.length !== 1 ? 's' : '') + ' (' + gmUsers.length + ')</div>';
+
+        if (gmUsers.length === 0) {
+            html += '<div class="dealer-gm-no-users">No GM user accounts found for this dealer code.</div>';
+        } else {
+            gmUsers.forEach(function (u) {
+                var statusClass = u.status === 'active' ? 'dealer-gm-status-active' : 'dealer-gm-status-inactive';
+                var statusLabel = (u.status || 'unknown').toUpperCase();
+                var lastLogin = 'Never';
+                if (u.lastLogin) {
+                    try { lastLogin = new Date(u.lastLogin).toLocaleDateString(); } catch (e) {}
+                }
+                html += '<div class="dealer-gm-row">' +
+                    '<span class="dealer-gm-username">' + esc(u.username) + '</span>' +
+                    '<span class="dealer-gm-detail">' + esc(u.displayName || '') + '</span>' +
+                    '<span class="dealer-gm-detail">' + esc(u.email || '') + '</span>' +
+                    '<span class="dealer-gm-detail">Last login: ' + esc(lastLogin) + '</span>' +
+                    '<span class="' + statusClass + '">' + statusLabel + '</span>' +
+                '</div>';
+            });
+        }
+
+        html += '</div>';
+
+        // GM selector: only shown if more than one GM user exists
+        // so admin can choose which account to change the password for.
+        if (gmUsers.length > 1) {
+            html += '<div class="admin-form-field" style="margin-bottom:0.75rem;">' +
+                '<label for="de-gm-select-' + eid + '">Change password for GM account:</label>' +
+                '<select id="de-gm-select-' + eid + '">';
+            gmUsers.forEach(function (u) {
+                html += '<option value="' + escAttr(u.id) + '">' + esc(u.username) + ' (' + esc(u.displayName || u.email || '') + ')</option>';
+            });
+            html += '</select></div>';
+        } else if (gmUsers.length === 1) {
+            // Single GM: store the user id in a hidden input
+            html += '<input type="hidden" id="de-gm-select-' + eid + '" value="' + escAttr(gmUsers[0].id) + '">';
+        }
+
+        return html;
+    }
+
     function openDealerEditForm(dealerId) {
-        // Fetch fresh dealer list to get latest state
-        _api('GET', '/api/admin/dealers')
-            .then(function (dealers) {
+        // Fetch fresh dealer list AND all users in parallel
+        Promise.all([
+            _api('GET', '/api/admin/dealers'),
+            _api('GET', '/api/admin/users')
+        ])
+            .then(function (results) {
+                var dealers = results[0];
+                var allUsers = results[1];
+
                 var dealer = dealers.find(function (d) { return String(d.id) === String(dealerId); });
                 if (!dealer) {
                     patchAlert('admin-dealer-alert', 'Dealer not found.', 'error');
                     return;
                 }
+
+                // Filter to GM users for this dealer's dealerCode
+                var gmUsers = allUsers.filter(function (u) {
+                    return u.dealerCode === dealer.dealerCode &&
+                           u.role === 'gm' &&
+                           !u.isDeleted &&
+                           u.status !== 'deleted';
+                });
 
                 var dealerRow = document.querySelector('tr[data-dealer-id="' + escAttr(dealerId) + '"]');
                 if (!dealerRow) {
@@ -340,22 +392,26 @@
                             '</div>' +
                         '</div>' +
 
-                        // === CHANGE PASSWORD SECTION ===
+                        // === CHANGE GM ACCOUNT PASSWORD SECTION ===
                         '<div class="dealer-pw-section">' +
-                            '<h5>Change Password</h5>' +
-                            '<div class="admin-form-row">' +
-                                '<div class="admin-form-field">' +
-                                    '<label for="de-pw1-' + eid + '">New Password (min 8 chars)</label>' +
-                                    '<input type="password" id="de-pw1-' + eid + '" placeholder="Enter new password" autocomplete="new-password">' +
-                                '</div>' +
-                                '<div class="admin-form-field">' +
-                                    '<label for="de-pw2-' + eid + '">Confirm Password</label>' +
-                                    '<input type="password" id="de-pw2-' + eid + '" placeholder="Repeat new password" autocomplete="new-password">' +
-                                '</div>' +
-                            '</div>' +
-                            '<div class="admin-form-actions">' +
-                                '<button class="admin-btn admin-btn-ghost" id="dealer-save-pw-' + eid + '">Set New Password</button>' +
-                            '</div>' +
+                            '<h5>Change GM Account Password</h5>' +
+                            buildGmUsersBlock(gmUsers, eid) +
+                            (gmUsers.length > 0
+                                ? '<div class="admin-form-row">' +
+                                      '<div class="admin-form-field">' +
+                                          '<label for="de-pw1-' + eid + '">New Password (min 8 chars)</label>' +
+                                          '<input type="password" id="de-pw1-' + eid + '" placeholder="Enter new password" autocomplete="new-password">' +
+                                      '</div>' +
+                                      '<div class="admin-form-field">' +
+                                          '<label for="de-pw2-' + eid + '">Confirm Password</label>' +
+                                          '<input type="password" id="de-pw2-' + eid + '" placeholder="Repeat new password" autocomplete="new-password">' +
+                                      '</div>' +
+                                  '</div>' +
+                                  '<div class="admin-form-actions">' +
+                                      '<button class="admin-btn admin-btn-ghost" id="dealer-save-pw-' + eid + '">Set New Password</button>' +
+                                  '</div>'
+                                : '<div style="font-size:0.85rem;color:#6b7280;">No GM accounts available. Create a GM user for this dealer in the Users tab.</div>'
+                            ) +
                         '</div>' +
 
                     '</div>';
@@ -363,19 +419,22 @@
                 slotRow.style.display = 'table-row';
                 slotRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
-                // --- Cancel buttons ---
+                // Cancel buttons
                 document.getElementById('dealer-cancel-top-' + dealerId).addEventListener('click', function () { closeAllDealerEditForms(); });
                 document.getElementById('dealer-cancel-bot-' + dealerId).addEventListener('click', function () { closeAllDealerEditForms(); });
 
-                // --- Save Profile button ---
+                // Save Profile
                 document.getElementById('dealer-save-profile-' + dealerId).addEventListener('click', function () {
                     saveDealerProfile(dealerId);
                 });
 
-                // --- Set Password button ---
-                document.getElementById('dealer-save-pw-' + dealerId).addEventListener('click', function () {
-                    saveDealerPassword(dealerId);
-                });
+                // Set GM Password (only wired if GM users exist)
+                var pwBtn = document.getElementById('dealer-save-pw-' + dealerId);
+                if (pwBtn) {
+                    pwBtn.addEventListener('click', function () {
+                        saveDealerGmPassword(dealerId);
+                    });
+                }
             })
             .catch(function (err) {
                 patchAlert('admin-dealer-alert', 'Failed to load dealer: ' + esc(err.message || err), 'error');
@@ -415,13 +474,22 @@
             });
     }
 
-    function saveDealerPassword(dealerId) {
-        var pw1 = document.getElementById('de-pw1-' + dealerId);
-        var pw2 = document.getElementById('de-pw2-' + dealerId);
-        if (!pw1 || !pw2) return;
+    // v2.3: Change password on the GM *user* record, not the dealer record.
+    function saveDealerGmPassword(dealerId) {
+        var gmSelect = document.getElementById('de-gm-select-' + dealerId);
+        var pw1El    = document.getElementById('de-pw1-' + dealerId);
+        var pw2El    = document.getElementById('de-pw2-' + dealerId);
 
-        var p1 = pw1.value;
-        var p2 = pw2.value;
+        if (!gmSelect || !pw1El || !pw2El) return;
+
+        var gmUserId = gmSelect.value || (gmSelect.tagName === 'INPUT' ? gmSelect.value : '');
+        if (!gmUserId) {
+            patchAlert('admin-dealer-alert', 'No GM account selected.', 'error');
+            return;
+        }
+
+        var p1 = pw1El.value;
+        var p2 = pw2El.value;
 
         if (!p1 || p1.length < 8) {
             patchAlert('admin-dealer-alert', 'Password must be at least 8 characters.', 'error');
@@ -435,11 +503,12 @@
         var pwBtn = document.getElementById('dealer-save-pw-' + dealerId);
         if (pwBtn) { pwBtn.disabled = true; pwBtn.textContent = 'Saving...'; }
 
-        _api('POST', '/api/admin/dealers/' + dealerId + '/change-password', { newPassword: p1 })
+        // Route to the user record endpoint, not the legacy dealer endpoint
+        _api('POST', '/api/admin/users/' + gmUserId + '/reset-password', { newPassword: p1 })
             .then(function () {
-                patchAlert('admin-dealer-alert', 'Password changed successfully!', 'success');
-                pw1.value = '';
-                pw2.value = '';
+                patchAlert('admin-dealer-alert', 'GM account password updated successfully!', 'success');
+                pw1El.value = '';
+                pw2El.value = '';
                 if (pwBtn) { pwBtn.disabled = false; pwBtn.textContent = 'Set New Password'; }
             })
             .catch(function (err) {
@@ -461,7 +530,7 @@
     }
 
 
-    // 6. PRODUCTS TABLE: Remove Tier Exempt Column + Edit Form
+    // 6. PRODUCTS TABLE: Remove Tier Exempt Column
     function patchProductsTable() {
         var container = document.getElementById('admin-products-list');
         if (!container) return;
@@ -960,5 +1029,5 @@
     }
 
 
-    console.log('[AdminPatch] v2.2 loaded: inline dealer edit + per-dealer pricing editor.');
+    console.log('[AdminPatch] v2.3 loaded: GM account password section + GM user display.');
 })();
