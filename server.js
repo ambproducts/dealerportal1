@@ -7,6 +7,9 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Read version once at startup
+const pkg = require('./package.json');
+
 // Middleware
 app.use(express.json({ limit: '5mb' })); // raised for full HTML bodies sent to /api/pdf/generate
 app.use(express.static(path.join(__dirname, 'public')));
@@ -64,10 +67,14 @@ const adminCustomerRoutes = require('./routes/admin-customers');
 app.use('/api/admin/customers', adminCustomerRoutes);
 
 // ----------------------------------------------------------
-// Health check + SPA fallback
+// Health check, version, + SPA fallback
 // ----------------------------------------------------------
 app.get('/api/health', (req, res) => {
     res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+app.get('/api/version', (req, res) => {
+    res.status(200).json({ version: pkg.version, name: pkg.name });
 });
 
 app.get('*', (req, res) => {
