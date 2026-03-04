@@ -1,7 +1,11 @@
 // ============================================================
-// AmeriDex Dealer Portal - Role-Based UI v3.2
+// AmeriDex Dealer Portal - Role-Based UI v3.2.1
 // Date: 2026-03-04
 // ============================================================
+// v3.2.1 Changes (2026-03-04):
+//   - FIX: Cleanup pending actions bubble and tray on logout.
+//     Stop polling, hide bubble/tray, clear count.
+//
 // v3.2 Changes (2026-03-04):
 //   - FEAT: Floating "Pending Actions" bubble for GM/admin
 //     Fixed position bottom-right, shows unified count of:
@@ -433,6 +437,17 @@
         }, 60000);
     }
 
+    function stopPendingActionsPolling() {
+        if (_pollInterval) {
+            clearInterval(_pollInterval);
+            _pollInterval = null;
+        }
+        bubble.classList.remove('visible');
+        tray.classList.remove('active');
+        var countEl = document.getElementById('pending-actions-count');
+        if (countEl) countEl.textContent = '0';
+    }
+
 
     // ----------------------------------------------------------
     // TEAM MODAL FUNCTIONS
@@ -628,6 +643,14 @@
 
 
     // ----------------------------------------------------------
+    // LOGOUT CLEANUP
+    // ----------------------------------------------------------
+    window.addEventListener('ameridex-logout', function () {
+        stopPendingActionsPolling();
+    });
+
+
+    // ----------------------------------------------------------
     // INIT
     // ----------------------------------------------------------
     window.addEventListener('ameridex-login', function () {
@@ -645,5 +668,5 @@
         startPendingActionsPolling();
     }
 
-    console.log('[AmeriDex Roles] v3.2 loaded (Pending Actions bubble + tray).');
+    console.log('[AmeriDex Roles] v3.2.1 loaded (Pending Actions bubble + tray with logout cleanup).');
 })();
