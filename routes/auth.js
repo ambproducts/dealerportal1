@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { readJSON, writeJSON, USERS_FILE, DEALERS_FILE } = require('../lib/helpers');
-const { verifyPassword, hashPassword } = require('../lib/password');
+const { verifyPassword, hashPassword, needsRehash } = require('../lib/password');
 const { generateToken } = require('../lib/token');
 const { requireAuth } = require('../middleware/auth');
 
@@ -43,6 +43,11 @@ router.post('/login', (req, res) => {
         }
         writeJSON(USERS_FILE, users);
         return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Transparent rehash: upgrade legacy SHA-256 hashes to bcrypt
+    if (needsRehash(user.passwordHash)) {
+        user.passwordHash = hashPassword(password);
     }
 
     user.failedLoginAttempts = 0;
