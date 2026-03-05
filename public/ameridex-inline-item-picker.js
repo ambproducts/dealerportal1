@@ -1,6 +1,14 @@
 // ============================================================
-// AmeriDex Dealer Portal - Inline Item Picker v1.0
+// AmeriDex Dealer Portal - Inline Item Picker v1.1
 // Date: 2026-03-05
+// ============================================================
+// CHANGES IN v1.1:
+//   - buildSelect() now iterates PRODUCT_CONFIG.categories and
+//     emits <optgroup> elements so the dropdown is categorized,
+//     matching the layout in renderDesktop() / renderMobile().
+//   - Added white-space / word-break / overflow-wrap CSS to
+//     .aip-select and optgroup/option so long product names
+//     wrap instead of being clipped.
 // ============================================================
 // PURPOSE:
 //   Replace the two-step flow of:
@@ -23,9 +31,9 @@
 //     quote-editor has locked the form, re-enabled on unlock.
 //
 // DEPENDENCIES (must be loaded before this file):
-//   - dealer-portal.html inline script (defines PRODUCTS, addItem,
-//     renderDesktop, renderMobile, currentQuote, updateTotals,
-//     updateTotalAndFasteners)
+//   - dealer-portal.html inline script (defines PRODUCT_CONFIG,
+//     PRODUCTS, addItem, renderDesktop, renderMobile, currentQuote,
+//     updateTotals, updateTotalAndFasteners)
 //   - ameridex-patches.js  (defines escapeHTML)
 //   - ameridex-quote-editor.js  (defines _editMode lock mechanism)
 //
@@ -42,7 +50,7 @@
     var style = document.createElement('style');
     style.id  = 'aip-styles';
     style.textContent = [
-        '/* ---- Inline Item Picker ---- */',
+        '/* ---- Inline Item Picker v1.1 ---- */',
         '.aip-select {',
         '  width: 100%;',
         '  padding: 5px 8px;',
@@ -56,6 +64,12 @@
         '  outline: none;',
         '  transition: border-color 0.15s, box-shadow 0.15s;',
         '  box-sizing: border-box;',
+        '  /* Allow the closed <select> to show a wrapped summary line */',
+        '  white-space: normal;',
+        '  overflow-wrap: break-word;',
+        '  word-break: break-word;',
+        '  height: auto;',
+        '  min-height: 2.4rem;',
         '}',
         '.aip-select:focus {',
         '  border-color: #818cf8;',
@@ -65,10 +79,29 @@
         '  opacity: 0.45;',
         '  cursor: not-allowed;',
         '}',
+        '/* Ensure option text wraps inside the open dropdown list.',
+        '   This only works in Firefox and some Chromium builds;',
+        '   Chrome/Safari native dropdowns ignore CSS on <option>.',
+        '   The select height:auto above handles the closed-state clip. */',
+        '.aip-select optgroup,',
+        '.aip-select option {',
+        '  white-space: normal;',
+        '  overflow-wrap: break-word;',
+        '  word-break: break-word;',
+        '}',
+        '/* Optgroup label styling (Firefox / Edge) */',
+        '.aip-select optgroup {',
+        '  font-weight: 700;',
+        '  font-style: normal;',
+        '  color: #94a3b8;',
+        '  font-size: 0.78rem;',
+        '  text-transform: uppercase;',
+        '  letter-spacing: 0.06em;',
+        '}',
         '/* Mobile picker wrapper */',
         '.aip-mobile-row {',
         '  display: flex;',
-        '  align-items: center;',
+        '  align-items: flex-start;',
         '  gap: 0.5rem;',
         '  margin-bottom: 0.4rem;',
         '}',
@@ -79,6 +112,7 @@
         '  text-transform: uppercase;',
         '  letter-spacing: 0.04em;',
         '  white-space: nowrap;',
+        '  padding-top: 0.45rem;',
         '}'
     ].join('\n');
     if (!document.getElementById('aip-styles')) {
@@ -92,36 +126,57 @@
 
     /**
      * Returns true when the quote-editor has locked the form.
-     * We read the module-private _editMode flag exposed via the
-     * banner button's text as a fallback if the variable is not
-     * accessible from outside the IIFE.
      */
     function isFormLocked() {
-        // quote-editor.js exposes lock state through data-qe-locked
-        // on form elements. If any locked element exists, form is locked.
         return document.querySelector('[data-qe-locked]') !== null;
     }
 
     /**
-     * Build a <select> element populated with every entry in PRODUCTS.
+     * Build a <select> element populated with categorized <optgroup>
+     * entries drawn from PRODUCT_CONFIG.categories, exactly matching
+     * the structure renderDesktop() and renderMobile() use.
+     *
      * selectedType: the currently selected product type key.
      * onChangeCallback: function(newTypeKey) called when user picks.
      */
     function buildSelect(selectedType, onChangeCallback) {
-        var products = (typeof PRODUCTS !== 'undefined') ? PRODUCTS : {};
-        var keys     = Object.keys(products);
+        var config = (typeof PRODUCT_CONFIG !== 'undefined') ? PRODUCT_CONFIG : null;
+        var flatProducts = (typeof PRODUCTS !== 'undefined') ? PRODUCTS : {};
 
         var sel = document.createElement('select');
         sel.className = 'aip-select';
         sel.disabled  = isFormLocked();
 
-        keys.forEach(function (key) {
-            var opt       = document.createElement('option');
-            opt.value     = key;
-            opt.textContent = products[key].name || key;
-            if (key === selectedType) opt.selected = true;
-            sel.appendChild(opt);
-        });
+        if (config && config.categories) {
+            // --- Categorized path (preferred) ---
+            Object.entries(config.categories).forEach(function (catEntry) {
+                var catKey      = catEntry[0];
+                var category    = catEntry[1];
+                var optgroup    = document.createElement('optgroup');
+                optgroup.label  = category.label || catKey;
+
+                Object.entries(category.products).forEach(function (prodEntry) {
+                    var prodKey  = prodEntry[0];
+                    var prodData = prodEntry[1];
+                    var opt      = document.createElement('option');
+                    opt.value        = prodKey;
+                    opt.textContent  = prodData.name || prodKey;
+                    if (prodKey === selectedType) opt.selected = true;
+                    optgroup.appendChild(opt);
+                });
+
+                sel.appendChild(optgroup);
+            });
+        } else {
+            // --- Fallback: flat list when PRODUCT_CONFIG is unavailable ---
+            Object.keys(flatProducts).forEach(function (key) {
+                var opt      = document.createElement('option');
+                opt.value    = key;
+                opt.textContent = flatProducts[key].name || key;
+                if (key === selectedType) opt.selected = true;
+                sel.appendChild(opt);
+            });
+        }
 
         sel.addEventListener('change', function () {
             onChangeCallback(sel.value);
@@ -169,11 +224,11 @@
         if (!firstCell) return;
 
         var sel = buildSelect(item.type, function (newType) {
-            currentQuote.lineItems[idx].type        = newType;
-            currentQuote.lineItems[idx].color       = '';
-            currentQuote.lineItems[idx].length      = '';
+            currentQuote.lineItems[idx].type         = newType;
+            currentQuote.lineItems[idx].color        = '';
+            currentQuote.lineItems[idx].length       = '';
             currentQuote.lineItems[idx].customLength = '';
-            currentQuote.lineItems[idx].customDesc  = '';
+            currentQuote.lineItems[idx].customDesc   = '';
             // Full re-render rebuilds the row with correct length/color
             // controls for the newly selected product type
             rerender();
@@ -219,7 +274,7 @@
                         try {
                             var evt = new MouseEvent('mousedown', { bubbles: true });
                             sel.dispatchEvent(evt);
-                        } catch (e) { /* ignore in IE */ }
+                        } catch (e) { /* ignore */ }
                     }
                 }
             }
@@ -300,7 +355,7 @@
         };
 
         _hooksInstalled = true;
-        console.log('[InlineItemPicker v1.0] Post-render hooks installed.');
+        console.log('[InlineItemPicker v1.1] Post-render hooks installed.');
     }
 
     function injectAllPickersDesktop() {
@@ -322,10 +377,6 @@
 
     // ----------------------------------------------------------
     // 6. LOCK STATE SYNC
-    // When quote-editor locks or unlocks the form, keep the
-    // pickers in sync. We observe attribute mutations on
-    // #order-form (quote-editor sets data-qe-locked on its
-    // children), and also patch lockForm/unlockForm if accessible.
     // ----------------------------------------------------------
 
     function syncPickerLockState() {
@@ -335,8 +386,6 @@
         });
     }
 
-    // MutationObserver: watch for data-qe-locked attributes appearing
-    // or disappearing anywhere under #order-form
     function observeLockChanges() {
         var form = document.getElementById('order-form');
         if (!form) {
@@ -355,7 +404,7 @@
             subtree: true,
             attributeFilter: ['data-qe-locked', 'disabled']
         });
-        console.log('[InlineItemPicker v1.0] Lock-state observer attached.');
+        console.log('[InlineItemPicker v1.1] Lock-state observer attached.');
     }
 
 
@@ -372,15 +421,12 @@
             _origAddItem.apply(this, arguments);
             injectPickerIntoLastRow();
         };
-        console.log('[InlineItemPicker v1.0] addItem() patched.');
+        console.log('[InlineItemPicker v1.1] addItem() patched.');
     }
 
 
     // ----------------------------------------------------------
     // 8. WRAP renderDesktop / renderMobile
-    // We must wait until both functions exist (they are defined
-    // in the inline script of dealer-portal.html and may not yet
-    // be present when this file first executes).
     // ----------------------------------------------------------
     function waitForRenderFunctions() {
         if (typeof window.renderDesktop === 'function' &&
@@ -399,7 +445,7 @@
         patchAddItem();
         waitForRenderFunctions();
         observeLockChanges();
-        console.log('[InlineItemPicker v1.0] Initialized.');
+        console.log('[InlineItemPicker v1.1] Initialized.');
     }
 
     if (document.readyState === 'loading') {
