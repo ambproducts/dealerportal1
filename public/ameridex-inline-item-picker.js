@@ -1,7 +1,24 @@
 // ============================================================
-// AmeriDex Dealer Portal - Inline Item Picker v2.1
+// AmeriDex Dealer Portal - Inline Item Picker v2.2
 // Date: 2026-03-05
 // ============================================================
+// FIXES IN v2.2:
+//
+//   BUG — Product name changes in Admin panel not reflected
+//     in already-rendered picker dropdowns:
+//     Root cause: buildPicker() reads PRODUCT_CONFIG/PRODUCTS
+//     at injection time and bakes the name into the DOM label.
+//     When syncProductGlobals() updates the globals, existing
+//     .aip-picker widgets still show the old name in their
+//     trigger label and option list.
+//     Fix: New window.refreshAllPickerLabels() function walks
+//     every live .aip-picker, reads data-aip-value, calls
+//     getProductName() (which reads the updated globals), and
+//     rewrites the trigger label span. Also updates matching
+//     .aip-option text nodes inside each picker's listbox.
+//     ameridex-admin.js syncProductGlobals() calls this after
+//     writing the new name/price/unit to the globals.
+//
 // FIXES IN v2.1:
 //
 //   BUG 3 — Subtotal 0.00 after selecting a per-foot product:
@@ -48,7 +65,7 @@
     var style = document.createElement('style');
     style.id  = 'aip-styles';
     style.textContent = [
-        '/* ---- AmeriDex Inline Item Picker v2.1 ---- */',
+        '/* ---- AmeriDex Inline Item Picker v2.2 ---- */',
         '.aip-picker {',
         '  position: relative;',
         '  width: 100%;',
@@ -192,17 +209,11 @@
     // ----------------------------------------------------------
     // 2b. HELPER: Resolve default length for a product type
     // ----------------------------------------------------------
-    // Matches the inline renderDesktop sel.onchange defaults:
-    //   - dexerdry: 240
-    //   - other per-foot (isFt): 16
-    //   - per-piece: null (length not applicable)
-    // ----------------------------------------------------------
     function getDefaultLength(typeKey) {
         if (typeKey === SENTINEL) return null;
         if (typeKey === 'dexerdry') return 240;
         var prod = (typeof PRODUCTS !== 'undefined' && PRODUCTS[typeKey]) ? PRODUCTS[typeKey] : null;
         if (prod && prod.isFt) return 16;
-        // Check PRODUCT_CONFIG as fallback
         if (typeof PRODUCT_CONFIG !== 'undefined' && PRODUCT_CONFIG.categories) {
             var cats = Object.values(PRODUCT_CONFIG.categories);
             for (var c = 0; c < cats.length; c++) {
@@ -266,6 +277,39 @@
             openPicker(picker);
         }
     }
+
+
+    // ----------------------------------------------------------
+    // 3b. REFRESH LIVE PICKER LABELS (v2.2)
+    // ----------------------------------------------------------
+    // Called by ameridex-admin.js syncProductGlobals() after
+    // updating PRODUCTS / PRODUCT_CONFIG. Walks every rendered
+    // .aip-picker and rewrites the trigger label and matching
+    // option text to match the updated global product name.
+    // ----------------------------------------------------------
+    function refreshAllPickerLabels() {
+        document.querySelectorAll('.aip-picker').forEach(function (picker) {
+            var key = picker.getAttribute('data-aip-value');
+            if (!key || key === SENTINEL) return;
+
+            var newName = getProductName(key);
+
+            // Update trigger label
+            var label = picker.querySelector('.aip-trigger-label');
+            if (label) label.textContent = newName;
+
+            // Update matching option(s) in the listbox
+            picker.querySelectorAll('.aip-option[data-aip-key]').forEach(function (opt) {
+                if (opt.getAttribute('data-aip-key') === key) {
+                    opt.textContent = newName;
+                }
+            });
+        });
+        console.log('[InlineItemPicker v2.2] refreshAllPickerLabels() ran.');
+    }
+
+    // Expose globally so ameridex-admin.js syncProductGlobals() can call it
+    window.refreshAllPickerLabels = refreshAllPickerLabels;
 
 
     // ----------------------------------------------------------
@@ -505,7 +549,6 @@
         if (!firstCell) return;
 
         var picker = buildPicker(item.type, function (newType) {
-            // v2.1: Default length based on product type instead of ''
             var defaultLen = getDefaultLength(newType);
             currentQuote.lineItems[idx].type         = newType;
             currentQuote.lineItems[idx].color        = '';
@@ -583,7 +626,6 @@
         label.textContent = 'Product:';
 
         var picker = buildPicker(item.type, function (newType) {
-            // v2.1: Default length based on product type instead of ''
             var defaultLen = getDefaultLength(newType);
             currentQuote.lineItems[idx].type         = newType;
             currentQuote.lineItems[idx].color        = '';
@@ -621,7 +663,7 @@
         };
 
         _hooksInstalled = true;
-        console.log('[InlineItemPicker v2.1] Post-render hooks installed.');
+        console.log('[InlineItemPicker v2.2] Post-render hooks installed.');
     }
 
     function injectAllPickersDesktop() {
@@ -673,7 +715,7 @@
             subtree: true,
             attributeFilter: ['data-qe-locked', 'disabled']
         });
-        console.log('[InlineItemPicker v2.1] Lock-state observer attached.');
+        console.log('[InlineItemPicker v2.2] Lock-state observer attached.');
     }
 
 
@@ -707,7 +749,7 @@
             }
             injectPickerIntoLastRow(true);
         };
-        console.log('[InlineItemPicker v2.1] addItem() patched.');
+        console.log('[InlineItemPicker v2.2] addItem() patched.');
     }
 
 
@@ -731,7 +773,7 @@
     function init() {
         waitForRenderFunctions();
         observeLockChanges();
-        console.log('[InlineItemPicker v2.1] Initialized.');
+        console.log('[InlineItemPicker v2.2] Initialized.');
     }
 
     if (document.readyState === 'loading') {
