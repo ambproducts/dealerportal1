@@ -16,6 +16,8 @@
 //     This enables per-row inline product dropdowns so users can
 //     select a product type directly in the line item row instead
 //     of navigating to the AmeriDex system board after adding.
+//   - PATCH 6: Added ameridex-ui-null-guards.js after ui-fixes to
+//     prevent classList TypeError on removed #print-dropdown.
 //
 // v1.6.1 Changes (2026-02-27):
 //   - BUGFIX: PATCH 2 had a backwards typeof check (`=== 'function'`
@@ -354,6 +356,8 @@
     //
     // v1.7: Added ameridex-inline-item-picker.js for inline
     //       per-row product type dropdowns on line items.
+    //       Added ameridex-ui-null-guards.js after ui-fixes
+    //       to prevent classList error on removed #print-dropdown.
     // v1.6: Added ameridex-customer-sync.js to sync localStorage
     //       customers to the server API.
     // ===========================================================
@@ -362,6 +366,7 @@
         'ameridex-inline-item-picker.js',
         'ameridex-print-branding.js',
         'ameridex-ui-fixes.js',
+        'ameridex-ui-null-guards.js',
         'ameridex-admin-csv-fix.js',
         'ameridex-customer-sync.js'
     ];
