@@ -1,6 +1,6 @@
 // ============================================================
-// AmeriDex Dealer Portal - Admin Panel v1.9
-// Date: 2026-03-01
+// AmeriDex Dealer Portal - Admin Panel v2.0
+// Date: 2026-03-05
 // ============================================================
 // REQUIRES: ameridex-api.js (v2.1+) loaded first
 //
@@ -8,6 +8,12 @@
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
 //   <script src="ameridex-admin.js"></script>
+//
+// v2.0 Changes (2026-03-05):
+//   - FIX: Product name/price/unit edits in the admin panel now
+//     instantly update the in-memory PRODUCTS and PRODUCT_CONFIG
+//     globals via new syncProductGlobals() helper. The quote
+//     builder dropdown reflects admin changes without a page reload.
 //
 // v1.9 Changes (2026-03-01):
 //   - FIX: Admin Panel tab bar is now horizontally scrollable on
@@ -403,7 +409,7 @@
                     '<div id="admin-pricing-list"><div class="admin-loading">Loading pricing...</div></div>' +
                 '</div>' +
 
-                // ---- USERS TAB (NEW in v1.5) ----
+                // ---- USERS TAB ----
                 '<div class="admin-tab-content" id="admin-tab-users">' +
                     '<div id="admin-users-stats" class="admin-stat-row"></div>' +
                     '<div id="admin-user-alert"></div>' +
@@ -1100,6 +1106,43 @@
         }
     }
 
+    // ----------------------------------------------------------
+    // SYNC PRODUCT GLOBALS (v2.0)
+    // After a successful product save, update the in-memory
+    // PRODUCTS and PRODUCT_CONFIG globals so the quote builder
+    // dropdown reflects the new name/price/unit immediately
+    // without requiring a full page reload.
+    // ----------------------------------------------------------
+    function syncProductGlobals(productId, newName, newBasePrice, newUnit, newCategory) {
+        if (typeof PRODUCTS !== 'undefined' && PRODUCTS[productId]) {
+            if (newName !== undefined)       PRODUCTS[productId].name      = newName;
+            if (newBasePrice !== undefined)  PRODUCTS[productId].basePrice = newBasePrice;
+            if (newUnit !== undefined) {
+                PRODUCTS[productId].unit = newUnit;
+                PRODUCTS[productId].isFt = (newUnit === 'ft');
+            }
+        }
+
+        if (typeof PRODUCT_CONFIG !== 'undefined' && PRODUCT_CONFIG.categories) {
+            Object.keys(PRODUCT_CONFIG.categories).forEach(function (catKey) {
+                var cat = PRODUCT_CONFIG.categories[catKey];
+                if (cat.products && cat.products[productId]) {
+                    if (newName !== undefined)       cat.products[productId].name      = newName;
+                    if (newBasePrice !== undefined)  cat.products[productId].basePrice = newBasePrice;
+                    if (newUnit !== undefined)       cat.products[productId].unit      = newUnit;
+                }
+            });
+        }
+
+        // Re-render the active quote if it has line items
+        if (typeof window.currentQuote !== 'undefined' && window.currentQuote && window.currentQuote.lineItems && window.currentQuote.lineItems.length > 0) {
+            if (typeof render === 'function') render();
+            if (typeof updateTotalAndFasteners === 'function') updateTotalAndFasteners();
+        }
+
+        console.log('[Admin v2.0] syncProductGlobals: id="' + productId + '" name="' + newName + '" basePrice=' + newBasePrice + ' unit=' + newUnit);
+    }
+
     function saveEditProduct(id) {
         var nameEl = document.getElementById('edit-name-' + id);
         var priceEl = document.getElementById('edit-price-' + id);
@@ -1135,6 +1178,7 @@
             tierOverrides: tierOverrides
         })
             .then(function () {
+                syncProductGlobals(id, newName, Number(newPrice), newUnit, newCat);
                 showAlert('admin-product-alert', 'Product "' + esc(newName) + '" updated successfully!', 'success');
                 loadProducts();
                 refreshPricingNow();
@@ -1535,5 +1579,5 @@
     }
 
 
-    console.log('[AmeriDex Admin] v1.9 loaded.');
+    console.log('[AmeriDex Admin] v2.0 loaded.');
 })();
