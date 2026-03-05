@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - Admin Panel v2.0
+// AmeriDex Dealer Portal - Admin Panel v2.1
 // Date: 2026-03-05
 // ============================================================
 // REQUIRES: ameridex-api.js (v2.1+) loaded first
@@ -8,6 +8,16 @@
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
 //   <script src="ameridex-admin.js"></script>
+//
+// v2.1 Changes (2026-03-05):
+//   - FIX: syncProductGlobals() now calls
+//     window.refreshAllPickerLabels() (exposed by
+//     ameridex-inline-item-picker.js v2.2) after writing
+//     the updated name/price/unit to PRODUCTS and
+//     PRODUCT_CONFIG. Previously, existing .aip-picker
+//     widgets kept showing the old product name in their
+//     trigger label and option list until a page reload.
+//     Now the label refreshes instantly on Save.
 //
 // v2.0 Changes (2026-03-05):
 //   - FIX: Product name/price/unit edits in the admin panel now
@@ -1107,11 +1117,16 @@
     }
 
     // ----------------------------------------------------------
-    // SYNC PRODUCT GLOBALS (v2.0)
+    // SYNC PRODUCT GLOBALS (v2.1)
     // After a successful product save, update the in-memory
     // PRODUCTS and PRODUCT_CONFIG globals so the quote builder
     // dropdown reflects the new name/price/unit immediately
     // without requiring a full page reload.
+    //
+    // v2.1 addition: calls window.refreshAllPickerLabels() (from
+    // ameridex-inline-item-picker.js v2.2) so any already-rendered
+    // .aip-picker trigger labels and option text nodes are also
+    // updated to show the new product name instantly.
     // ----------------------------------------------------------
     function syncProductGlobals(productId, newName, newBasePrice, newUnit, newCategory) {
         if (typeof PRODUCTS !== 'undefined' && PRODUCTS[productId]) {
@@ -1134,13 +1149,19 @@
             });
         }
 
+        // Refresh live picker labels so trigger buttons and option text
+        // immediately reflect the updated product name (v2.1 fix).
+        if (typeof window.refreshAllPickerLabels === 'function') {
+            window.refreshAllPickerLabels();
+        }
+
         // Re-render the active quote if it has line items
         if (typeof window.currentQuote !== 'undefined' && window.currentQuote && window.currentQuote.lineItems && window.currentQuote.lineItems.length > 0) {
             if (typeof render === 'function') render();
             if (typeof updateTotalAndFasteners === 'function') updateTotalAndFasteners();
         }
 
-        console.log('[Admin v2.0] syncProductGlobals: id="' + productId + '" name="' + newName + '" basePrice=' + newBasePrice + ' unit=' + newUnit);
+        console.log('[Admin v2.1] syncProductGlobals: id="' + productId + '" name="' + newName + '" basePrice=' + newBasePrice + ' unit=' + newUnit);
     }
 
     function saveEditProduct(id) {
@@ -1579,5 +1600,5 @@
     }
 
 
-    console.log('[AmeriDex Admin] v2.0 loaded.');
+    console.log('[AmeriDex Admin] v2.1 loaded.');
 })();
