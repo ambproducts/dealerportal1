@@ -1,7 +1,14 @@
 // ============================================================
-// AmeriDex Dealer Portal - Inline Item Picker v1.2
+// AmeriDex Dealer Portal - Inline Item Picker v1.3
 // Date: 2026-03-05
 // ============================================================
+// CHANGES IN v1.3:
+//   - BUGFIX: injectPickerDesktop no longer clears firstCell.innerHTML.
+//     Instead it removes only the native <select> and prepends the
+//     custom .aip-picker before the remaining content (help text,
+//     price display, custom-item fields).  This fixes the $0.00
+//     pricing bug caused by destroying the price DOM nodes.
+//
 // CHANGES IN v1.2:
 //   - Replaced native <select> with a fully custom dropdown widget
 //     (.aip-picker) so the closed state can wrap freely and never
@@ -28,9 +35,8 @@
     var style = document.createElement('style');
     style.id  = 'aip-styles';
     style.textContent = `
-/* ---- AmeriDex Inline Item Picker v1.2 ---- */
+/* ---- AmeriDex Inline Item Picker v1.3 ---- */
 
-/* Wrapper: positions the listbox relative to the trigger */
 .aip-picker {
   position: relative;
   width: 100%;
@@ -38,7 +44,6 @@
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-/* Trigger button — wraps freely, never clips */
 .aip-trigger {
   display: flex;
   align-items: flex-start;
@@ -56,7 +61,6 @@
   text-align: left;
   box-sizing: border-box;
   transition: border-color 0.15s, box-shadow 0.15s;
-  /* CRITICAL: white-space normal + no overflow so label wraps freely */
   white-space: normal;
   overflow: visible;
   word-break: break-word;
@@ -76,14 +80,12 @@
   cursor: not-allowed;
 }
 
-/* Label span inside trigger */
 .aip-trigger-label {
   flex: 1;
   white-space: normal;
   word-break: break-word;
 }
 
-/* Chevron icon inside trigger */
 .aip-trigger-chevron {
   flex-shrink: 0;
   width: 16px;
@@ -100,7 +102,6 @@
   transform: rotate(180deg);
 }
 
-/* Listbox dropdown */
 .aip-listbox {
   display: none;
   position: absolute;
@@ -123,7 +124,6 @@
   display: block;
 }
 
-/* Category group header */
 .aip-group-header {
   padding: 6px 12px 3px;
   font-size: 0.7rem;
@@ -135,7 +135,6 @@
   user-select: none;
 }
 
-/* Individual option */
 .aip-option {
   padding: 8px 14px;
   font-size: 0.85rem;
@@ -161,14 +160,12 @@
   color: #a5b4fc;
 }
 
-/* Divider between groups */
 .aip-group-divider {
   height: 1px;
   background: #2d3a5e;
   margin: 4px 0;
 }
 
-/* Mobile wrapper */
 .aip-mobile-row {
   display: flex;
   align-items: flex-start;
@@ -205,7 +202,6 @@
         if (typeof updateTotalAndFasteners === 'function') updateTotalAndFasteners();
     }
 
-    // Flatten PRODUCT_CONFIG into a lookup of key -> name for label resolution
     function getProductName(typeKey) {
         var config = (typeof PRODUCT_CONFIG !== 'undefined') ? PRODUCT_CONFIG : null;
         if (config && config.categories) {
@@ -221,7 +217,6 @@
         return (flat[typeKey] && flat[typeKey].name) ? flat[typeKey].name : typeKey;
     }
 
-    // Close all open pickers except the one passed in (or all if none)
     function closeAllPickers(except) {
         document.querySelectorAll('.aip-picker.aip-open').forEach(function (p) {
             if (p !== except) closePicker(p);
@@ -253,23 +248,16 @@
     // 3. BUILD CUSTOM PICKER WIDGET
     // ----------------------------------------------------------
 
-    /**
-     * Build a .aip-picker element.
-     * selectedType  : current product key
-     * onSelect      : function(newTypeKey) called on user selection
-     */
     function buildPicker(selectedType, onSelect) {
         var config      = (typeof PRODUCT_CONFIG !== 'undefined') ? PRODUCT_CONFIG : null;
         var flatProducts = (typeof PRODUCTS !== 'undefined') ? PRODUCTS : {};
         var locked      = isFormLocked();
 
-        // Root wrapper
         var picker = document.createElement('div');
         picker.className = 'aip-picker';
         picker.setAttribute('data-aip-value', selectedType);
         if (locked) picker.classList.add('aip-disabled');
 
-        // --- Trigger button ---
         var trigger = document.createElement('button');
         trigger.type      = 'button';
         trigger.className = 'aip-trigger';
@@ -281,7 +269,6 @@
         labelSpan.className   = 'aip-trigger-label';
         labelSpan.textContent = getProductName(selectedType);
 
-        // Chevron SVG
         var chevronSVG = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         chevronSVG.setAttribute('viewBox', '0 0 16 16');
         chevronSVG.setAttribute('aria-hidden', 'true');
@@ -293,20 +280,18 @@
         trigger.appendChild(labelSpan);
         trigger.appendChild(chevronSVG);
 
-        // --- Listbox ---
         var listbox = document.createElement('ul');
         listbox.className = 'aip-listbox';
         listbox.setAttribute('role', 'listbox');
         listbox.setAttribute('aria-label', 'Select product');
 
-        var allOptions = []; // flat list of .aip-option li elements for keyboard nav
+        var allOptions = [];
 
         function buildFromConfig() {
             var cats = Object.entries(config.categories);
             cats.forEach(function (catEntry, catIdx) {
                 var category = catEntry[1];
 
-                // Divider between groups (not before first)
                 if (catIdx > 0) {
                     var div = document.createElement('li');
                     div.className = 'aip-group-divider';
@@ -314,14 +299,12 @@
                     listbox.appendChild(div);
                 }
 
-                // Group header
                 var header = document.createElement('li');
                 header.className   = 'aip-group-header';
                 header.textContent = category.label || catEntry[0];
                 header.setAttribute('role', 'presentation');
                 listbox.appendChild(header);
 
-                // Options
                 Object.entries(category.products).forEach(function (prodEntry) {
                     var prodKey  = prodEntry[0];
                     var prodData = prodEntry[1];
@@ -361,7 +344,6 @@
         picker.appendChild(trigger);
         picker.appendChild(listbox);
 
-        // ---- Interaction: select an option ----
         function selectOption(key) {
             var name = getProductName(key);
             labelSpan.textContent = name;
@@ -376,23 +358,19 @@
             onSelect(key);
         }
 
-        // ---- Mouse: click option ----
         listbox.addEventListener('mousedown', function (e) {
-            // Use mousedown so it fires before blur closes the picker
             var li = e.target.closest('.aip-option');
             if (!li) return;
             e.preventDefault();
             selectOption(li.getAttribute('data-aip-key'));
         });
 
-        // ---- Mouse: click trigger ----
         trigger.addEventListener('click', function () {
             if (locked || isFormLocked()) return;
             togglePicker(picker);
             trigger.setAttribute('aria-expanded', picker.classList.contains('aip-open') ? 'true' : 'false');
         });
 
-        // ---- Keyboard navigation ----
         var highlightedIdx = -1;
 
         function highlight(idx) {
@@ -413,7 +391,6 @@
                 if (!open) {
                     openPicker(picker);
                     trigger.setAttribute('aria-expanded', 'true');
-                    // Pre-highlight the currently selected option
                     var curIdx = allOptions.findIndex(function (o) {
                         return o.getAttribute('data-aip-key') === picker.getAttribute('data-aip-value');
                     });
@@ -466,6 +443,8 @@
 
     // ----------------------------------------------------------
     // 5. DESKTOP: INJECT PICKER INTO A SPECIFIC ROW
+    //    v1.3 FIX: Only remove the native <select>, preserve
+    //    help-text, price display, custom fields, override rows.
     // ----------------------------------------------------------
 
     function injectPickerDesktop(idx) {
@@ -480,13 +459,14 @@
         var row  = rows[idx];
         if (!row) return;
 
-        // Idempotency guard — check for our wrapper class now
+        // Idempotency: already injected
         if (row.querySelector('.aip-picker')) return;
 
         var cells     = row.querySelectorAll('td');
         var firstCell = cells[0];
         if (!firstCell) return;
 
+        // Build our custom picker
         var picker = buildPicker(item.type, function (newType) {
             currentQuote.lineItems[idx].type         = newType;
             currentQuote.lineItems[idx].color        = '';
@@ -496,10 +476,17 @@
             rerender();
         });
 
-        var overrideInfoRow = firstCell.querySelector('.override-info-row');
-        firstCell.innerHTML = '';
-        firstCell.appendChild(picker);
-        if (overrideInfoRow) firstCell.appendChild(overrideInfoRow);
+        // v1.3: Remove ONLY the native <select> that renderDesktop() created.
+        // Everything else (help-text div, price div, custom inputs,
+        // override-info-row) stays intact.
+        var nativeSelect = firstCell.querySelector('select');
+        if (nativeSelect) {
+            nativeSelect.remove();
+        }
+
+        // Prepend our picker as the first child so it sits above
+        // the help text and price display.
+        firstCell.insertBefore(picker, firstCell.firstChild);
     }
 
     function injectPickerIntoLastRow() {
@@ -510,7 +497,6 @@
         setTimeout(function () {
             injectPickerDesktop(idx);
 
-            // Focus the trigger button only — user clicks once to open
             var tbody = document.querySelector('#line-items tbody');
             if (tbody) {
                 var rows = tbody.querySelectorAll('tr');
@@ -585,7 +571,7 @@
         };
 
         _hooksInstalled = true;
-        console.log('[InlineItemPicker v1.2] Post-render hooks installed.');
+        console.log('[InlineItemPicker v1.3] Post-render hooks installed.');
     }
 
     function injectAllPickersDesktop() {
@@ -637,7 +623,7 @@
             subtree: true,
             attributeFilter: ['data-qe-locked', 'disabled']
         });
-        console.log('[InlineItemPicker v1.2] Lock-state observer attached.');
+        console.log('[InlineItemPicker v1.3] Lock-state observer attached.');
     }
 
 
@@ -654,7 +640,7 @@
             _origAddItem.apply(this, arguments);
             injectPickerIntoLastRow();
         };
-        console.log('[InlineItemPicker v1.2] addItem() patched.');
+        console.log('[InlineItemPicker v1.3] addItem() patched.');
     }
 
 
@@ -678,7 +664,7 @@
         patchAddItem();
         waitForRenderFunctions();
         observeLockChanges();
-        console.log('[InlineItemPicker v1.2] Initialized.');
+        console.log('[InlineItemPicker v1.3] Initialized.');
     }
 
     if (document.readyState === 'loading') {
