@@ -1,120 +1,190 @@
 // ============================================================
-// AmeriDex Dealer Portal - Inline Item Picker v1.1
+// AmeriDex Dealer Portal - Inline Item Picker v1.2
 // Date: 2026-03-05
 // ============================================================
-// CHANGES IN v1.1:
-//   - buildSelect() now iterates PRODUCT_CONFIG.categories and
-//     emits <optgroup> elements so the dropdown is categorized,
-//     matching the layout in renderDesktop() / renderMobile().
-//   - Added white-space / word-break / overflow-wrap CSS to
-//     .aip-select and optgroup/option so long product names
-//     wrap instead of being clipped.
-// ============================================================
-// PURPOSE:
-//   Replace the two-step flow of:
-//     1. Click "+ Add Line Item"  -->  row appended with default type
-//     2. User scrolls down and changes the type via the AmeriDex board
-//
-//   With a single inline experience:
-//     1. Click "+ Add Line Item"  -->  row appears with a <select>
-//        dropdown ALREADY open in the product cell
-//     2. User picks the product directly in the row. Done.
-//
-// HOW IT WORKS:
-//   - Wraps window.addItem() to call injectPickerIntoLastRow()
-//     immediately after the native function appends the new item.
-//   - Also installs a post-render hook (same pattern as
-//     ameridex-overrides.js v1.7) so pickers survive any
-//     subsequent renderDesktop() / renderMobile() call.
-//   - Mobile cards (#mobile-items-container) get the same treatment.
-//   - Fully edit-mode aware: pickers are disabled when the
-//     quote-editor has locked the form, re-enabled on unlock.
-//
-// DEPENDENCIES (must be loaded before this file):
-//   - dealer-portal.html inline script (defines PRODUCT_CONFIG,
-//     PRODUCTS, addItem, renderDesktop, renderMobile, currentQuote,
-//     updateTotals, updateTotalAndFasteners)
-//   - ameridex-patches.js  (defines escapeHTML)
-//   - ameridex-quote-editor.js  (defines _editMode lock mechanism)
-//
-// LOAD ORDER (managed by EXTRA_SCRIPTS in ameridex-patches.js):
-//   ameridex-addrow-fix.js  -->  ameridex-inline-item-picker.js  --> ...
+// CHANGES IN v1.2:
+//   - Replaced native <select> with a fully custom dropdown widget
+//     (.aip-picker) so the closed state can wrap freely and never
+//     clips the selected product label, regardless of browser.
+//   - Closed state: a <button> that wraps to as many lines as needed.
+//   - Open state: a positioned <ul> listbox with category group
+//     headers sourced from PRODUCT_CONFIG.categories.
+//   - On new row add: picker is focused only (one click to open),
+//     no auto-open simulation.
+//   - Keyboard: Enter/Space opens, ArrowDown/Up navigates,
+//     Enter selects highlighted item, Escape closes.
+//   - Lock-state aware: disabled class applied when form is locked.
+//   - Mobile cards get the same custom picker.
+//   - All post-render hooks, rerender cycle, and MutationObserver
+//     from v1.1 are preserved unchanged.
 // ============================================================
 
 (function () {
     'use strict';
 
     // ----------------------------------------------------------
-    // 1. INJECT CSS
+    // 1. CSS
     // ----------------------------------------------------------
     var style = document.createElement('style');
     style.id  = 'aip-styles';
-    style.textContent = [
-        '/* ---- Inline Item Picker v1.1 ---- */',
-        '.aip-select {',
-        '  width: 100%;',
-        '  padding: 5px 8px;',
-        '  border: 2px solid #6366f1;',
-        '  border-radius: 6px;',
-        '  background: #1e2540;',
-        '  color: #e2e8f0;',
-        '  font-size: 0.85rem;',
-        '  font-weight: 600;',
-        '  cursor: pointer;',
-        '  outline: none;',
-        '  transition: border-color 0.15s, box-shadow 0.15s;',
-        '  box-sizing: border-box;',
-        '  /* Allow the closed <select> to show a wrapped summary line */',
-        '  white-space: normal;',
-        '  overflow-wrap: break-word;',
-        '  word-break: break-word;',
-        '  height: auto;',
-        '  min-height: 2.4rem;',
-        '}',
-        '.aip-select:focus {',
-        '  border-color: #818cf8;',
-        '  box-shadow: 0 0 0 3px rgba(99,102,241,0.25);',
-        '}',
-        '.aip-select:disabled {',
-        '  opacity: 0.45;',
-        '  cursor: not-allowed;',
-        '}',
-        '/* Ensure option text wraps inside the open dropdown list.',
-        '   This only works in Firefox and some Chromium builds;',
-        '   Chrome/Safari native dropdowns ignore CSS on <option>.',
-        '   The select height:auto above handles the closed-state clip. */',
-        '.aip-select optgroup,',
-        '.aip-select option {',
-        '  white-space: normal;',
-        '  overflow-wrap: break-word;',
-        '  word-break: break-word;',
-        '}',
-        '/* Optgroup label styling (Firefox / Edge) */',
-        '.aip-select optgroup {',
-        '  font-weight: 700;',
-        '  font-style: normal;',
-        '  color: #94a3b8;',
-        '  font-size: 0.78rem;',
-        '  text-transform: uppercase;',
-        '  letter-spacing: 0.06em;',
-        '}',
-        '/* Mobile picker wrapper */',
-        '.aip-mobile-row {',
-        '  display: flex;',
-        '  align-items: flex-start;',
-        '  gap: 0.5rem;',
-        '  margin-bottom: 0.4rem;',
-        '}',
-        '.aip-mobile-label {',
-        '  font-size: 0.72rem;',
-        '  font-weight: 700;',
-        '  color: #94a3b8;',
-        '  text-transform: uppercase;',
-        '  letter-spacing: 0.04em;',
-        '  white-space: nowrap;',
-        '  padding-top: 0.45rem;',
-        '}'
-    ].join('\n');
+    style.textContent = `
+/* ---- AmeriDex Inline Item Picker v1.2 ---- */
+
+/* Wrapper: positions the listbox relative to the trigger */
+.aip-picker {
+  position: relative;
+  width: 100%;
+  box-sizing: border-box;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+/* Trigger button — wraps freely, never clips */
+.aip-trigger {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 2px solid #6366f1;
+  border-radius: 6px;
+  background: #1e2540;
+  color: #e2e8f0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  box-sizing: border-box;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  /* CRITICAL: white-space normal + no overflow so label wraps freely */
+  white-space: normal;
+  overflow: visible;
+  word-break: break-word;
+  line-height: 1.35;
+}
+.aip-trigger:focus {
+  outline: none;
+  border-color: #818cf8;
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.25);
+}
+.aip-trigger:hover:not(:disabled) {
+  border-color: #818cf8;
+}
+.aip-trigger:disabled,
+.aip-picker.aip-disabled .aip-trigger {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Label span inside trigger */
+.aip-trigger-label {
+  flex: 1;
+  white-space: normal;
+  word-break: break-word;
+}
+
+/* Chevron icon inside trigger */
+.aip-trigger-chevron {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  fill: none;
+  stroke: #94a3b8;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.15s;
+}
+.aip-picker.aip-open .aip-trigger-chevron {
+  transform: rotate(180deg);
+}
+
+/* Listbox dropdown */
+.aip-listbox {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  background: #1e2540;
+  border: 2px solid #6366f1;
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.45);
+  max-height: 320px;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  box-sizing: border-box;
+}
+.aip-picker.aip-open .aip-listbox {
+  display: block;
+}
+
+/* Category group header */
+.aip-group-header {
+  padding: 6px 12px 3px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Individual option */
+.aip-option {
+  padding: 8px 14px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #e2e8f0;
+  cursor: pointer;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.35;
+  transition: background 0.1s, color 0.1s;
+}
+.aip-option:hover,
+.aip-option.aip-highlighted {
+  background: #2d3a5e;
+  color: #ffffff;
+}
+.aip-option.aip-selected {
+  color: #818cf8;
+  font-weight: 700;
+}
+.aip-option.aip-selected.aip-highlighted {
+  background: #2d3a5e;
+  color: #a5b4fc;
+}
+
+/* Divider between groups */
+.aip-group-divider {
+  height: 1px;
+  background: #2d3a5e;
+  margin: 4px 0;
+}
+
+/* Mobile wrapper */
+.aip-mobile-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+.aip-mobile-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  padding-top: 0.55rem;
+}
+`;
     if (!document.getElementById('aip-styles')) {
         document.head.appendChild(style);
     }
@@ -124,70 +194,10 @@
     // 2. HELPERS
     // ----------------------------------------------------------
 
-    /**
-     * Returns true when the quote-editor has locked the form.
-     */
     function isFormLocked() {
         return document.querySelector('[data-qe-locked]') !== null;
     }
 
-    /**
-     * Build a <select> element populated with categorized <optgroup>
-     * entries drawn from PRODUCT_CONFIG.categories, exactly matching
-     * the structure renderDesktop() and renderMobile() use.
-     *
-     * selectedType: the currently selected product type key.
-     * onChangeCallback: function(newTypeKey) called when user picks.
-     */
-    function buildSelect(selectedType, onChangeCallback) {
-        var config = (typeof PRODUCT_CONFIG !== 'undefined') ? PRODUCT_CONFIG : null;
-        var flatProducts = (typeof PRODUCTS !== 'undefined') ? PRODUCTS : {};
-
-        var sel = document.createElement('select');
-        sel.className = 'aip-select';
-        sel.disabled  = isFormLocked();
-
-        if (config && config.categories) {
-            // --- Categorized path (preferred) ---
-            Object.entries(config.categories).forEach(function (catEntry) {
-                var catKey      = catEntry[0];
-                var category    = catEntry[1];
-                var optgroup    = document.createElement('optgroup');
-                optgroup.label  = category.label || catKey;
-
-                Object.entries(category.products).forEach(function (prodEntry) {
-                    var prodKey  = prodEntry[0];
-                    var prodData = prodEntry[1];
-                    var opt      = document.createElement('option');
-                    opt.value        = prodKey;
-                    opt.textContent  = prodData.name || prodKey;
-                    if (prodKey === selectedType) opt.selected = true;
-                    optgroup.appendChild(opt);
-                });
-
-                sel.appendChild(optgroup);
-            });
-        } else {
-            // --- Fallback: flat list when PRODUCT_CONFIG is unavailable ---
-            Object.keys(flatProducts).forEach(function (key) {
-                var opt      = document.createElement('option');
-                opt.value    = key;
-                opt.textContent = flatProducts[key].name || key;
-                if (key === selectedType) opt.selected = true;
-                sel.appendChild(opt);
-            });
-        }
-
-        sel.addEventListener('change', function () {
-            onChangeCallback(sel.value);
-        });
-
-        return sel;
-    }
-
-    /**
-     * Trigger a full re-render + totals update cycle.
-     */
     function rerender() {
         if (typeof renderDesktop           === 'function') renderDesktop();
         if (typeof renderMobile            === 'function') renderMobile();
@@ -195,15 +205,269 @@
         if (typeof updateTotalAndFasteners === 'function') updateTotalAndFasteners();
     }
 
+    // Flatten PRODUCT_CONFIG into a lookup of key -> name for label resolution
+    function getProductName(typeKey) {
+        var config = (typeof PRODUCT_CONFIG !== 'undefined') ? PRODUCT_CONFIG : null;
+        if (config && config.categories) {
+            var found = null;
+            Object.values(config.categories).forEach(function (cat) {
+                if (cat.products && cat.products[typeKey]) {
+                    found = cat.products[typeKey].name || typeKey;
+                }
+            });
+            if (found) return found;
+        }
+        var flat = (typeof PRODUCTS !== 'undefined') ? PRODUCTS : {};
+        return (flat[typeKey] && flat[typeKey].name) ? flat[typeKey].name : typeKey;
+    }
+
+    // Close all open pickers except the one passed in (or all if none)
+    function closeAllPickers(except) {
+        document.querySelectorAll('.aip-picker.aip-open').forEach(function (p) {
+            if (p !== except) closePicker(p);
+        });
+    }
+
+    function openPicker(picker) {
+        if (picker.classList.contains('aip-disabled')) return;
+        closeAllPickers(picker);
+        picker.classList.add('aip-open');
+        var listbox = picker.querySelector('.aip-listbox');
+        if (listbox) listbox.scrollTop = 0;
+    }
+
+    function closePicker(picker) {
+        picker.classList.remove('aip-open');
+    }
+
+    function togglePicker(picker) {
+        if (picker.classList.contains('aip-open')) {
+            closePicker(picker);
+        } else {
+            openPicker(picker);
+        }
+    }
+
 
     // ----------------------------------------------------------
-    // 3. DESKTOP: INJECT PICKER INTO A SPECIFIC ROW
+    // 3. BUILD CUSTOM PICKER WIDGET
     // ----------------------------------------------------------
 
     /**
-     * Replace the product-name text in row[idx] with an inline
-     * <select> picker. Idempotent: skips if picker already present.
+     * Build a .aip-picker element.
+     * selectedType  : current product key
+     * onSelect      : function(newTypeKey) called on user selection
      */
+    function buildPicker(selectedType, onSelect) {
+        var config      = (typeof PRODUCT_CONFIG !== 'undefined') ? PRODUCT_CONFIG : null;
+        var flatProducts = (typeof PRODUCTS !== 'undefined') ? PRODUCTS : {};
+        var locked      = isFormLocked();
+
+        // Root wrapper
+        var picker = document.createElement('div');
+        picker.className = 'aip-picker';
+        picker.setAttribute('data-aip-value', selectedType);
+        if (locked) picker.classList.add('aip-disabled');
+
+        // --- Trigger button ---
+        var trigger = document.createElement('button');
+        trigger.type      = 'button';
+        trigger.className = 'aip-trigger';
+        trigger.disabled  = locked;
+        trigger.setAttribute('aria-haspopup', 'listbox');
+        trigger.setAttribute('aria-expanded', 'false');
+
+        var labelSpan = document.createElement('span');
+        labelSpan.className   = 'aip-trigger-label';
+        labelSpan.textContent = getProductName(selectedType);
+
+        // Chevron SVG
+        var chevronSVG = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        chevronSVG.setAttribute('viewBox', '0 0 16 16');
+        chevronSVG.setAttribute('aria-hidden', 'true');
+        chevronSVG.classList.add('aip-trigger-chevron');
+        var chevronPath = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+        chevronPath.setAttribute('points', '2,5 8,11 14,5');
+        chevronSVG.appendChild(chevronPath);
+
+        trigger.appendChild(labelSpan);
+        trigger.appendChild(chevronSVG);
+
+        // --- Listbox ---
+        var listbox = document.createElement('ul');
+        listbox.className = 'aip-listbox';
+        listbox.setAttribute('role', 'listbox');
+        listbox.setAttribute('aria-label', 'Select product');
+
+        var allOptions = []; // flat list of .aip-option li elements for keyboard nav
+
+        function buildFromConfig() {
+            var cats = Object.entries(config.categories);
+            cats.forEach(function (catEntry, catIdx) {
+                var category = catEntry[1];
+
+                // Divider between groups (not before first)
+                if (catIdx > 0) {
+                    var div = document.createElement('li');
+                    div.className = 'aip-group-divider';
+                    div.setAttribute('role', 'presentation');
+                    listbox.appendChild(div);
+                }
+
+                // Group header
+                var header = document.createElement('li');
+                header.className   = 'aip-group-header';
+                header.textContent = category.label || catEntry[0];
+                header.setAttribute('role', 'presentation');
+                listbox.appendChild(header);
+
+                // Options
+                Object.entries(category.products).forEach(function (prodEntry) {
+                    var prodKey  = prodEntry[0];
+                    var prodData = prodEntry[1];
+                    var li       = document.createElement('li');
+                    li.className   = 'aip-option';
+                    li.textContent = prodData.name || prodKey;
+                    li.setAttribute('role', 'option');
+                    li.setAttribute('data-aip-key', prodKey);
+                    li.setAttribute('aria-selected', prodKey === selectedType ? 'true' : 'false');
+                    if (prodKey === selectedType) li.classList.add('aip-selected');
+                    allOptions.push(li);
+                    listbox.appendChild(li);
+                });
+            });
+        }
+
+        function buildFromFlat() {
+            Object.keys(flatProducts).forEach(function (key) {
+                var li = document.createElement('li');
+                li.className   = 'aip-option';
+                li.textContent = flatProducts[key].name || key;
+                li.setAttribute('role', 'option');
+                li.setAttribute('data-aip-key', key);
+                li.setAttribute('aria-selected', key === selectedType ? 'true' : 'false');
+                if (key === selectedType) li.classList.add('aip-selected');
+                allOptions.push(li);
+                listbox.appendChild(li);
+            });
+        }
+
+        if (config && config.categories) {
+            buildFromConfig();
+        } else {
+            buildFromFlat();
+        }
+
+        picker.appendChild(trigger);
+        picker.appendChild(listbox);
+
+        // ---- Interaction: select an option ----
+        function selectOption(key) {
+            var name = getProductName(key);
+            labelSpan.textContent = name;
+            picker.setAttribute('data-aip-value', key);
+            trigger.setAttribute('aria-expanded', 'false');
+            allOptions.forEach(function (opt) {
+                var isThis = opt.getAttribute('data-aip-key') === key;
+                opt.classList.toggle('aip-selected', isThis);
+                opt.setAttribute('aria-selected', isThis ? 'true' : 'false');
+            });
+            closePicker(picker);
+            onSelect(key);
+        }
+
+        // ---- Mouse: click option ----
+        listbox.addEventListener('mousedown', function (e) {
+            // Use mousedown so it fires before blur closes the picker
+            var li = e.target.closest('.aip-option');
+            if (!li) return;
+            e.preventDefault();
+            selectOption(li.getAttribute('data-aip-key'));
+        });
+
+        // ---- Mouse: click trigger ----
+        trigger.addEventListener('click', function () {
+            if (locked || isFormLocked()) return;
+            togglePicker(picker);
+            trigger.setAttribute('aria-expanded', picker.classList.contains('aip-open') ? 'true' : 'false');
+        });
+
+        // ---- Keyboard navigation ----
+        var highlightedIdx = -1;
+
+        function highlight(idx) {
+            allOptions.forEach(function (o) { o.classList.remove('aip-highlighted'); });
+            if (idx >= 0 && idx < allOptions.length) {
+                allOptions[idx].classList.add('aip-highlighted');
+                allOptions[idx].scrollIntoView({ block: 'nearest' });
+                highlightedIdx = idx;
+            }
+        }
+
+        trigger.addEventListener('keydown', function (e) {
+            if (locked || isFormLocked()) return;
+            var open = picker.classList.contains('aip-open');
+
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                if (!open) {
+                    openPicker(picker);
+                    trigger.setAttribute('aria-expanded', 'true');
+                    // Pre-highlight the currently selected option
+                    var curIdx = allOptions.findIndex(function (o) {
+                        return o.getAttribute('data-aip-key') === picker.getAttribute('data-aip-value');
+                    });
+                    highlight(curIdx >= 0 ? curIdx : 0);
+                } else if (highlightedIdx >= 0) {
+                    selectOption(allOptions[highlightedIdx].getAttribute('data-aip-key'));
+                    trigger.setAttribute('aria-expanded', 'false');
+                }
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                closePicker(picker);
+                trigger.setAttribute('aria-expanded', 'false');
+                trigger.focus();
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (!open) {
+                    openPicker(picker);
+                    trigger.setAttribute('aria-expanded', 'true');
+                }
+                var next = Math.min(highlightedIdx + 1, allOptions.length - 1);
+                if (highlightedIdx < 0) next = 0;
+                highlight(next);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (!open) {
+                    openPicker(picker);
+                    trigger.setAttribute('aria-expanded', 'true');
+                }
+                var prev = Math.max(highlightedIdx - 1, 0);
+                highlight(prev);
+            } else if (e.key === 'Tab') {
+                closePicker(picker);
+                trigger.setAttribute('aria-expanded', 'false');
+            }
+        });
+
+        return picker;
+    }
+
+
+    // ----------------------------------------------------------
+    // 4. CLOSE ON OUTSIDE CLICK
+    // ----------------------------------------------------------
+    document.addEventListener('mousedown', function (e) {
+        if (!e.target.closest('.aip-picker')) {
+            closeAllPickers(null);
+        }
+    });
+
+
+    // ----------------------------------------------------------
+    // 5. DESKTOP: INJECT PICKER INTO A SPECIFIC ROW
+    // ----------------------------------------------------------
+
     function injectPickerDesktop(idx) {
         if (typeof currentQuote === 'undefined' || !currentQuote.lineItems) return;
         var item = currentQuote.lineItems[idx];
@@ -216,66 +480,44 @@
         var row  = rows[idx];
         if (!row) return;
 
-        // Idempotency guard
-        if (row.querySelector('.aip-select')) return;
+        // Idempotency guard — check for our wrapper class now
+        if (row.querySelector('.aip-picker')) return;
 
         var cells     = row.querySelectorAll('td');
         var firstCell = cells[0];
         if (!firstCell) return;
 
-        var sel = buildSelect(item.type, function (newType) {
+        var picker = buildPicker(item.type, function (newType) {
             currentQuote.lineItems[idx].type         = newType;
             currentQuote.lineItems[idx].color        = '';
             currentQuote.lineItems[idx].length       = '';
             currentQuote.lineItems[idx].customLength = '';
             currentQuote.lineItems[idx].customDesc   = '';
-            // Full re-render rebuilds the row with correct length/color
-            // controls for the newly selected product type
             rerender();
         });
 
-        // Preserve any override info that might already be in this cell
         var overrideInfoRow = firstCell.querySelector('.override-info-row');
-
-        // Clear cell and insert picker first
         firstCell.innerHTML = '';
-        firstCell.appendChild(sel);
-
-        // Re-attach override info below picker if it existed
-        if (overrideInfoRow) {
-            firstCell.appendChild(overrideInfoRow);
-        }
+        firstCell.appendChild(picker);
+        if (overrideInfoRow) firstCell.appendChild(overrideInfoRow);
     }
 
-    /**
-     * Inject a picker into the LAST row only.
-     * Called immediately after addItem() appends a new row.
-     */
     function injectPickerIntoLastRow() {
         if (typeof currentQuote === 'undefined' || !currentQuote.lineItems) return;
         var idx = currentQuote.lineItems.length - 1;
         if (idx < 0) return;
 
-        // Give renderDesktop() a tick to paint the row before we inject
         setTimeout(function () {
             injectPickerDesktop(idx);
 
-            // Auto-open the dropdown so the user does not need an
-            // extra click (supported in Chrome/Edge/Safari desktop)
+            // Focus the trigger button only — user clicks once to open
             var tbody = document.querySelector('#line-items tbody');
             if (tbody) {
                 var rows = tbody.querySelectorAll('tr');
                 var row  = rows[idx];
                 if (row) {
-                    var sel = row.querySelector('.aip-select');
-                    if (sel && !isFormLocked()) {
-                        sel.focus();
-                        // Simulate a mousedown to pop the native dropdown
-                        try {
-                            var evt = new MouseEvent('mousedown', { bubbles: true });
-                            sel.dispatchEvent(evt);
-                        } catch (e) { /* ignore */ }
-                    }
+                    var trigger = row.querySelector('.aip-trigger');
+                    if (trigger && !isFormLocked()) trigger.focus();
                 }
             }
         }, 30);
@@ -283,13 +525,9 @@
 
 
     // ----------------------------------------------------------
-    // 4. MOBILE: INJECT PICKER INTO A SPECIFIC CARD
+    // 6. MOBILE: INJECT PICKER INTO A SPECIFIC CARD
     // ----------------------------------------------------------
 
-    /**
-     * Prepend an inline product picker row at the top of a
-     * mobile item card for lineItems[idx].
-     */
     function injectPickerMobile(idx) {
         if (typeof currentQuote === 'undefined' || !currentQuote.lineItems) return;
         var item = currentQuote.lineItems[idx];
@@ -302,8 +540,7 @@
         var card  = cards[idx];
         if (!card) return;
 
-        // Idempotency guard
-        if (card.querySelector('.aip-select')) return;
+        if (card.querySelector('.aip-picker')) return;
 
         var wrapper   = document.createElement('div');
         wrapper.className = 'aip-mobile-row';
@@ -312,7 +549,7 @@
         label.className = 'aip-mobile-label';
         label.textContent = 'Product:';
 
-        var sel = buildSelect(item.type, function (newType) {
+        var picker = buildPicker(item.type, function (newType) {
             currentQuote.lineItems[idx].type         = newType;
             currentQuote.lineItems[idx].color        = '';
             currentQuote.lineItems[idx].length       = '';
@@ -322,20 +559,13 @@
         });
 
         wrapper.appendChild(label);
-        wrapper.appendChild(sel);
-
-        // Insert at the very top of the card so it is the first
-        // thing the user sees without scrolling
+        wrapper.appendChild(picker);
         card.insertBefore(wrapper, card.firstChild);
     }
 
 
     // ----------------------------------------------------------
-    // 5. POST-RENDER HOOK
-    // Mirrors the same pattern used in ameridex-overrides.js v1.7.
-    // After every renderDesktop/renderMobile call, scan ALL rows
-    // and inject pickers for any row that is missing one.
-    // This keeps pickers alive after the form re-renders.
+    // 7. POST-RENDER HOOKS
     // ----------------------------------------------------------
     var _hooksInstalled = false;
 
@@ -355,7 +585,7 @@
         };
 
         _hooksInstalled = true;
-        console.log('[InlineItemPicker v1.1] Post-render hooks installed.');
+        console.log('[InlineItemPicker v1.2] Post-render hooks installed.');
     }
 
     function injectAllPickersDesktop() {
@@ -376,13 +606,16 @@
 
 
     // ----------------------------------------------------------
-    // 6. LOCK STATE SYNC
+    // 8. LOCK STATE SYNC
     // ----------------------------------------------------------
 
     function syncPickerLockState() {
         var locked = isFormLocked();
-        document.querySelectorAll('.aip-select').forEach(function (sel) {
-            sel.disabled = locked;
+        document.querySelectorAll('.aip-picker').forEach(function (p) {
+            p.classList.toggle('aip-disabled', locked);
+            var trigger = p.querySelector('.aip-trigger');
+            if (trigger) trigger.disabled = locked;
+            if (locked) closePicker(p);
         });
     }
 
@@ -404,12 +637,12 @@
             subtree: true,
             attributeFilter: ['data-qe-locked', 'disabled']
         });
-        console.log('[InlineItemPicker v1.1] Lock-state observer attached.');
+        console.log('[InlineItemPicker v1.2] Lock-state observer attached.');
     }
 
 
     // ----------------------------------------------------------
-    // 7. WRAP window.addItem()
+    // 9. WRAP window.addItem()
     // ----------------------------------------------------------
     function patchAddItem() {
         if (typeof window.addItem !== 'function') {
@@ -421,12 +654,12 @@
             _origAddItem.apply(this, arguments);
             injectPickerIntoLastRow();
         };
-        console.log('[InlineItemPicker v1.1] addItem() patched.');
+        console.log('[InlineItemPicker v1.2] addItem() patched.');
     }
 
 
     // ----------------------------------------------------------
-    // 8. WRAP renderDesktop / renderMobile
+    // 10. WAIT FOR RENDER FUNCTIONS
     // ----------------------------------------------------------
     function waitForRenderFunctions() {
         if (typeof window.renderDesktop === 'function' &&
@@ -439,13 +672,13 @@
 
 
     // ----------------------------------------------------------
-    // 9. INIT
+    // 11. INIT
     // ----------------------------------------------------------
     function init() {
         patchAddItem();
         waitForRenderFunctions();
         observeLockChanges();
-        console.log('[InlineItemPicker v1.1] Initialized.');
+        console.log('[InlineItemPicker v1.2] Initialized.');
     }
 
     if (document.readyState === 'loading') {
