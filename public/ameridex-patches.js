@@ -1,6 +1,6 @@
 // ============================================================
-// AmeriDex Dealer Portal - Patch File v1.6.1
-// Date: 2026-02-27
+// AmeriDex Dealer Portal - Patch File v1.7
+// Date: 2026-03-05
 // ============================================================
 // HOW TO USE:
 //   Add this <script> tag at the very bottom of dealer-portal.html,
@@ -10,6 +10,12 @@
 //
 //   This file monkey-patches the existing global functions
 //   in-place. No edits to the main file required.
+//
+// v1.7 Changes (2026-03-05):
+//   - PATCH 6: Added ameridex-inline-item-picker.js to EXTRA_SCRIPTS.
+//     This enables per-row inline product dropdowns so users can
+//     select a product type directly in the line item row instead
+//     of navigating to the AmeriDex system board after adding.
 //
 // v1.6.1 Changes (2026-02-27):
 //   - BUGFIX: PATCH 2 had a backwards typeof check (`=== 'function'`
@@ -58,7 +64,7 @@
     function removeSavedQuotesSection() {
         var savedSection = document.getElementById('saved-quotes-section');
         if (!savedSection) {
-            console.log('[patches v1.6.1] PATCH 0: No saved-quotes-section found, nothing to remove.');
+            console.log('[patches v1.7] PATCH 0: No saved-quotes-section found, nothing to remove.');
             return;
         }
 
@@ -66,7 +72,7 @@
         if (!form) {
             // Fallback: just hide it
             savedSection.style.display = 'none';
-            console.log('[patches v1.6.1] PATCH 0: No order-form found, hid saved-quotes-section.');
+            console.log('[patches v1.7] PATCH 0: No order-form found, hid saved-quotes-section.');
             return;
         }
 
@@ -85,7 +91,7 @@
                     form.appendChild(el);
                 }
                 insertAfter = el;
-                console.log('[patches v1.6.1] PATCH 0: Rescued section #' + id + ' from saved-quotes.');
+                console.log('[patches v1.7] PATCH 0: Rescued section #' + id + ' from saved-quotes.');
             }
         });
 
@@ -96,19 +102,19 @@
             if (section === savedSection) return;
             section.parentNode.removeChild(section);
             form.appendChild(section);
-            console.log('[patches v1.6.1] PATCH 0: Rescued unnamed trapped section.');
+            console.log('[patches v1.7] PATCH 0: Rescued unnamed trapped section.');
         });
 
         // Step 2: Remove the saved-quotes-section itself
         savedSection.parentNode.removeChild(savedSection);
-        console.log('[patches v1.6.1] PATCH 0: Removed saved-quotes-section from DOM.');
+        console.log('[patches v1.7] PATCH 0: Removed saved-quotes-section from DOM.');
 
         // Step 3: Also remove the old customers-section on the dashboard
         // (not the one on quotes-customers.html, which has different IDs)
         var customersSection = document.getElementById('customers-section');
         if (customersSection && form.contains(customersSection)) {
             customersSection.parentNode.removeChild(customersSection);
-            console.log('[patches v1.6.1] PATCH 0: Removed customers-section from dashboard DOM.');
+            console.log('[patches v1.7] PATCH 0: Removed customers-section from dashboard DOM.');
         }
 
         // Step 4: Force re-render to fix any layout issues
@@ -147,9 +153,9 @@
             // v1.6: No-op. The old customers list on the dashboard
             // has been removed. Customer management now lives on
             // the My Quotes page (quotes-customers.html).
-            console.log('[patches v1.6.1] renderCustomersList() called but customers-section has been removed. Use My Quotes tab.');
+            console.log('[patches v1.7] renderCustomersList() called but customers-section has been removed. Use My Quotes tab.');
         };
-        console.log('[patches v1.6.1] PATCH 0b: Registered renderCustomersList() as no-op (section removed).');
+        console.log('[patches v1.7] PATCH 0b: Registered renderCustomersList() as no-op (section removed).');
     }
 
 
@@ -179,7 +185,7 @@
         window.getItemSubtotalFromData = function (li) {
             return window.getItemSubtotal(li);
         };
-        console.log('[patches v1.6.1] PATCH 2: Created getItemSubtotalFromData alias (was missing due to inverted check).');
+        console.log('[patches v1.7] PATCH 2: Created getItemSubtotalFromData alias (was missing due to inverted check).');
     }
 
 
@@ -346,11 +352,14 @@
     // ===========================================================
     // PATCH 6: Bootstrap Loader for Additional Scripts
     //
+    // v1.7: Added ameridex-inline-item-picker.js for inline
+    //       per-row product type dropdowns on line items.
     // v1.6: Added ameridex-customer-sync.js to sync localStorage
     //       customers to the server API.
     // ===========================================================
     var EXTRA_SCRIPTS = [
         'ameridex-addrow-fix.js',
+        'ameridex-inline-item-picker.js',
         'ameridex-print-branding.js',
         'ameridex-ui-fixes.js',
         'ameridex-admin-csv-fix.js',
@@ -361,7 +370,7 @@
 
     function loadNextScript() {
         if (scriptIndex >= EXTRA_SCRIPTS.length) {
-            console.log('[patches v1.6.1] PATCH 6: All ' + EXTRA_SCRIPTS.length + ' extra scripts loaded.');
+            console.log('[patches v1.7] PATCH 6: All ' + EXTRA_SCRIPTS.length + ' extra scripts loaded.');
             // Run removal one more time after all scripts loaded,
             // in case any script re-rendered the section
             setTimeout(function() {
@@ -373,12 +382,12 @@
         var el = document.createElement('script');
         el.src = src;
         el.onload = function () {
-            console.log('[patches v1.6.1] PATCH 6: Loaded ' + src);
+            console.log('[patches v1.7] PATCH 6: Loaded ' + src);
             scriptIndex++;
             loadNextScript();
         };
         el.onerror = function () {
-            console.error('[patches v1.6.1] PATCH 6: FAILED to load ' + src);
+            console.error('[patches v1.7] PATCH 6: FAILED to load ' + src);
             scriptIndex++;
             loadNextScript();
         };
