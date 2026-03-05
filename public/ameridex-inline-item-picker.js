@@ -1,7 +1,18 @@
 // ============================================================
-// AmeriDex Dealer Portal - Inline Item Picker v2.0
+// AmeriDex Dealer Portal - Inline Item Picker v2.1
 // Date: 2026-03-05
 // ============================================================
+// FIXES IN v2.1:
+//
+//   BUG 3 — Subtotal 0.00 after selecting a per-foot product:
+//     Root cause: onSelect set item.length = '' (empty string).
+//     getItemSubtotal() computes price * parseFloat('') * qty,
+//     and parseFloat('') returns NaN, so the result is always 0.
+//     Fix: onSelect now defaults length to 16 for standard
+//     per-foot products, 240 for dexerdry, or null for per-piece
+//     items. This matches the inline renderDesktop sel.onchange
+//     defaults in dealer-portal.html.
+//
 // FIXES IN v2.0:
 //
 //   BUG 1 — Subtotal 0.00 after type change:
@@ -37,7 +48,7 @@
     var style = document.createElement('style');
     style.id  = 'aip-styles';
     style.textContent = [
-        '/* ---- AmeriDex Inline Item Picker v2.0 ---- */',
+        '/* ---- AmeriDex Inline Item Picker v2.1 ---- */',
         '.aip-picker {',
         '  position: relative;',
         '  width: 100%;',
@@ -166,13 +177,8 @@
     // ----------------------------------------------------------
     // 2. SENTINEL
     // ----------------------------------------------------------
-    // '__pick__' is used as a placeholder type for brand-new rows
-    // before the user has selected a product. getItemSubtotal
-    // returns 0 for this type so it never pollutes the total.
-    // ----------------------------------------------------------
     var SENTINEL = '__pick__';
 
-    // Guard getItemSubtotal so sentinel rows always return 0
     var _origGetItemSubtotal = window.getItemSubtotal;
     window.getItemSubtotal = function (item) {
         if (!item || item.type === SENTINEL) return 0;
@@ -181,6 +187,34 @@
         }
         return 0;
     };
+
+
+    // ----------------------------------------------------------
+    // 2b. HELPER: Resolve default length for a product type
+    // ----------------------------------------------------------
+    // Matches the inline renderDesktop sel.onchange defaults:
+    //   - dexerdry: 240
+    //   - other per-foot (isFt): 16
+    //   - per-piece: null (length not applicable)
+    // ----------------------------------------------------------
+    function getDefaultLength(typeKey) {
+        if (typeKey === SENTINEL) return null;
+        if (typeKey === 'dexerdry') return 240;
+        var prod = (typeof PRODUCTS !== 'undefined' && PRODUCTS[typeKey]) ? PRODUCTS[typeKey] : null;
+        if (prod && prod.isFt) return 16;
+        // Check PRODUCT_CONFIG as fallback
+        if (typeof PRODUCT_CONFIG !== 'undefined' && PRODUCT_CONFIG.categories) {
+            var cats = Object.values(PRODUCT_CONFIG.categories);
+            for (var c = 0; c < cats.length; c++) {
+                if (cats[c].products && cats[c].products[typeKey]) {
+                    var cfgProd = cats[c].products[typeKey];
+                    if (cfgProd.isFt) return 16;
+                    break;
+                }
+            }
+        }
+        return null;
+    }
 
 
     // ----------------------------------------------------------
@@ -427,24 +461,12 @@
 
     // ----------------------------------------------------------
     // 6. DESKTOP: INJECT PICKER INTO A SPECIFIC ROW
-    //
-    //    v2.0: onSelect no longer calls rerender(). Instead:
-    //      1. Update lineItems[idx] data in place
-    //      2. Call the RAW (pre-hook) renderDesktop + renderMobile
-    //         so the row repaints with correct product info
-    //      3. Call updateTotalAndFasteners() in setTimeout(0)
-    //         so it always runs after the render pass settles
-    //
-    //    This breaks the re-entrant render loop that caused 0.00.
     // ----------------------------------------------------------
 
-    // Stored references to the raw render functions BEFORE our
-    // post-render hooks wrap them. Populated in installPostRenderHooks.
     var _rawRenderDesktop = null;
     var _rawRenderMobile  = null;
 
     function safeRender() {
-        // Call the raw pre-hook versions to avoid re-entrancy
         if (typeof _rawRenderDesktop === 'function') {
             try { _rawRenderDesktop(); } catch(e) { console.warn('[AIP] renderDesktop error:', e); }
         } else if (typeof window.renderDesktop === 'function') {
@@ -455,10 +477,8 @@
         } else if (typeof window.renderMobile === 'function') {
             try { window.renderMobile(); } catch(e) { console.warn('[AIP] renderMobile error:', e); }
         }
-        // Re-inject pickers after raw render rebuilt the DOM
         injectAllPickersDesktop();
         injectAllPickersMobile();
-        // Totals after DOM is fully settled
         setTimeout(function () {
             if (typeof window.updateTotalAndFasteners === 'function') {
                 window.updateTotalAndFasteners();
@@ -478,7 +498,6 @@
         var row  = rows[idx];
         if (!row) return;
 
-        // Idempotency: already injected
         if (row.querySelector('.aip-picker')) return;
 
         var cells     = row.querySelectorAll('td');
@@ -486,28 +505,22 @@
         if (!firstCell) return;
 
         var picker = buildPicker(item.type, function (newType) {
-            // Update data
+            // v2.1: Default length based on product type instead of ''
+            var defaultLen = getDefaultLength(newType);
             currentQuote.lineItems[idx].type         = newType;
             currentQuote.lineItems[idx].color        = '';
-            currentQuote.lineItems[idx].length       = '';
+            currentQuote.lineItems[idx].length       = defaultLen;
             currentQuote.lineItems[idx].customLength = '';
             currentQuote.lineItems[idx].customDesc   = '';
-            // Re-render cleanly without re-entrancy
             safeRender();
         });
 
-        // Remove only the native <select> renderDesktop() created
         var nativeSelect = firstCell.querySelector('select');
         if (nativeSelect) nativeSelect.remove();
 
-        // Prepend above help-text and price display
         firstCell.insertBefore(picker, firstCell.firstChild);
 
-        // If this is a sentinel (new unselected row), show placeholder
-        // and clear the price/help text that renderDesktop painted for
-        // whatever product it defaulted to
         if (item.type === SENTINEL) {
-            // Hide the help-text and price divs until a product is chosen
             firstCell.querySelectorAll('div, small, span').forEach(function (el) {
                 if (el.closest('.aip-picker')) return;
                 el.style.display = 'none';
@@ -570,9 +583,11 @@
         label.textContent = 'Product:';
 
         var picker = buildPicker(item.type, function (newType) {
+            // v2.1: Default length based on product type instead of ''
+            var defaultLen = getDefaultLength(newType);
             currentQuote.lineItems[idx].type         = newType;
             currentQuote.lineItems[idx].color        = '';
-            currentQuote.lineItems[idx].length       = '';
+            currentQuote.lineItems[idx].length       = defaultLen;
             currentQuote.lineItems[idx].customLength = '';
             currentQuote.lineItems[idx].customDesc   = '';
             safeRender();
@@ -592,16 +607,12 @@
     function installPostRenderHooks() {
         if (_hooksInstalled) return;
 
-        // Store raw references BEFORE wrapping
         _rawRenderDesktop = window.renderDesktop;
         _rawRenderMobile  = window.renderMobile;
 
         window.renderDesktop = function () {
             if (typeof _rawRenderDesktop === 'function') _rawRenderDesktop();
             injectAllPickersDesktop();
-            // NOTE: We do NOT call updateTotalAndFasteners here.
-            // The caller chain (render() -> updateTotalAndFasteners())
-            // handles totals. We only re-inject picker widgets.
         };
 
         window.renderMobile = function () {
@@ -610,7 +621,7 @@
         };
 
         _hooksInstalled = true;
-        console.log('[InlineItemPicker v2.0] Post-render hooks installed.');
+        console.log('[InlineItemPicker v2.1] Post-render hooks installed.');
     }
 
     function injectAllPickersDesktop() {
@@ -662,20 +673,12 @@
             subtree: true,
             attributeFilter: ['data-qe-locked', 'disabled']
         });
-        console.log('[InlineItemPicker v2.0] Lock-state observer attached.');
+        console.log('[InlineItemPicker v2.1] Lock-state observer attached.');
     }
 
 
     // ----------------------------------------------------------
     // 10. WRAP window.addItem()
-    //
-    //  v2.0: Instead of letting addItem() commit the first product
-    //  key as the default type, we:
-    //    1. Call the original addItem() (which adds a line item
-    //       with whatever the default type is)
-    //    2. Immediately overwrite that type with SENTINEL
-    //    3. Inject the picker with auto-open so the user's first
-    //       action is choosing a product
     // ----------------------------------------------------------
     function patchAddItem() {
         if (typeof window.addItem !== 'function') {
@@ -685,15 +688,13 @@
         var _origAddItem = window.addItem;
         window.addItem = function () {
             _origAddItem.apply(this, arguments);
-            // Overwrite the committed default type with the sentinel
             if (typeof currentQuote !== 'undefined' &&
                 currentQuote.lineItems &&
                 currentQuote.lineItems.length > 0) {
                 var idx = currentQuote.lineItems.length - 1;
                 currentQuote.lineItems[idx].type   = SENTINEL;
                 currentQuote.lineItems[idx].color  = '';
-                currentQuote.lineItems[idx].length = '';
-                // Re-render so the row shows the sentinel state
+                currentQuote.lineItems[idx].length = null;
                 if (_rawRenderDesktop) {
                     try { _rawRenderDesktop(); } catch(e) {}
                 }
@@ -704,10 +705,9 @@
                     window.updateTotalAndFasteners();
                 }
             }
-            // Inject picker and auto-open it
             injectPickerIntoLastRow(true);
         };
-        console.log('[InlineItemPicker v2.0] addItem() patched.');
+        console.log('[InlineItemPicker v2.1] addItem() patched.');
     }
 
 
@@ -731,7 +731,7 @@
     function init() {
         waitForRenderFunctions();
         observeLockChanges();
-        console.log('[InlineItemPicker v2.0] Initialized.');
+        console.log('[InlineItemPicker v2.1] Initialized.');
     }
 
     if (document.readyState === 'loading') {
