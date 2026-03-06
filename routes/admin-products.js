@@ -4,7 +4,7 @@
 // ============================================================
 const express = require('express');
 const router = express.Router();
-const { readJSON, writeJSON, PRODUCTS_FILE, generateId } = require('../lib/helpers');
+const { readJSON, writeJSON, PRODUCTS_FILE, DEALERS_FILE, generateId } = require('../lib/helpers');
 
 // Default seed products (used if products.json is empty/missing)
 const SEED_PRODUCTS = [
@@ -91,6 +91,7 @@ router.put('/:id', (req, res) => {
 
     const updates = req.body;
     const product = products[idx];
+    const oldBasePrice = product.basePrice;
 
     // Updateable fields
     if (updates.name !== undefined) product.name = updates.name.trim();
@@ -104,7 +105,85 @@ router.put('/:id', (req, res) => {
     product.updatedAt = new Date().toISOString();
     products[idx] = product;
     writeJSON(PRODUCTS_FILE, products);
-    res.json(product);
+
+    // ----------------------------------------------------------
+    // CASCADE: If basePrice changed, update all dealers whose
+    // pricing for this product still matches the OLD basePrice.
+    //
+    // Logic: A dealer whose pricing[productId] === oldBasePrice
+    // was never given a custom price; they were on the default.
+    // Those dealers should follow the new base price.
+    //
+    // A dealer whose pricing[productId] differs from oldBasePrice
+    // has a deliberate custom price and is NOT touched.
+    // ----------------------------------------------------------
+    let dealersCascaded = 0;
+    let dealersSkipped = 0;
+
+    if (updates.basePrice !== undefined && product.basePrice !== oldBasePrice) {
+        const productId = product.id;
+        const newBasePrice = product.basePrice;
+        const roundedOld = Math.round(oldBasePrice * 100) / 100;
+
+        try {
+            const dealers = readJSON(DEALERS_FILE);
+            let dealersChanged = false;
+
+            dealers.forEach(dealer => {
+                if (dealer.isDeleted) return;
+                if (!dealer.pricing) return;
+
+                const dealerCurrentPrice = dealer.pricing[productId];
+
+                // Case 1: Dealer has no entry for this product (undefined).
+                // They get the basePrice from products.json via getDealerPrice()
+                // fallback, so no action needed. But if they DO have an entry
+                // that equals the old base, update it.
+                if (dealerCurrentPrice === undefined) {
+                    // No explicit entry; getDealerPrice() will use the new
+                    // basePrice from products.json automatically. No change needed.
+                    return;
+                }
+
+                const roundedDealerPrice = Math.round(dealerCurrentPrice * 100) / 100;
+
+                if (roundedDealerPrice === roundedOld) {
+                    // Dealer was on the default base price; cascade the update
+                    dealer.pricing[productId] = newBasePrice;
+                    dealersCascaded++;
+                    dealersChanged = true;
+                } else {
+                    // Dealer has a custom price; leave it alone
+                    dealersSkipped++;
+                }
+            });
+
+            if (dealersChanged) {
+                writeJSON(DEALERS_FILE, dealers);
+                console.log(
+                    '[Admin Products] Base price cascade for "' + productId + '": $' +
+                    oldBasePrice.toFixed(2) + ' -> $' + newBasePrice.toFixed(2) +
+                    ' | ' + dealersCascaded + ' dealer(s) updated, ' +
+                    dealersSkipped + ' dealer(s) skipped (custom pricing)'
+                );
+            }
+        } catch (err) {
+            console.error('[Admin Products] Cascade failed for "' + product.id + '":', err.message);
+            // Don't fail the whole request; the product itself was saved
+        }
+    }
+
+    res.json({
+        product: product,
+        cascade: (updates.basePrice !== undefined && product.basePrice !== oldBasePrice)
+            ? {
+                dealersUpdated: dealersCascaded,
+                dealersSkipped: dealersSkipped,
+                oldBasePrice: oldBasePrice,
+                newBasePrice: product.basePrice
+            }
+            : null
+    });
 });
 
 // DELETE /api/admin/products/:id - Remove a product
