@@ -1,8 +1,16 @@
 // ============================================================
-// AmeriDex Dealer Portal - API Integration Patch v2.22
-// Date: 2026-03-02
+// AmeriDex Dealer Portal - API Integration Patch v2.23
+// Date: 2026-03-05
 // ============================================================
 // REQUIRES: ameridex-patches.js (v1.0+) loaded first
+//
+// v2.23 Changes (2026-03-05):
+//   - FIX: applyTierPricing() now calls window.backupPrices()
+//     after updating PRODUCTS and PRODUCT_CONFIG from the server.
+//     This prevents ameridex-pricing-fix.js healUndefinedPrices()
+//     from reverting server prices back to stale hardcoded values.
+//   - ADD: Dispatches 'ameridex-prices-loaded' event after tier
+//     pricing is applied so other scripts can react.
 //
 // v2.22 Changes (2026-03-02):
 //   - FIX: loadQuoteFromUrlParam() now ALWAYS waits for the
@@ -123,6 +131,17 @@
             window.dispatchEvent(evt);
         }
         console.log('[Auth] Dispatched ameridex-login event (role: ' + (_currentUser ? _currentUser.role : 'unknown') + ')');
+    }
+
+    function dispatchPricesLoadedEvent() {
+        try {
+            window.dispatchEvent(new Event('ameridex-prices-loaded'));
+        } catch (e) {
+            var evt = document.createEvent('Event');
+            evt.initEvent('ameridex-prices-loaded', true, true);
+            window.dispatchEvent(evt);
+        }
+        console.log('[Pricing] Dispatched ameridex-prices-loaded event.');
     }
 
 
@@ -364,7 +383,14 @@
 
 
     // ----------------------------------------------------------
-    // 5. TIER PRICING
+    // 5. TIER PRICING (v2.23)
+    //
+    // v2.23 FIX: After updating PRODUCTS and PRODUCT_CONFIG from
+    // the server, we now:
+    //   a) Call window.backupPrices() so ameridex-pricing-fix.js
+    //      has the correct server prices as its backup, not the
+    //      stale hardcoded values from dealer-portal.html.
+    //   b) Dispatch 'ameridex-prices-loaded' event.
     // ----------------------------------------------------------
     function isValidPrice(val) {
         if (val === undefined || val === null) return false;
@@ -392,6 +418,18 @@
                 });
                 window._currentTier = data.tier;
                 console.log('[Pricing] Tier:', data.tier.label, '(x' + data.tier.multiplier + ')');
+
+                // v2.23 FIX: Re-snapshot prices AFTER server data is applied.
+                // This prevents healUndefinedPrices() from reverting to stale
+                // hardcoded values.
+                if (typeof window.backupPrices === 'function') {
+                    window.backupPrices();
+                    console.log('[Pricing v2.23] backupPrices() refreshed with server prices.');
+                }
+
+                // Notify other scripts that fresh prices are available
+                dispatchPricesLoadedEvent();
+
                 if (window.currentQuote.lineItems.length > 0) { render(); updateTotalAndFasteners(); }
             })
             .catch(function (err) { console.warn('[Pricing] Could not load tier pricing:', err.message); });
@@ -1052,5 +1090,5 @@
     if (_authToken) tryResumeSession();
     loadQuoteFromUrlParam();
 
-    console.log('[AmeriDex API] v2.22 loaded.');
+    console.log('[AmeriDex API] v2.23 loaded.');
 })();
