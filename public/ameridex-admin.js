@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - Admin Panel v2.1
+// AmeriDex Dealer Portal - Admin Panel v2.2
 // Date: 2026-03-05
 // ============================================================
 // REQUIRES: ameridex-api.js (v2.1+) loaded first
@@ -8,6 +8,14 @@
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
 //   <script src="ameridex-admin.js"></script>
+//
+// v2.2 Changes (2026-03-05):
+//   - FIX: saveEditProduct() now checks for result.cascade from
+//     the server (Fix 1 added cascade data to PUT /api/admin/products/:id
+//     response) and displays feedback about how many dealers were
+//     updated vs. skipped when a base price change occurs.
+//   - Example alert: 'Product "Grooved Boards" updated! Cascade:
+//     12 dealers updated to $6.50, 3 skipped (custom pricing).'
 //
 // v2.1 Changes (2026-03-05):
 //   - FIX: syncProductGlobals() now calls
@@ -1164,6 +1172,14 @@
         console.log('[Admin v2.1] syncProductGlobals: id="' + productId + '" name="' + newName + '" basePrice=' + newBasePrice + ' unit=' + newUnit);
     }
 
+    // ----------------------------------------------------------
+    // SAVE EDIT PRODUCT (v2.2)
+    //
+    // v2.2 FIX: Check for result.cascade in the server response.
+    // If present, it means Fix 1 cascaded the base price change to
+    // dealers. Display feedback about how many dealers were updated
+    // vs. skipped (custom pricing).
+    // ----------------------------------------------------------
     function saveEditProduct(id) {
         var nameEl = document.getElementById('edit-name-' + id);
         var priceEl = document.getElementById('edit-price-' + id);
@@ -1198,9 +1214,18 @@
             category: newCat,
             tierOverrides: tierOverrides
         })
-            .then(function () {
+            .then(function (result) {
                 syncProductGlobals(id, newName, Number(newPrice), newUnit, newCat);
-                showAlert('admin-product-alert', 'Product "' + esc(newName) + '" updated successfully!', 'success');
+
+                // v2.2: Build success message with cascade info if present
+                var msg = 'Product "' + esc(newName) + '" updated successfully!';
+                if (result && result.cascade) {
+                    var c = result.cascade;
+                    msg += ' <strong>Cascade:</strong> ' + c.dealersUpdated + ' dealer(s) updated to $' +
+                           c.newBasePrice.toFixed(2) + ', ' + c.dealersSkipped + ' skipped (custom pricing).';
+                }
+
+                showAlert('admin-product-alert', msg, 'success');
                 loadProducts();
                 refreshPricingNow();
             })
@@ -1600,5 +1625,5 @@
     }
 
 
-    console.log('[AmeriDex Admin] v2.1 loaded.');
+    console.log('[AmeriDex Admin] v2.2 loaded.');
 })();
