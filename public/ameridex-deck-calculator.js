@@ -710,25 +710,72 @@
             itemsAdded.push(fasteners.plugBoxes + ' box(es) plugs (' + fasteners.totalPlugs.toLocaleString() + ' total)');
         }
 
-        // 4. Picture frame solid edge boards (only if checked)
-        if (window.currentQuote.options && window.currentQuote.options.pictureFrame) {
+        // 4. Picture frame solid edge boards
+        var pfOpt = window.currentQuote.options && window.currentQuote.options.pictureFrame;
+        // Backward compat: boolean true means enabled single frame
+        if (pfOpt === true) pfOpt = { enabled: true, type: 'single', color: null };
+        if (pfOpt && pfOpt.enabled) {
             var perimeterFt = 2 * (currentCalcResult.coverageFt + currentCalcResult.spanFt);
             var pfBoardLen = currentCalcResult.spanFt <= 12 ? 12 :
                              currentCalcResult.spanFt <= 16 ? 16 : 20;
             var pfBoards = Math.ceil(perimeterFt / pfBoardLen);
+            if (pfOpt.type === 'double') pfBoards = pfBoards * 2;
+            var pfColor = pfOpt.color || color;
 
             window.currentQuote.lineItems.push({
                 type: 'solid',
-                color: color,
+                color: pfColor,
                 length: pfBoardLen,
                 customLength: null,
                 qty: pfBoards,
                 customDesc: '',
                 customUnitPrice: 0,
                 _source: 'calculator',
-                _sourceNote: 'Picture frame: ' + Math.round(perimeterFt) + ' LF perimeter'
+                _sourceNote: 'Picture frame (' + (pfOpt.type === 'double' ? 'double' : 'single') + '): ' + Math.round(perimeterFt) + ' LF perimeter'
             });
-            itemsAdded.push(pfBoards + ' solid edge boards (picture frame)');
+            itemsAdded.push(pfBoards + ' solid edge boards (picture frame, ' + (pfOpt.type === 'double' ? 'double' : 'single') + ')');
+        }
+
+        // 5. Stair boards
+        var stOpt = window.currentQuote.options && window.currentQuote.options.stairs;
+        // Backward compat: boolean true means enabled with defaults
+        if (stOpt === true) stOpt = { enabled: true, steps: 1, treadsPerStep: 1, risers: false, color: null };
+        if (stOpt && stOpt.enabled) {
+            var stairWidth = currentCalcResult.coverageFt; // "along house" dimension
+            var stBoardLen = stairWidth <= 12 ? 12 : stairWidth <= 16 ? 16 : 20;
+            var stColor = stOpt.color || color;
+            var steps = stOpt.steps || 1;
+            var treadsPerStep = stOpt.treadsPerStep || 1;
+            var treadBoards = steps * treadsPerStep;
+
+            window.currentQuote.lineItems.push({
+                type: 'solid',
+                color: stColor,
+                length: stBoardLen,
+                customLength: null,
+                qty: treadBoards,
+                customDesc: '',
+                customUnitPrice: 0,
+                _source: 'calculator',
+                _sourceNote: 'Stair treads: ' + steps + ' step(s) x ' + treadsPerStep + ' tread(s)'
+            });
+            itemsAdded.push(treadBoards + ' solid edge boards (stair treads)');
+
+            if (stOpt.risers) {
+                var riserBoards = steps;
+                window.currentQuote.lineItems.push({
+                    type: 'solid',
+                    color: stColor,
+                    length: stBoardLen,
+                    customLength: null,
+                    qty: riserBoards,
+                    customDesc: '',
+                    customUnitPrice: 0,
+                    _source: 'calculator',
+                    _sourceNote: 'Stair risers: ' + steps + ' riser(s)'
+                });
+                itemsAdded.push(riserBoards + ' solid edge boards (stair risers)');
+            }
         }
 
         // Clean up and re-render

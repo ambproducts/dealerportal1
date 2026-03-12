@@ -311,6 +311,40 @@
     .check-row label { cursor: pointer; font-size: 1rem; }
     .note-inline { margin-left: 1.8rem; font-size: 0.85rem; color: #b45309; }
 
+    /* Option config panels */
+    .option-config-panel {
+        margin-left: 1.8rem;
+        margin-top: 0.4rem;
+        padding: 0.75rem 0.9rem;
+        background: #f9fafb;
+        border: 1px solid var(--border-subtle);
+        border-radius: 10px;
+        display: none;
+        animation: panelSlideDown 0.2s ease-out;
+    }
+    .option-config-panel.visible { display: block; }
+    @keyframes panelSlideDown { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+    .option-config-panel .config-row { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
+    .option-config-panel .config-row:last-child { margin-bottom: 0; }
+    .option-config-panel .config-label { font-size: 0.85rem; color: var(--text-muted); min-width: 80px; }
+    .option-config-panel select { padding: 0.3rem 0.5rem; border: 1px solid var(--border-subtle); border-radius: var(--radius-field); font-size: 0.85rem; background: white; }
+    .option-config-panel .note-inline { margin-left: 0; margin-top: 0.3rem; }
+
+    /* Mini color swatches for option panels */
+    .mini-color-swatches { display: flex; gap: 0.35rem; flex-wrap: wrap; align-items: center; }
+    .mini-swatch {
+        width: 32px; height: 32px; border-radius: 6px; cursor: pointer;
+        border: 2px solid transparent; background-size: cover; background-position: center;
+        transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+    }
+    .mini-swatch:hover { transform: translateY(-1px); border-color: #93c5fd; }
+    .mini-swatch.active { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(37,99,235,0.2); }
+    .mini-swatch-label { font-size: 0.78rem; color: var(--primary); font-weight: 500; margin-left: 0.25rem; }
+    @media (max-width: 768px) {
+        .option-config-panel { margin-left: 0; margin-top: 0.5rem; }
+        .mini-swatch { width: 28px; height: 28px; }
+    }
+
     .fastener-block { margin-top: 0.9rem; padding: 0.8rem 0.9rem; background-color: var(--primary-soft); border-radius: 10px; border: 1px dashed #bfdbfe; font-size: 0.88rem; color: #1d4ed8; }
     .fastener-warning { color: #b91c1c; font-size: 0.82rem; margin-top: 0.5rem; }
 
@@ -1007,16 +1041,64 @@
                     </div>
                 </div>
                 <div class="inline-checks">
+                    <!-- Picture Framing -->
                     <div class="check-row">
                         <input type="checkbox" id="pic-frame">
                         <label for="pic-frame">Picture Framing</label>
                     </div>
-                    <div id="pic-frame-note" class="note-inline" style="display:none;">Add Solid Edge boards to frame the deck perimeter.</div>
+                    <div id="pic-frame-config" class="option-config-panel">
+                        <div class="note-inline" style="display:block; margin-bottom:0.5rem;">Add Solid Edge boards to frame the deck perimeter.</div>
+                        <div class="config-row">
+                            <span class="config-label">Frame type:</span>
+                            <select id="pf-type">
+                                <option value="single">Single board</option>
+                                <option value="double">Double board</option>
+                            </select>
+                        </div>
+                        <div class="config-row">
+                            <span class="config-label">Frame color:</span>
+                            <div class="mini-color-swatches" id="pf-color-swatches"></div>
+                        </div>
+                        <div class="config-row">
+                            <span class="mini-swatch-label" id="pf-color-label">Using deck color</span>
+                        </div>
+                    </div>
+
+                    <!-- Stairs -->
                     <div class="check-row" style="margin-top:0.2rem;">
                         <input type="checkbox" id="stairs">
                         <label for="stairs">Stairs</label>
                     </div>
-                    <div id="stairs-note" class="note-inline" style="display:none;">Add Solid Edge boards for stair treads and risers.</div>
+                    <div id="stairs-config" class="option-config-panel">
+                        <div class="note-inline" style="display:block; margin-bottom:0.5rem;">Add Solid Edge boards for stair treads and risers.</div>
+                        <div class="config-row">
+                            <span class="config-label">Steps:</span>
+                            <select id="stair-steps">
+                                <option value="1">1</option>
+                                <option value="2">2</option>
+                                <option value="3">3</option>
+                            </select>
+                        </div>
+                        <div class="config-row">
+                            <span class="config-label">Treads/step:</span>
+                            <select id="stair-treads">
+                                <option value="1">1 board</option>
+                                <option value="2">2 boards</option>
+                                <option value="3">3 boards</option>
+                            </select>
+                        </div>
+                        <div class="config-row">
+                            <input type="checkbox" id="stair-risers" style="width:16px;height:16px;cursor:pointer;">
+                            <label for="stair-risers" style="font-size:0.85rem;cursor:pointer;">Include risers</label>
+                        </div>
+                        <div class="config-row">
+                            <span class="config-label">Stair color:</span>
+                            <div class="mini-color-swatches" id="stair-color-swatches"></div>
+                        </div>
+                        <div class="config-row">
+                            <span class="mini-swatch-label" id="stair-color-label">Using deck color</span>
+                        </div>
+                    </div>
                 </div>
                 <div id="fastener-hint" class="fastener-block" style="display:none;"></div>
                 <div id="desktop-table-container">
@@ -1274,7 +1356,10 @@ var currentQuote = {
     status: 'draft',
     customer: { name: '', email: '', zipCode: '', company: '', phone: '' },
     lineItems: [],
-    options: { pictureFrame: false, stairs: false },
+    options: {
+        pictureFrame: { enabled: false, type: 'single', color: null },
+        stairs: { enabled: false, steps: 1, treadsPerStep: 1, risers: false, color: null }
+    },
     specialInstructions: '',
     internalNotes: '',
     shippingAddress: '',
@@ -2137,6 +2222,50 @@ function setButtonLoading(btn, isLoading) {
     }
 }
 
+// ============================================
+// OPTION PANEL HELPERS
+// ============================================
+function buildMiniColorSwatches(containerId, labelId) {
+    var container = document.getElementById(containerId);
+    if (!container) return;
+    // "Use deck color" swatch (no image, just a default indicator)
+    var defSwatch = document.createElement('div');
+    defSwatch.className = 'mini-swatch active';
+    defSwatch.title = 'Use deck color';
+    defSwatch.dataset.color = '';
+    defSwatch.style.background = 'linear-gradient(135deg, #e5e7eb 50%, #d1d5db 50%)';
+    defSwatch.style.position = 'relative';
+    defSwatch.innerHTML = '<span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;color:#6b7280;font-weight:600;">Auto</span>';
+    defSwatch.onclick = function() { selectMiniSwatch(containerId, labelId, '', 'Using deck color'); };
+    container.appendChild(defSwatch);
+
+    COLORS.forEach(function(c) {
+        var sw = document.createElement('div');
+        sw.className = 'mini-swatch';
+        sw.title = c;
+        sw.dataset.color = c;
+        sw.style.backgroundImage = 'url(' + (COLOR_IMAGES[c] || c + '.png') + ')';
+        sw.onclick = function() { selectMiniSwatch(containerId, labelId, c, c); };
+        container.appendChild(sw);
+    });
+    container.dataset.selected = '';
+}
+
+function selectMiniSwatch(containerId, labelId, colorVal, labelText) {
+    var container = document.getElementById(containerId);
+    var swatches = container.querySelectorAll('.mini-swatch');
+    swatches.forEach(function(s) { s.classList.toggle('active', s.dataset.color === colorVal); });
+    container.dataset.selected = colorVal;
+    var lbl = document.getElementById(labelId);
+    if (lbl) lbl.textContent = labelText;
+}
+
+function setMiniSwatchSelection(containerId, colorVal) {
+    var labelId = containerId === 'pf-color-swatches' ? 'pf-color-label' : 'stair-color-label';
+    var labelText = colorVal ? colorVal : 'Using deck color';
+    selectMiniSwatch(containerId, labelId, colorVal || '', labelText);
+}
+
 function saveCurrentQuote() {
     if (!currentQuote.quoteId) currentQuote.quoteId = generateQuoteNumber();
     currentQuote.customer.name = document.getElementById('cust-name').value.trim();
@@ -2144,8 +2273,18 @@ function saveCurrentQuote() {
     currentQuote.customer.zipCode = document.getElementById('cust-zip').value.trim();
     currentQuote.customer.company = document.getElementById('cust-company').value.trim();
     currentQuote.customer.phone = document.getElementById('cust-phone').value.trim();
-    currentQuote.options.pictureFrame = document.getElementById('pic-frame').checked;
-    currentQuote.options.stairs = document.getElementById('stairs').checked;
+    currentQuote.options.pictureFrame = {
+        enabled: document.getElementById('pic-frame').checked,
+        type: document.getElementById('pf-type').value,
+        color: document.getElementById('pf-color-swatches').dataset.selected || null
+    };
+    currentQuote.options.stairs = {
+        enabled: document.getElementById('stairs').checked,
+        steps: parseInt(document.getElementById('stair-steps').value),
+        treadsPerStep: parseInt(document.getElementById('stair-treads').value),
+        risers: document.getElementById('stair-risers').checked,
+        color: document.getElementById('stair-color-swatches').dataset.selected || null
+    };
     currentQuote.specialInstructions = document.getElementById('special-instr').value;
     currentQuote.internalNotes = document.getElementById('internal-notes').value;
     currentQuote.shippingAddress = document.getElementById('ship-addr').value;
@@ -2160,14 +2299,49 @@ function saveCurrentQuote() {
     return currentQuote.quoteId;
 }
 
+function normalizeOptions(opts) {
+    if (!opts) opts = {};
+    // Backward compat: boolean pictureFrame -> object
+    if (typeof opts.pictureFrame === 'boolean') {
+        opts.pictureFrame = { enabled: opts.pictureFrame, type: 'single', color: null };
+    } else if (!opts.pictureFrame) {
+        opts.pictureFrame = { enabled: false, type: 'single', color: null };
+    }
+    // Backward compat: boolean stairs -> object
+    if (typeof opts.stairs === 'boolean') {
+        opts.stairs = { enabled: opts.stairs, steps: 1, treadsPerStep: 1, risers: false, color: null };
+    } else if (!opts.stairs) {
+        opts.stairs = { enabled: false, steps: 1, treadsPerStep: 1, risers: false, color: null };
+    }
+    return opts;
+}
+
+function restoreOptionPanels() {
+    var pf = currentQuote.options.pictureFrame;
+    document.getElementById('pic-frame').checked = pf.enabled;
+    document.getElementById('pf-type').value = pf.type || 'single';
+    setMiniSwatchSelection('pf-color-swatches', pf.color);
+    document.getElementById('pic-frame-config').classList.toggle('visible', pf.enabled);
+
+    var st = currentQuote.options.stairs;
+    document.getElementById('stairs').checked = st.enabled;
+    document.getElementById('stair-steps').value = st.steps || 1;
+    document.getElementById('stair-treads').value = st.treadsPerStep || 1;
+    document.getElementById('stair-risers').checked = st.risers || false;
+    setMiniSwatchSelection('stair-color-swatches', st.color);
+    document.getElementById('stairs-config').classList.toggle('visible', st.enabled);
+}
+
 function loadQuote(idx) {
     if (currentQuote.lineItems.length > 0 && !confirm('Loading this quote will replace your current work. Continue?')) return;
     currentQuote = JSON.parse(JSON.stringify(savedQuotes[idx]));
+    currentQuote.options = normalizeOptions(currentQuote.options);
     document.getElementById('cust-name').value = currentQuote.customer.name || '';
     document.getElementById('cust-email').value = currentQuote.customer.email || '';
     document.getElementById('cust-zip').value = currentQuote.customer.zipCode || '';
     document.getElementById('cust-company').value = currentQuote.customer.company || '';
     document.getElementById('cust-phone').value = currentQuote.customer.phone || '';
+    restoreOptionPanels();
     render();
     updateTotalAndFasteners();
     updateCustomerProgress();
@@ -2194,7 +2368,10 @@ function resetFormOnly() {
         status: 'draft',
         customer: { name: '', email: '', zipCode: '', company: '', phone: '' },
         lineItems: [],
-        options: { pictureFrame: false, stairs: false },
+        options: {
+            pictureFrame: { enabled: false, type: 'single', color: null },
+            stairs: { enabled: false, steps: 1, treadsPerStep: 1, risers: false, color: null }
+        },
         specialInstructions: '',
         internalNotes: '',
         shippingAddress: '',
@@ -2207,16 +2384,22 @@ function resetFormOnly() {
     document.getElementById('cust-zip').value = '';
     document.getElementById('cust-company').value = '';
     document.getElementById('cust-phone').value = '';
-    document.getElementById('pic-frame').checked = false;
-    document.getElementById('stairs').checked = false;
     document.getElementById('special-instr').value = '';
     document.getElementById('internal-notes').value = '';
     document.getElementById('ship-addr').value = '';
     document.getElementById('del-date').value = '';
 
-    // Hide the option notes
-    document.getElementById('pic-frame-note').style.display = 'none';
-    document.getElementById('stairs-note').style.display = 'none';
+    // Reset option panels
+    document.getElementById('pic-frame').checked = false;
+    document.getElementById('pic-frame-config').classList.remove('visible');
+    document.getElementById('pf-type').value = 'single';
+    setMiniSwatchSelection('pf-color-swatches', null);
+    document.getElementById('stairs').checked = false;
+    document.getElementById('stairs-config').classList.remove('visible');
+    document.getElementById('stair-steps').value = '1';
+    document.getElementById('stair-treads').value = '1';
+    document.getElementById('stair-risers').checked = false;
+    setMiniSwatchSelection('stair-color-swatches', null);
 
     // Clear calculator results
     document.getElementById('calc-result-container').style.display = 'none';
@@ -2327,12 +2510,23 @@ function generatePrintHTML(type) {
     if (phone) html += '<tr><td style="padding: 3px 10px 3px 0; color: #666;"><strong>Phone:</strong></td><td>' + phone + '</td></tr>';
     html += '</table></div>';
 
-    const hasPicFrame = document.getElementById('pic-frame').checked;
-    const hasStairs = document.getElementById('stairs').checked;
+    const pfOpt = currentQuote.options.pictureFrame || {};
+    const stOpt = currentQuote.options.stairs || {};
+    const hasPicFrame = pfOpt.enabled;
+    const hasStairs = stOpt.enabled;
     if (hasPicFrame || hasStairs) {
         html += '<div style="margin-bottom: 20px;"><h2 style="color: #374151; font-size: 1.1rem; border-bottom: 1px solid #ddd; padding-bottom: 5px;">Options</h2>';
-        if (hasPicFrame) html += '<p style="margin: 5px 0;">✓ Picture Framing</p>';
-        if (hasStairs) html += '<p style="margin: 5px 0;">✓ Stairs</p>';
+        if (hasPicFrame) {
+            var pfDesc = '✓ Picture Framing — ' + (pfOpt.type === 'double' ? 'Double' : 'Single') + ' board';
+            if (pfOpt.color) pfDesc += ', ' + pfOpt.color;
+            html += '<p style="margin: 5px 0;">' + pfDesc + '</p>';
+        }
+        if (hasStairs) {
+            var stDesc = '✓ Stairs — ' + (stOpt.steps || 1) + ' step(s), ' + (stOpt.treadsPerStep || 1) + ' tread(s)/step';
+            if (stOpt.risers) stDesc += ', with risers';
+            if (stOpt.color) stDesc += ', ' + stOpt.color;
+            html += '<p style="margin: 5px 0;">' + stDesc + '</p>';
+        }
         html += '</div>';
     }
 
@@ -2689,9 +2883,17 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('cust-zip').oninput = updateCustomerProgress;
     document.addEventListener('click', e => { if (!e.target.closest('.field-with-lookup')) document.getElementById('customer-lookup-results').classList.remove('visible'); });
 
-    // Options
-    document.getElementById('pic-frame').onchange = e => { document.getElementById('pic-frame-note').style.display = e.target.checked ? 'block' : 'none'; };
-    document.getElementById('stairs').onchange = e => { document.getElementById('stairs-note').style.display = e.target.checked ? 'block' : 'none'; };
+    // Options — config panel toggles
+    document.getElementById('pic-frame').onchange = function(e) {
+        document.getElementById('pic-frame-config').classList.toggle('visible', e.target.checked);
+    };
+    document.getElementById('stairs').onchange = function(e) {
+        document.getElementById('stairs-config').classList.toggle('visible', e.target.checked);
+    };
+
+    // Build mini color swatches for option panels
+    buildMiniColorSwatches('pf-color-swatches', 'pf-color-label');
+    buildMiniColorSwatches('stair-color-swatches', 'stair-color-label');
 
     // Add item
     document.getElementById('add-row').onclick = () => { currentQuote.lineItems.push({ type: 'system', color: selectedColor1, length: 16, customLength: null, qty: 1, customDesc: '', customUnitPrice: 0 }); deletedItems = []; render(); updateTotalAndFasteners(); };
