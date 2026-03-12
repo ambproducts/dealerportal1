@@ -1,7 +1,7 @@
 // ============================================================
-// AmeriDex Dealer Portal - Advanced Deck Calculator v1.4.1
+// AmeriDex Dealer Portal - Advanced Deck Calculator v2.0.0
 // File: ameridex-deck-calculator.js
-// Date: 2026-02-28
+// Date: 2026-03-12
 // ============================================================
 // The AmeriDex System = Grooved deck boards + Dexerdry seal
 // integrated at $8/ft. The calculator defaults to System boards.
@@ -19,7 +19,9 @@
 //     it saves significant waste
 //   - Screw calculation: boardRows x joists x 2 per crossing
 //   - Plug calculation: 1 plug per screw (375/box each)
-//   - Pushes boards + screws + plugs + picture frame (if on)
+//   - Pushes boards + screws + plugs + picture frame + breaker board + stairs (if on)
+//   - Polygon drawing tool for visual deck shape input
+//   - Breaker board auto-suggestion for large decks (span >= 16')
 // ============================================================
 
 (function () {
@@ -574,7 +576,7 @@
         var s = fasteners.screwBoxes === 1 ? '' : 'es';
         var p = fasteners.plugBoxes === 1 ? '' : 'es';
 
-        container.innerHTML =
+        var html =
             '<strong>Fasteners for ' + opt.label + ':</strong><br>' +
             'Screws: <strong>' + fasteners.totalScrews.toLocaleString() + '</strong> total = ' +
             '<strong>' + fasteners.screwBoxes + ' box' + s + '</strong> (375/box)<br>' +
@@ -584,6 +586,49 @@
                 opt.boardRows + ' board rows &times; ' + result.joistCount + ' joists &times; ' +
                 SCREWS_PER_CROSSING + ' screws per crossing = ' + fasteners.totalScrews.toLocaleString() + ' screws' +
             '</span>';
+
+        // Additional Materials Preview
+        var additionalItems = [];
+        var pfOpt = window.currentQuote && window.currentQuote.options && window.currentQuote.options.pictureFrame;
+        if (pfOpt === true) pfOpt = { enabled: true, type: 'single', color: null };
+        if (pfOpt && pfOpt.enabled) {
+            var perimeterFt = 2 * (result.coverageFt + result.spanFt);
+            var pfBoardLen = result.spanFt <= 12 ? 12 : result.spanFt <= 16 ? 16 : 20;
+            var pfBoards = Math.ceil(perimeterFt / pfBoardLen);
+            if (pfOpt.type === 'double') pfBoards = pfBoards * 2;
+            additionalItems.push('Picture frame: <strong>' + pfBoards + '</strong> solid edge board' + (pfBoards !== 1 ? 's' : '') + ' (' + (pfOpt.type === 'double' ? 'double' : 'single') + ')');
+        }
+
+        var bbOpt = window.currentQuote && window.currentQuote.options && window.currentQuote.options.breakerBoard;
+        if (bbOpt && bbOpt.enabled) {
+            var bbCoverage = result.coverageFt;
+            var bbBoardLen = bbCoverage <= 12 ? 12 : bbCoverage <= 16 ? 16 : 20;
+            var bbBoardCount = Math.ceil(bbCoverage / bbBoardLen);
+            additionalItems.push('Breaker board: <strong>' + bbBoardCount + '</strong> solid edge board' + (bbBoardCount !== 1 ? 's' : ''));
+        }
+
+        var stOpt = window.currentQuote && window.currentQuote.options && window.currentQuote.options.stairs;
+        if (stOpt === true) stOpt = { enabled: true, steps: 1, treadsPerStep: 1, risers: false, color: null, stairWidth: null };
+        if (stOpt && stOpt.enabled) {
+            var steps = stOpt.steps || 1;
+            var treadsPerStep = stOpt.treadsPerStep || 1;
+            var treadBoards = steps * treadsPerStep;
+            var riserBoards = stOpt.risers ? steps : 0;
+            var stairDesc = 'Stairs: <strong>' + treadBoards + '</strong> tread board' + (treadBoards !== 1 ? 's' : '');
+            if (riserBoards > 0) stairDesc += ' + <strong>' + riserBoards + '</strong> riser board' + (riserBoards !== 1 ? 's' : '');
+            additionalItems.push(stairDesc);
+        }
+
+        if (additionalItems.length > 0) {
+            html += '<div style="margin-top:0.75rem;padding-top:0.6rem;border-top:1px solid #86efac">' +
+                '<strong>Additional Materials:</strong><br>';
+            additionalItems.forEach(function(item) {
+                html += '\u2022 ' + item + '<br>';
+            });
+            html += '</div>';
+        }
+
+        container.innerHTML = html;
         container.style.display = 'block';
     }
 
@@ -627,6 +672,26 @@
         renderOptionsTable(currentCalcResult);
         document.getElementById('calc-result-container').style.display = 'block';
         enableAcceptButton();
+
+        // Breaker board auto-suggestion for large decks
+        var breakerCheckbox = document.getElementById('breaker-board');
+        var existingBanner = document.getElementById('breaker-suggestion-banner');
+        if (existingBanner) existingBanner.parentNode.removeChild(existingBanner);
+        if (currentCalcResult.spanFt >= 16 && breakerCheckbox && !breakerCheckbox.checked) {
+            var banner = document.createElement('div');
+            banner.id = 'breaker-suggestion-banner';
+            banner.style.cssText = 'margin-top:0.75rem;padding:0.75rem 1rem;background:#fefce8;border:1px solid #fde68a;border-radius:8px;font-size:0.88rem;color:#92400e;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap';
+            banner.innerHTML = '<span>\uD83D\uDCA1 This deck is ' + currentCalcResult.spanFt + '\' long \u2014 consider adding a breaker board for a cleaner look.</span>' +
+                '<button type="button" class="btn btn-outline btn-sm" id="breaker-suggest-btn" style="font-size:0.8rem;padding:0.25rem 0.75rem;">Add Breaker Board</button>';
+            var fastenerEl = document.getElementById('calc-fastener-summary');
+            if (fastenerEl) fastenerEl.parentNode.insertBefore(banner, fastenerEl.nextSibling);
+            document.getElementById('breaker-suggest-btn').addEventListener('click', function() {
+                breakerCheckbox.checked = true;
+                document.getElementById('breaker-config').classList.add('visible');
+                banner.parentNode.removeChild(banner);
+                breakerCheckbox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            });
+        }
 
         var preview = document.getElementById('board-lines-preview');
         if (preview) preview.className = 'board-lines ' + orientation;
@@ -736,12 +801,34 @@
             itemsAdded.push(pfBoards + ' solid edge boards (picture frame, ' + (pfOpt.type === 'double' ? 'double' : 'single') + ')');
         }
 
-        // 5. Stair boards
+        // 5. Breaker board
+        var bbOpt = window.currentQuote.options && window.currentQuote.options.breakerBoard;
+        if (bbOpt && bbOpt.enabled) {
+            var bbCoverage = currentCalcResult.coverageFt;
+            var bbBoardLen = bbCoverage <= 12 ? 12 : bbCoverage <= 16 ? 16 : 20;
+            var bbBoardCount = Math.ceil(bbCoverage / bbBoardLen);
+            var bbColor = bbOpt.color || color;
+
+            window.currentQuote.lineItems.push({
+                type: 'solid',
+                color: bbColor,
+                length: bbBoardLen,
+                customLength: null,
+                qty: bbBoardCount,
+                customDesc: '',
+                customUnitPrice: 0,
+                _source: 'calculator',
+                _sourceNote: 'Breaker board: ' + Math.round(bbCoverage) + ' LF coverage (' + (bbOpt.position === 'custom' ? bbOpt.customOffset + ' ft offset' : 'center') + ')'
+            });
+            itemsAdded.push(bbBoardCount + ' solid edge board(s) (breaker board)');
+        }
+
+        // 6. Stair boards
         var stOpt = window.currentQuote.options && window.currentQuote.options.stairs;
         // Backward compat: boolean true means enabled with defaults
-        if (stOpt === true) stOpt = { enabled: true, steps: 1, treadsPerStep: 1, risers: false, color: null };
+        if (stOpt === true) stOpt = { enabled: true, steps: 1, treadsPerStep: 1, risers: false, color: null, stairWidth: null };
         if (stOpt && stOpt.enabled) {
-            var stairWidth = currentCalcResult.coverageFt; // "along house" dimension
+            var stairWidth = stOpt.stairWidth || currentCalcResult.coverageFt;
             var stBoardLen = stairWidth <= 12 ? 12 : stairWidth <= 16 ? 16 : 20;
             var stColor = stOpt.color || color;
             var steps = stOpt.steps || 1;
@@ -757,7 +844,7 @@
                 customDesc: '',
                 customUnitPrice: 0,
                 _source: 'calculator',
-                _sourceNote: 'Stair treads: ' + steps + ' step(s) x ' + treadsPerStep + ' tread(s)'
+                _sourceNote: 'Stair treads: ' + steps + ' step(s) x ' + treadsPerStep + ' tread(s)' + (stOpt.stairWidth ? ', ' + stOpt.stairWidth + ' ft wide' : '')
             });
             itemsAdded.push(treadBoards + ' solid edge boards (stair treads)');
 
@@ -797,7 +884,7 @@
 
     // === INITIALIZATION ===
     function init() {
-        console.log('[DeckCalc] Initializing advanced deck calculator v1.4.1');
+        console.log('[DeckCalc] Initializing advanced deck calculator v2.0.0');
 
         // Remove the standalone Select Colors section (now integrated here)
         removeStandaloneColorSection();
@@ -847,6 +934,214 @@
 
         console.log('[DeckCalc] Ready. Board width: ' + BOARD_WIDTH_INCH + '"  Gap: ' + GAP_INCH + '"  Effective: ' + EFFECTIVE_FT.toFixed(6) + ' ft/board');
     }
+
+    // === POLYGON DRAWING TOOL ===
+    var polyState = { vertices: [], scale: 2, closed: false };
+    var polyInitialized = false;
+
+    window.initPolygonTool = function () {
+        if (polyInitialized) return;
+        polyInitialized = true;
+
+        var canvas = document.getElementById('polygon-canvas');
+        if (!canvas) return;
+        var ctx = canvas.getContext('2d');
+        var scaleInput = document.getElementById('polygon-scale');
+        var useBtn = document.getElementById('polygon-use-btn');
+        var clearBtn = document.getElementById('polygon-clear-btn');
+        var dimsDiv = document.getElementById('polygon-dimensions');
+        var alongSpan = document.getElementById('polygon-along');
+        var fromSpan = document.getElementById('polygon-from');
+
+        var SNAP_RADIUS = 10;
+
+        function getScale() {
+            return parseFloat(scaleInput.value) || 2;
+        }
+
+        function getGridSize() {
+            // Grid size in pixels: canvas covers a reasonable number of grid cells
+            return 30;
+        }
+
+        function canvasCoords(e) {
+            var rect = canvas.getBoundingClientRect();
+            var scaleX = canvas.width / rect.width;
+            var scaleY = canvas.height / rect.height;
+            return {
+                x: (e.clientX - rect.left) * scaleX,
+                y: (e.clientY - rect.top) * scaleY
+            };
+        }
+
+        function drawGrid() {
+            var gs = getGridSize();
+            ctx.strokeStyle = '#e5e7eb';
+            ctx.lineWidth = 0.5;
+            for (var x = 0; x <= canvas.width; x += gs) {
+                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+            }
+            for (var y = 0; y <= canvas.height; y += gs) {
+                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+            }
+            // House wall indicator at top
+            ctx.fillStyle = '#6b7280';
+            ctx.fillRect(0, 0, canvas.width, 3);
+            ctx.font = '11px sans-serif';
+            ctx.fillStyle = '#6b7280';
+            ctx.fillText('HOUSE WALL', 5, 14);
+        }
+
+        function dist(a, b) {
+            return Math.sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));
+        }
+
+        function edgeLengthFt(a, b) {
+            var gs = getGridSize();
+            var scale = getScale();
+            var dx = (b.x - a.x) / gs * scale;
+            var dy = (b.y - a.y) / gs * scale;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        function drawEdgeLabel(a, b) {
+            var len = edgeLengthFt(a, b);
+            var mx = (a.x + b.x) / 2;
+            var my = (a.y + b.y) / 2;
+            ctx.font = 'bold 11px sans-serif';
+            ctx.fillStyle = '#1e40af';
+            ctx.textAlign = 'center';
+            ctx.fillText(len.toFixed(1) + ' ft', mx, my - 5);
+            ctx.textAlign = 'left';
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawGrid();
+
+            var verts = polyState.vertices;
+            if (verts.length === 0) return;
+
+            // Draw filled polygon if closed
+            if (polyState.closed && verts.length >= 3) {
+                ctx.beginPath();
+                ctx.moveTo(verts[0].x, verts[0].y);
+                for (var i = 1; i < verts.length; i++) {
+                    ctx.lineTo(verts[i].x, verts[i].y);
+                }
+                ctx.closePath();
+                ctx.fillStyle = 'rgba(37, 99, 235, 0.1)';
+                ctx.fill();
+            }
+
+            // Draw edges
+            ctx.strokeStyle = '#2563eb';
+            ctx.lineWidth = 2;
+            for (var i = 0; i < verts.length - 1; i++) {
+                ctx.beginPath();
+                ctx.moveTo(verts[i].x, verts[i].y);
+                ctx.lineTo(verts[i + 1].x, verts[i + 1].y);
+                ctx.stroke();
+                drawEdgeLabel(verts[i], verts[i + 1]);
+            }
+            if (polyState.closed && verts.length >= 3) {
+                ctx.beginPath();
+                ctx.moveTo(verts[verts.length - 1].x, verts[verts.length - 1].y);
+                ctx.lineTo(verts[0].x, verts[0].y);
+                ctx.stroke();
+                drawEdgeLabel(verts[verts.length - 1], verts[0]);
+            }
+
+            // Draw vertices
+            for (var i = 0; i < verts.length; i++) {
+                ctx.beginPath();
+                ctx.arc(verts[i].x, verts[i].y, 5, 0, Math.PI * 2);
+                ctx.fillStyle = i === 0 ? '#dc2626' : '#2563eb';
+                ctx.fill();
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+        }
+
+        function computeBoundingBox() {
+            var verts = polyState.vertices;
+            if (verts.length < 3 || !polyState.closed) {
+                dimsDiv.style.display = 'none';
+                useBtn.style.display = 'none';
+                return;
+            }
+            var gs = getGridSize();
+            var scale = getScale();
+            var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+            for (var i = 0; i < verts.length; i++) {
+                if (verts[i].x < minX) minX = verts[i].x;
+                if (verts[i].x > maxX) maxX = verts[i].x;
+                if (verts[i].y < minY) minY = verts[i].y;
+                if (verts[i].y > maxY) maxY = verts[i].y;
+            }
+            var alongFt = Math.round(((maxX - minX) / gs * scale) * 10) / 10;
+            var fromFt = Math.round(((maxY - minY) / gs * scale) * 10) / 10;
+            alongSpan.textContent = alongFt;
+            fromSpan.textContent = fromFt;
+            dimsDiv.style.display = '';
+            useBtn.style.display = '';
+        }
+
+        function clearPoly() {
+            polyState.vertices = [];
+            polyState.closed = false;
+            dimsDiv.style.display = 'none';
+            useBtn.style.display = 'none';
+            draw();
+        }
+
+        canvas.addEventListener('click', function (e) {
+            if (polyState.closed) return;
+            var pt = canvasCoords(e);
+            var verts = polyState.vertices;
+
+            // Snap to first vertex to close
+            if (verts.length >= 3) {
+                if (dist(pt, verts[0]) < SNAP_RADIUS) {
+                    polyState.closed = true;
+                    draw();
+                    computeBoundingBox();
+                    return;
+                }
+            }
+
+            verts.push(pt);
+            draw();
+        });
+
+        canvas.addEventListener('dblclick', function (e) {
+            e.preventDefault();
+            if (polyState.closed || polyState.vertices.length < 3) return;
+            polyState.closed = true;
+            draw();
+            computeBoundingBox();
+        });
+
+        clearBtn.addEventListener('click', clearPoly);
+
+        useBtn.addEventListener('click', function () {
+            var along = parseFloat(alongSpan.textContent) || 0;
+            var from = parseFloat(fromSpan.textContent) || 0;
+            if (along > 0 && from > 0) {
+                document.getElementById('deck-len').value = along;
+                document.getElementById('deck-wid').value = from;
+            }
+        });
+
+        scaleInput.addEventListener('change', function () {
+            polyState.scale = getScale();
+            draw();
+            computeBoundingBox();
+        });
+
+        draw();
+    };
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', function () {

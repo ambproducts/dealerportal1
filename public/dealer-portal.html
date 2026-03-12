@@ -911,6 +911,31 @@
                 </div>
                 <div class="card-body-collapsible collapsed" id="calc-body">
                 <div class="form-grid">
+                    <!-- Polygon Drawing Tool -->
+                    <div id="polygon-tool-section" style="display:none;margin-bottom:0.75rem;padding:1rem;background:#f9fafb;border-radius:10px;border:1px solid #e5e7eb;">
+                        <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;">
+                            <label style="font-size:0.9rem;font-weight:600;color:#374151;">Draw Deck Shape</label>
+                            <span style="font-size:0.78rem;color:#6b7280;">Click to place corners. Double-click or click first point to close.</span>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem;">
+                            <span style="font-size:0.85rem;color:#374151;">1 grid square =</span>
+                            <input type="number" id="polygon-scale" min="0.5" step="0.5" value="2" style="width:60px;">
+                            <span style="font-size:0.85rem;color:#374151;">ft</span>
+                        </div>
+                        <canvas id="polygon-canvas" width="600" height="300" style="width:100%;border:1px solid #d1d5db;border-radius:6px;cursor:crosshair;background:#fff;"></canvas>
+                        <div id="polygon-dimensions" style="display:none;margin-top:0.5rem;padding:0.5rem 0.75rem;background:#eff6ff;border-radius:6px;font-size:0.88rem;color:#1e40af;">
+                            <strong>Bounding box:</strong> Along House = <span id="polygon-along">0</span> ft, From House = <span id="polygon-from">0</span> ft
+                        </div>
+                        <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
+                            <button type="button" class="btn btn-primary btn-sm" id="polygon-use-btn" style="display:none;">Use These Dimensions</button>
+                            <button type="button" class="btn btn-ghost btn-sm" id="polygon-clear-btn">Clear Drawing</button>
+                        </div>
+                    </div>
+                    <div class="check-row" style="margin-bottom:0.5rem;">
+                        <input type="checkbox" id="polygon-toggle">
+                        <label for="polygon-toggle">Draw Deck Shape</label>
+                    </div>
+
                     <div class="deck-diagram-container">
                         <div class="deck-diagram">
                             <div class="house-wall">HOUSE</div>
@@ -973,6 +998,33 @@
                             </div>
                         </div>
 
+                        <!-- Breaker Board -->
+                        <div class="check-row" style="margin-top:0.2rem;">
+                            <input type="checkbox" id="breaker-board">
+                            <label for="breaker-board">Breaker Board</label>
+                        </div>
+                        <div id="breaker-config" class="option-config-panel">
+                            <div class="note-inline" style="display:block; margin-bottom:0.5rem;">Add a Solid Edge board running perpendicular across the deck for a decorative visual break.</div>
+                            <div class="config-row">
+                                <span class="config-label">Position:</span>
+                                <select id="breaker-position">
+                                    <option value="center">Center</option>
+                                    <option value="custom">Custom offset</option>
+                                </select>
+                            </div>
+                            <div class="config-row" id="breaker-offset-row" style="display:none;">
+                                <span class="config-label">Offset from house (ft):</span>
+                                <input type="number" id="breaker-offset" min="1" step="0.5" placeholder="e.g., 8" style="width:80px;">
+                            </div>
+                            <div class="config-row">
+                                <span class="config-label">Breaker color:</span>
+                                <div class="mini-color-swatches" id="breaker-color-swatches"></div>
+                            </div>
+                            <div class="config-row">
+                                <span class="mini-swatch-label" id="breaker-color-label">Using deck color</span>
+                            </div>
+                        </div>
+
                         <!-- Stairs -->
                         <div class="check-row" style="margin-top:0.2rem;">
                             <input type="checkbox" id="stairs">
@@ -982,19 +1034,16 @@
                             <div class="note-inline" style="display:block; margin-bottom:0.5rem;">Add Solid Edge boards for stair treads and risers.</div>
                             <div class="config-row">
                                 <span class="config-label">Steps:</span>
-                                <select id="stair-steps">
-                                    <option value="1">1</option>
-                                    <option value="2">2</option>
-                                    <option value="3">3</option>
-                                </select>
+                                <input type="number" id="stair-steps" min="1" value="1" style="width:70px;">
                             </div>
                             <div class="config-row">
                                 <span class="config-label">Treads/step:</span>
-                                <select id="stair-treads">
-                                    <option value="1">1 board</option>
-                                    <option value="2">2 boards</option>
-                                    <option value="3">3 boards</option>
-                                </select>
+                                <input type="number" id="stair-treads" min="1" max="5" value="1" style="width:70px;">
+                            </div>
+                            <div class="config-row">
+                                <span class="config-label">Stair width (ft):</span>
+                                <input type="number" id="stair-width" min="1" step="0.5" placeholder="e.g., 4" style="width:80px;">
+                                <span class="help-text" style="margin-left:0.25rem;font-size:0.78rem;">Board length based on stair width</span>
                             </div>
                             <div class="config-row">
                                 <input type="checkbox" id="stair-risers" style="width:16px;height:16px;cursor:pointer;">
@@ -2262,7 +2311,9 @@ function selectMiniSwatch(containerId, labelId, colorVal, labelText) {
 }
 
 function setMiniSwatchSelection(containerId, colorVal) {
-    var labelId = containerId === 'pf-color-swatches' ? 'pf-color-label' : 'stair-color-label';
+    var labelId = containerId === 'pf-color-swatches' ? 'pf-color-label'
+                : containerId === 'breaker-color-swatches' ? 'breaker-color-label'
+                : 'stair-color-label';
     var labelText = colorVal ? colorVal : 'Using deck color';
     selectMiniSwatch(containerId, labelId, colorVal || '', labelText);
 }
@@ -2279,12 +2330,19 @@ function saveCurrentQuote() {
         type: document.getElementById('pf-type').value,
         color: document.getElementById('pf-color-swatches').dataset.selected || null
     };
+    currentQuote.options.breakerBoard = {
+        enabled: document.getElementById('breaker-board').checked,
+        position: document.getElementById('breaker-position').value || 'center',
+        customOffset: document.getElementById('breaker-position').value === 'custom' ? (parseFloat(document.getElementById('breaker-offset').value) || null) : null,
+        color: document.getElementById('breaker-color-swatches').dataset.selected || null
+    };
     currentQuote.options.stairs = {
         enabled: document.getElementById('stairs').checked,
-        steps: parseInt(document.getElementById('stair-steps').value),
-        treadsPerStep: parseInt(document.getElementById('stair-treads').value),
+        steps: parseInt(document.getElementById('stair-steps').value) || 1,
+        treadsPerStep: parseInt(document.getElementById('stair-treads').value) || 1,
         risers: document.getElementById('stair-risers').checked,
-        color: document.getElementById('stair-color-swatches').dataset.selected || null
+        color: document.getElementById('stair-color-swatches').dataset.selected || null,
+        stairWidth: parseFloat(document.getElementById('stair-width').value) || null
     };
     currentQuote.specialInstructions = document.getElementById('special-instr').value;
     currentQuote.internalNotes = document.getElementById('internal-notes').value;
@@ -2308,11 +2366,17 @@ function normalizeOptions(opts) {
     } else if (!opts.pictureFrame) {
         opts.pictureFrame = { enabled: false, type: 'single', color: null };
     }
+    // Breaker board
+    if (!opts.breakerBoard) {
+        opts.breakerBoard = { enabled: false, position: 'center', customOffset: null, color: null };
+    }
     // Backward compat: boolean stairs -> object
     if (typeof opts.stairs === 'boolean') {
-        opts.stairs = { enabled: opts.stairs, steps: 1, treadsPerStep: 1, risers: false, color: null };
+        opts.stairs = { enabled: opts.stairs, steps: 1, treadsPerStep: 1, risers: false, color: null, stairWidth: null };
     } else if (!opts.stairs) {
-        opts.stairs = { enabled: false, steps: 1, treadsPerStep: 1, risers: false, color: null };
+        opts.stairs = { enabled: false, steps: 1, treadsPerStep: 1, risers: false, color: null, stairWidth: null };
+    } else {
+        if (opts.stairs.stairWidth === undefined) opts.stairs.stairWidth = null;
     }
     return opts;
 }
@@ -2324,10 +2388,19 @@ function restoreOptionPanels() {
     setMiniSwatchSelection('pf-color-swatches', pf.color);
     document.getElementById('pic-frame-config').classList.toggle('visible', pf.enabled);
 
+    var bb = currentQuote.options.breakerBoard || {};
+    document.getElementById('breaker-board').checked = bb.enabled || false;
+    document.getElementById('breaker-position').value = bb.position || 'center';
+    document.getElementById('breaker-offset').value = bb.customOffset || '';
+    document.getElementById('breaker-offset-row').style.display = bb.position === 'custom' ? '' : 'none';
+    setMiniSwatchSelection('breaker-color-swatches', bb.color);
+    document.getElementById('breaker-config').classList.toggle('visible', bb.enabled || false);
+
     var st = currentQuote.options.stairs;
     document.getElementById('stairs').checked = st.enabled;
     document.getElementById('stair-steps').value = st.steps || 1;
     document.getElementById('stair-treads').value = st.treadsPerStep || 1;
+    document.getElementById('stair-width').value = st.stairWidth || '';
     document.getElementById('stair-risers').checked = st.risers || false;
     setMiniSwatchSelection('stair-color-swatches', st.color);
     document.getElementById('stairs-config').classList.toggle('visible', st.enabled);
@@ -2371,7 +2444,8 @@ function resetFormOnly() {
         lineItems: [],
         options: {
             pictureFrame: { enabled: false, type: 'single', color: null },
-            stairs: { enabled: false, steps: 1, treadsPerStep: 1, risers: false, color: null }
+            breakerBoard: { enabled: false, position: 'center', customOffset: null, color: null },
+            stairs: { enabled: false, steps: 1, treadsPerStep: 1, risers: false, color: null, stairWidth: null }
         },
         specialInstructions: '',
         internalNotes: '',
@@ -2395,10 +2469,17 @@ function resetFormOnly() {
     document.getElementById('pic-frame-config').classList.remove('visible');
     document.getElementById('pf-type').value = 'single';
     setMiniSwatchSelection('pf-color-swatches', null);
+    document.getElementById('breaker-board').checked = false;
+    document.getElementById('breaker-config').classList.remove('visible');
+    document.getElementById('breaker-position').value = 'center';
+    document.getElementById('breaker-offset').value = '';
+    document.getElementById('breaker-offset-row').style.display = 'none';
+    setMiniSwatchSelection('breaker-color-swatches', null);
     document.getElementById('stairs').checked = false;
     document.getElementById('stairs-config').classList.remove('visible');
     document.getElementById('stair-steps').value = '1';
     document.getElementById('stair-treads').value = '1';
+    document.getElementById('stair-width').value = '';
     document.getElementById('stair-risers').checked = false;
     setMiniSwatchSelection('stair-color-swatches', null);
 
@@ -2512,18 +2593,26 @@ function generatePrintHTML(type) {
     html += '</table></div>';
 
     const pfOpt = currentQuote.options.pictureFrame || {};
+    const bbOpt = currentQuote.options.breakerBoard || {};
     const stOpt = currentQuote.options.stairs || {};
     const hasPicFrame = pfOpt.enabled;
+    const hasBreaker = bbOpt.enabled;
     const hasStairs = stOpt.enabled;
-    if (hasPicFrame || hasStairs) {
+    if (hasPicFrame || hasBreaker || hasStairs) {
         html += '<div style="margin-bottom: 20px;"><h2 style="color: #374151; font-size: 1.1rem; border-bottom: 1px solid #ddd; padding-bottom: 5px;">Options</h2>';
         if (hasPicFrame) {
             var pfDesc = '✓ Picture Framing — ' + (pfOpt.type === 'double' ? 'Double' : 'Single') + ' board';
             if (pfOpt.color) pfDesc += ', ' + pfOpt.color;
             html += '<p style="margin: 5px 0;">' + pfDesc + '</p>';
         }
+        if (hasBreaker) {
+            var bbDesc = '✓ Breaker Board — ' + (bbOpt.position === 'custom' && bbOpt.customOffset ? bbOpt.customOffset + ' ft from house' : 'Center');
+            if (bbOpt.color) bbDesc += ', ' + bbOpt.color;
+            html += '<p style="margin: 5px 0;">' + bbDesc + '</p>';
+        }
         if (hasStairs) {
             var stDesc = '✓ Stairs — ' + (stOpt.steps || 1) + ' step(s), ' + (stOpt.treadsPerStep || 1) + ' tread(s)/step';
+            if (stOpt.stairWidth) stDesc += ', ' + stOpt.stairWidth + ' ft wide';
             if (stOpt.risers) stDesc += ', with risers';
             if (stOpt.color) stDesc += ', ' + stOpt.color;
             html += '<p style="margin: 5px 0;">' + stDesc + '</p>';
@@ -2888,12 +2977,25 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('pic-frame').onchange = function(e) {
         document.getElementById('pic-frame-config').classList.toggle('visible', e.target.checked);
     };
+    document.getElementById('breaker-board').onchange = function(e) {
+        document.getElementById('breaker-config').classList.toggle('visible', e.target.checked);
+    };
+    document.getElementById('breaker-position').onchange = function(e) {
+        document.getElementById('breaker-offset-row').style.display = e.target.value === 'custom' ? '' : 'none';
+    };
     document.getElementById('stairs').onchange = function(e) {
         document.getElementById('stairs-config').classList.toggle('visible', e.target.checked);
     };
 
+    // Polygon drawing tool toggle
+    document.getElementById('polygon-toggle').onchange = function(e) {
+        document.getElementById('polygon-tool-section').style.display = e.target.checked ? '' : 'none';
+        if (e.target.checked && typeof window.initPolygonTool === 'function') window.initPolygonTool();
+    };
+
     // Build mini color swatches for option panels
     buildMiniColorSwatches('pf-color-swatches', 'pf-color-label');
+    buildMiniColorSwatches('breaker-color-swatches', 'breaker-color-label');
     buildMiniColorSwatches('stair-color-swatches', 'stair-color-label');
 
     // Add item
