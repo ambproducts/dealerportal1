@@ -1644,6 +1644,113 @@
             });
         }
 
+        // === Polygon-clear confirmation when manually changing dimensions ===
+        // Track previous values so we can revert on cancel
+        var prevDeckLen = deckLenInput ? deckLenInput.value : '';
+        var prevDeckWid = deckWidInput ? deckWidInput.value : '';
+        // Pending change info stored while modal is open
+        var pendingDimChange = null;
+
+        function hasActivePolygon() {
+            return polyState.closed && polyState.vertices.length >= 3;
+        }
+
+        function showPolygonClearModal(inputEl, prevVal) {
+            var modal = document.getElementById('polygonClearModal');
+            if (!modal) return false;
+            pendingDimChange = { input: inputEl, prevValue: prevVal };
+            modal.classList.add('active');
+            return true;
+        }
+
+        function revertPendingChange() {
+            if (!pendingDimChange) return;
+            var info = pendingDimChange;
+            pendingDimChange = null;
+            info.input.value = info.prevValue;
+            info.input.dispatchEvent(new Event('input'));
+        }
+
+        function confirmClearPolygon() {
+            pendingDimChange = null;
+            // Clear the polygon by triggering the clear button
+            var clearBtn = document.getElementById('polygon-clear-btn');
+            if (clearBtn) clearBtn.click();
+            // Update stored previous values to current
+            prevDeckLen = deckLenInput ? deckLenInput.value : '';
+            prevDeckWid = deckWidInput ? deckWidInput.value : '';
+        }
+
+        // Save value on focus so we know what to revert to
+        if (deckLenInput) {
+            deckLenInput.addEventListener('focus', function () {
+                prevDeckLen = this.value;
+            });
+            deckLenInput.addEventListener('change', function () {
+                if (hasActivePolygon()) {
+                    if (!showPolygonClearModal(this, prevDeckLen)) {
+                        // Modal not found, fall back to native confirm
+                        if (!confirm('You have a custom shape drawn. Clear the polygon and use entered dimensions instead?')) {
+                            this.value = prevDeckLen;
+                            this.dispatchEvent(new Event('input'));
+                            return;
+                        }
+                        var clearBtn = document.getElementById('polygon-clear-btn');
+                        if (clearBtn) clearBtn.click();
+                    }
+                    return;
+                }
+                prevDeckLen = this.value;
+            });
+        }
+        if (deckWidInput) {
+            deckWidInput.addEventListener('focus', function () {
+                prevDeckWid = this.value;
+            });
+            deckWidInput.addEventListener('change', function () {
+                if (hasActivePolygon()) {
+                    if (!showPolygonClearModal(this, prevDeckWid)) {
+                        if (!confirm('You have a custom shape drawn. Clear the polygon and use entered dimensions instead?')) {
+                            this.value = prevDeckWid;
+                            this.dispatchEvent(new Event('input'));
+                            return;
+                        }
+                        var clearBtn = document.getElementById('polygon-clear-btn');
+                        if (clearBtn) clearBtn.click();
+                    }
+                    return;
+                }
+                prevDeckWid = this.value;
+            });
+        }
+
+        // Wire up the polygon-clear modal buttons
+        var pcModal = document.getElementById('polygonClearModal');
+        if (pcModal) {
+            var pcConfirm = document.getElementById('polygon-clear-confirm');
+            var pcCancel = document.getElementById('polygon-clear-cancel');
+            var pcClose = document.getElementById('polygon-clear-modal-close');
+
+            function dismissPolygonModal() {
+                pcModal.classList.remove('active');
+                revertPendingChange();
+            }
+
+            if (pcConfirm) {
+                pcConfirm.addEventListener('click', function () {
+                    pcModal.classList.remove('active');
+                    confirmClearPolygon();
+                });
+            }
+            if (pcCancel) pcCancel.addEventListener('click', dismissPolygonModal);
+            if (pcClose) pcClose.addEventListener('click', dismissPolygonModal);
+
+            // Backdrop click = cancel
+            pcModal.addEventListener('click', function (e) {
+                if (e.target === pcModal) dismissPolygonModal();
+            });
+        }
+
         console.log('[DeckCalc] Ready. Board width: ' + BOARD_WIDTH_INCH + '"  Gap: ' + GAP_INCH + '"  Effective: ' + EFFECTIVE_FT.toFixed(6) + ' ft/board');
     }
 
