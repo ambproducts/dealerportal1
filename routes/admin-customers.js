@@ -27,6 +27,7 @@
 //   GET    /api/admin/customers              - List active customers
 //   GET    /api/admin/customers/deleted       - List soft-deleted customers
 //   POST   /api/admin/customers/recalc-all   - Recalc all customer stats
+//   POST   /api/admin/customers/purge-expired - Purge customers deleted 30+ days ago
 //   PUT    /api/admin/customers/:id          - Update a customer
 //   DELETE /api/admin/customers/:id          - Soft delete customer + quotes
 //   POST   /api/admin/customers/:id/restore  - Undo / restore customer + quotes
@@ -38,6 +39,9 @@ const express = require('express');
 const router = express.Router();
 const { readJSON, writeJSON, CUSTOMERS_FILE, QUOTES_FILE, recalcCustomerStats } = require('../lib/helpers');
 const { requireAuth, requireRole, requireAdmin } = require('../middleware/auth');
+
+// Soft-delete expiry: 30 days in milliseconds
+const PURGE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
 
 // All routes require authenticated admin or gm
 router.use(requireAuth, requireRole('admin', 'gm'));
@@ -147,6 +151,54 @@ router.post('/recalc-all', requireAdmin, (req, res) => {
         totalCustomers: customers.filter(c => !c.deleted).length,
         customersUpdated: updated,
         changes: changes
+    });
+});
+
+// -----------------------------------------------------------
+// POST /api/admin/customers/purge-expired
+// Permanently removes customers soft-deleted more than 30 days ago.
+// Also removes their cascade-deleted quotes.
+// -----------------------------------------------------------
+router.post('/purge-expired', requireAdmin, (req, res) => {
+    const customers = readJSON(CUSTOMERS_FILE);
+    const now = Date.now();
+
+    const kept = [];
+    const purged = [];
+
+    customers.forEach(c => {
+        if (c.deleted && c.deletedAt) {
+            const deletedTime = new Date(c.deletedAt).getTime();
+            if (now - deletedTime > PURGE_AFTER_MS) {
+                purged.push({ id: c.id, name: c.name, deletedAt: c.deletedAt });
+                return;
+            }
+        }
+        kept.push(c);
+    });
+
+    writeJSON(CUSTOMERS_FILE, kept);
+
+    // Also permanently remove cascade-deleted quotes for purged customers
+    const purgedIds = new Set(purged.map(p => p.id));
+    if (purgedIds.size > 0) {
+        const quotes = readJSON(QUOTES_FILE);
+        const keptQuotes = quotes.filter(q => {
+            if (q.customer && q.customer.customerId && purgedIds.has(q.customer.customerId) && q.deleted) {
+                return false;
+            }
+            return true;
+        });
+        if (keptQuotes.length < quotes.length) {
+            writeJSON(QUOTES_FILE, keptQuotes);
+        }
+    }
+
+    console.log('[Admin Customers] Purged ' + purged.length + ' expired soft-deleted customers by ' + req.user.username);
+    res.json({
+        purged: purged.length,
+        remaining: kept.filter(c => c.deleted).length,
+        details: purged
     });
 });
 

@@ -16,6 +16,7 @@
 //   GET    /api/admin/quotes              - List active quotes
 //   GET    /api/admin/quotes/deleted       - List soft-deleted quotes
 //   GET    /api/admin/quotes/export        - Export quotes as CSV
+//   POST   /api/admin/quotes/purge-expired - Purge quotes deleted 30+ days ago
 //   PUT    /api/admin/quotes/:id/status    - Update quote status
 //   DELETE /api/admin/quotes/:id           - Soft delete a quote
 //   POST   /api/admin/quotes/:id/restore  - Undo / restore a quote
@@ -26,6 +27,9 @@ const express = require('express');
 const router = express.Router();
 const { readJSON, writeJSON, QUOTES_FILE, recalcCustomerStats } = require('../lib/helpers');
 const { requireAuth, requireRole, requireAdmin } = require('../middleware/auth');
+
+// Soft-delete expiry: 30 days in milliseconds
+const PURGE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
 
 // All routes require authenticated admin or gm
 router.use(requireAuth, requireRole('admin', 'gm'));
@@ -118,6 +122,45 @@ router.get('/export', (req, res) => {
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename="ameridex-quotes-export.csv"');
     res.send(csvContent);
+});
+
+// -----------------------------------------------------------
+// POST /api/admin/quotes/purge-expired
+// Permanently removes quotes soft-deleted more than 30 days ago.
+// Recalculates customer stats for any affected customers.
+// -----------------------------------------------------------
+router.post('/purge-expired', requireAdmin, (req, res) => {
+    const quotes = readJSON(QUOTES_FILE);
+    const now = Date.now();
+
+    const kept = [];
+    const purged = [];
+    const affectedCustomerIds = new Set();
+
+    quotes.forEach(q => {
+        if (q.deleted && q.deletedAt) {
+            const deletedTime = new Date(q.deletedAt).getTime();
+            if (now - deletedTime > PURGE_AFTER_MS) {
+                purged.push({ id: q.id, quoteNumber: q.quoteNumber || null, deletedAt: q.deletedAt });
+                const custId = q.customer && q.customer.customerId;
+                if (custId) affectedCustomerIds.add(custId);
+                return;
+            }
+        }
+        kept.push(q);
+    });
+
+    writeJSON(QUOTES_FILE, kept);
+
+    // Recalculate stats for customers whose quotes were purged
+    affectedCustomerIds.forEach(custId => recalcCustomerStats(custId));
+
+    console.log('[Admin Quotes] Purged ' + purged.length + ' expired soft-deleted quotes by ' + req.user.username);
+    res.json({
+        purged: purged.length,
+        remaining: kept.filter(q => q.deleted).length,
+        details: purged
+    });
 });
 
 // -----------------------------------------------------------
