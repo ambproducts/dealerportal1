@@ -2662,6 +2662,58 @@ function generatePrintHTML(type) {
     html += '<tr style="background: #f3f4f6; font-weight: bold;"><td colspan="4" style="border: 1px solid #ddd; padding: 12px; text-align: right;">ESTIMATED TOTAL:</td>';
     html += '<td style="border: 1px solid #ddd; padding: 12px; text-align: right; color: #1e40af; font-size: 1.1rem;">' + formatCurrency(grandTotal) + '</td></tr></tbody></table></div>';
 
+    // Cut Plan section (saved from polygon calculator)
+    if (currentQuote.cutPlan) {
+        const cp = currentQuote.cutPlan;
+        const ms = cp.materialSummary;
+        const cl = cp.cutList;
+        html += '<div style="margin-bottom: 20px;">';
+        html += '<h2 style="color: #374151; font-size: 1.1rem; border-bottom: 1px solid #ddd; padding-bottom: 5px;">Cut Plan</h2>';
+
+        // Material summary
+        const typeLabel = ms.deckBoards.type === 'system' ? 'AmeriDex System'
+                        : ms.deckBoards.type === 'grooved' ? 'Grooved' : 'Solid Edge';
+        const pft = ms.deckBoards.type === 'system' ? 8 : 6;
+        html += '<p style="margin: 5px 0;"><strong>Materials:</strong> ' +
+            ms.deckBoards.qty + 'x ' + typeLabel + ' ' + ms.deckBoards.length + '\' ' + ms.deckBoards.color +
+            ' (' + formatCurrency(ms.deckBoards.qty * ms.deckBoards.length * pft) + ')' +
+            ' | ' + ms.screwBoxes + ' screw box(es) | ' + ms.plugBoxes + ' plug box(es)</p>';
+
+        // Cut summary
+        if (cp.cutSummary) {
+            const cs = cp.cutSummary;
+            html += '<p style="margin: 5px 0; font-size: 0.9rem;">';
+            if (cs.straightRows > 0) html += cs.straightRows + ' straight cut' + (cs.straightRows !== 1 ? 's' : '') + ' ';
+            if (cs.angledRows > 0) html += cs.angledRows + ' angled cut' + (cs.angledRows !== 1 ? 's' : '') + ' (' + cs.uniqueAngles.join('\u00B0/') + '\u00B0)';
+            html += '</p>';
+        }
+
+        html += '<p style="margin: 5px 0; font-size: 0.9rem;">Purchase: <strong>' + cl.totalBoardsPurchased + ' boards</strong> (' + cp.boardLength + '\') | ' +
+            cl.reuseNote + ' | Waste: ' + fmtFtIn(cl.totalWasteFt) + ' (' + cl.wastePct + '%)</p>';
+
+        // Board-by-board instructions
+        html += '<table style="width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.85rem;">';
+        html += '<thead><tr style="background: #f3f4f6;"><th style="border: 1px solid #ddd; padding: 6px; text-align: left;">Board</th>' +
+            '<th style="border: 1px solid #ddd; padding: 6px; text-align: left;">Cuts</th>' +
+            '<th style="border: 1px solid #ddd; padding: 6px; text-align: right;">Waste</th></tr></thead><tbody>';
+        for (let bi = 0; bi < cl.boards.length; bi++) {
+            const brd = cl.boards[bi];
+            let cutDesc = '';
+            for (let ci = 0; ci < brd.cuts.length; ci++) {
+                const c = brd.cuts[ci];
+                if (ci > 0) cutDesc += ' \u2192 ';
+                cutDesc += 'Row ' + c.row + ': ' + fmtFtIn(c.cutLength);
+                cutDesc += c.angle > 0 ? ' [' + c.angle + '\u00B0]' : ' [str]';
+                if (c.isReuse) cutDesc += ' (offcut)';
+            }
+            html += '<tr' + (bi % 2 === 1 ? ' style="background: #f9fafb;"' : '') + '>';
+            html += '<td style="border: 1px solid #ddd; padding: 4px 6px;">#' + brd.boardNum + '</td>';
+            html += '<td style="border: 1px solid #ddd; padding: 4px 6px;">' + cutDesc + '</td>';
+            html += '<td style="border: 1px solid #ddd; padding: 4px 6px; text-align: right;">' + (brd.wasteLength > 0.01 ? fmtFtIn(brd.wasteLength) : '-') + '</td></tr>';
+        }
+        html += '</tbody></table></div>';
+    }
+
     const special = document.getElementById('special-instr').value;
     if (special) {
         html += '<div style="margin-bottom: 20px;"><h2 style="color: #374151; font-size: 1.1rem; border-bottom: 1px solid #ddd; padding-bottom: 5px;">Special Instructions</h2>';

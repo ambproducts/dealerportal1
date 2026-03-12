@@ -963,7 +963,112 @@
         var s = fasteners.screwBoxes === 1 ? '' : 'es';
         var p = fasteners.plugBoxes === 1 ? '' : 'es';
 
-        var html =
+        // === MATERIAL SHOPPING LIST ===
+        var boardTypeEl = document.getElementById('calc-board-type');
+        var boardType = boardTypeEl ? boardTypeEl.value : 'system';
+        var color = getActiveColor();
+        var pricePerFt = boardType === 'system' ? 8 : 6;
+        var solidPricePerFt = 6;
+        var boardTypeLabel = boardType === 'system' ? 'AmeriDex System'
+                           : boardType === 'grooved' ? 'Grooved'
+                           : 'Solid Edge';
+
+        var totalItemCount = 0;
+        var totalBoxCount = 0;
+        var estimatedTotal = 0;
+
+        // Deck boards price
+        var deckBoardPrice = opt.totalBoards * opt.length * pricePerFt;
+        totalItemCount += opt.totalBoards;
+        estimatedTotal += deckBoardPrice;
+
+        // Fastener boxes
+        var screwBoxPrice = 37.00;
+        var plugBoxPrice = 33.79;
+        totalBoxCount += fasteners.screwBoxes + fasteners.plugBoxes;
+        estimatedTotal += fasteners.screwBoxes * screwBoxPrice + fasteners.plugBoxes * plugBoxPrice;
+
+        // Collect solid edge items for shopping list
+        var solidItems = [];
+
+        var pfCheck = document.getElementById('pic-frame');
+        if (pfCheck && pfCheck.checked) {
+            var slPfType = (document.getElementById('pf-type') || {}).value || 'single';
+            var slPfLongSide = Math.max(result.coverageFt, result.spanFt);
+            var slPfBoardLen = slPfLongSide <= 12 ? 12 : slPfLongSide <= 16 ? 16 : 20;
+            var slBoardsAlongSpan = Math.ceil(result.spanFt / slPfBoardLen) * 2;
+            var slBoardsAlongCoverage = Math.ceil(result.coverageFt / slPfBoardLen) * 2;
+            var slPfBoards = slBoardsAlongSpan + slBoardsAlongCoverage;
+            if (slPfType === 'double') slPfBoards = slPfBoards * 2;
+            var slPfColor = ((document.getElementById('pf-color-swatches') || {}).dataset && document.getElementById('pf-color-swatches').dataset.selected) || color;
+            var slPfPrice = slPfBoards * slPfBoardLen * solidPricePerFt;
+            solidItems.push({ qty: slPfBoards, length: slPfBoardLen, color: slPfColor, label: 'picture frame' + (slPfType === 'double' ? ', double' : ''), price: slPfPrice });
+            totalItemCount += slPfBoards;
+            estimatedTotal += slPfPrice;
+        }
+
+        var bbCheck = document.getElementById('breaker-board');
+        if (bbCheck && bbCheck.checked) {
+            var slBbCoverage = result.coverageFt;
+            var slBbBoardLen = slBbCoverage <= 12 ? 12 : slBbCoverage <= 16 ? 16 : 20;
+            var slBbBoardCount = Math.ceil(slBbCoverage / slBbBoardLen);
+            var slBbColor = ((document.getElementById('breaker-color-swatches') || {}).dataset && document.getElementById('breaker-color-swatches').dataset.selected) || color;
+            var slBbPrice = slBbBoardCount * slBbBoardLen * solidPricePerFt;
+            solidItems.push({ qty: slBbBoardCount, length: slBbBoardLen, color: slBbColor, label: 'breaker board', price: slBbPrice });
+            totalItemCount += slBbBoardCount;
+            estimatedTotal += slBbPrice;
+        }
+
+        var stCheck = document.getElementById('stairs');
+        if (stCheck && stCheck.checked) {
+            var slSteps = parseInt((document.getElementById('stair-steps') || {}).value) || 1;
+            var slTreadsPerStep = parseInt((document.getElementById('stair-treads') || {}).value) || 1;
+            var slTreadBoards = slSteps * slTreadsPerStep;
+            var slHasRisers = document.getElementById('stair-risers') && document.getElementById('stair-risers').checked;
+            var slRiserBoards = slHasRisers ? slSteps : 0;
+            var slStairWidth = parseFloat((document.getElementById('stair-width') || {}).value) || result.coverageFt;
+            var slStBoardLen = slStairWidth <= 12 ? 12 : slStairWidth <= 16 ? 16 : 20;
+            var slStColor = ((document.getElementById('stair-color-swatches') || {}).dataset && document.getElementById('stair-color-swatches').dataset.selected) || color;
+            var slTreadPrice = slTreadBoards * slStBoardLen * solidPricePerFt;
+            solidItems.push({ qty: slTreadBoards, length: slStBoardLen, color: slStColor, label: 'stair treads', price: slTreadPrice });
+            totalItemCount += slTreadBoards;
+            estimatedTotal += slTreadPrice;
+            if (slRiserBoards > 0) {
+                var slRiserPrice = slRiserBoards * slStBoardLen * solidPricePerFt;
+                solidItems.push({ qty: slRiserBoards, length: slStBoardLen, color: slStColor, label: 'stair risers', price: slRiserPrice });
+                totalItemCount += slRiserBoards;
+                estimatedTotal += slRiserPrice;
+            }
+        }
+
+        function fmtMoney(n) { return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+
+        var html = '<div style="background:#fff;border-left:4px solid #2563eb;border:1px solid #dbeafe;border-left:4px solid #2563eb;border-radius:8px;padding:1rem;margin-bottom:1rem">' +
+            '<div style="font-size:1rem;font-weight:700;color:#1e40af;margin-bottom:0.6rem">\uD83D\uDCCB MATERIAL SHOPPING LIST</div>' +
+            '<table style="width:100%;font-size:0.85rem;border-collapse:collapse">' +
+            '<tr style="border-bottom:1px solid #e5e7eb"><td colspan="3" style="padding:4px 0;font-weight:600;color:#374151">DECKING</td></tr>' +
+            '<tr><td style="padding:2px 0">\u2022 ' + opt.totalBoards + 'x ' + boardTypeLabel + ' boards, ' + opt.length + '\', ' + color + '</td>' +
+            '<td style="text-align:right;padding:2px 0;color:#374151">' + fmtMoney(deckBoardPrice) + '</td></tr>' +
+            '<tr style="border-bottom:1px solid #e5e7eb"><td colspan="3" style="padding:6px 0 4px;font-weight:600;color:#374151">FASTENERS</td></tr>' +
+            '<tr><td style="padding:2px 0">\u2022 ' + fasteners.screwBoxes + 'x Screw box' + s + ' (375/box)</td>' +
+            '<td style="text-align:right;padding:2px 0;color:#6b7280">' + fmtMoney(fasteners.screwBoxes * screwBoxPrice) + '</td></tr>' +
+            '<tr><td style="padding:2px 0">\u2022 ' + fasteners.plugBoxes + 'x Plug box' + p + ' (375/box)</td>' +
+            '<td style="text-align:right;padding:2px 0;color:#6b7280">' + fmtMoney(fasteners.plugBoxes * plugBoxPrice) + '</td></tr>';
+
+        if (solidItems.length > 0) {
+            html += '<tr style="border-bottom:1px solid #e5e7eb"><td colspan="3" style="padding:6px 0 4px;font-weight:600;color:#374151">SOLID EDGE BOARDS</td></tr>';
+            for (var si = 0; si < solidItems.length; si++) {
+                var item = solidItems[si];
+                html += '<tr><td style="padding:2px 0">\u2022 ' + item.qty + 'x Solid Edge, ' + item.length + '\', ' + item.color + ' (' + item.label + ')</td>' +
+                    '<td style="text-align:right;padding:2px 0;color:#374151">' + fmtMoney(item.price) + '</td></tr>';
+            }
+        }
+
+        html += '<tr style="border-top:2px solid #1e40af"><td style="padding:6px 0;font-weight:700;color:#1e40af">TOTAL: ' + totalItemCount + ' boards + ' + totalBoxCount + ' boxes</td>' +
+            '<td style="text-align:right;padding:6px 0;font-weight:700;color:#1e40af;font-size:1rem">' + fmtMoney(estimatedTotal) + '</td></tr>' +
+            '</table></div>';
+
+        html +=
             '<strong>Fasteners for ' + opt.label + ':</strong><br>' +
             'Screws: <strong>' + fasteners.totalScrews.toLocaleString() + '</strong> total = ' +
             '<strong>' + fasteners.screwBoxes + ' box' + s + '</strong> (375/box)<br>' +
@@ -1056,6 +1161,7 @@
                 '\u2022 ' + cutList.reuseNote + '<br>' +
                 '\u2022 Total waste: <strong>' + fmtFtIn(cutList.totalWasteFt) + '</strong> (' + cutList.wastePct + '%)<br>' +
                 '<span style="font-size:0.75rem;color:#6b7280">\u2702 Kerf allowance: \u00BC" per cut (saw blade width)</span>' +
+                '<br><button type="button" class="btn btn-outline btn-sm" onclick="printCutPlan()" style="margin-top:0.5rem">Print Cut Plan</button>' +
                 '</div>';
 
             // Visual board bars
@@ -1419,6 +1525,29 @@
                 });
                 itemsAdded.push(riserBoards + ' solid edge boards (stair risers)');
             }
+        }
+
+        // 7. Save cut plan data with quote (polygon only)
+        if (currentCalcResult.isPolygon && currentCalcResult.cutDetails) {
+            var cpCutList = generateCutList(currentCalcResult.cutDetails, opt.length);
+            window.currentQuote.cutPlan = {
+                generatedAt: new Date().toISOString(),
+                boardLength: opt.length,
+                boardType: boardType,
+                color: color,
+                deckArea: currentCalcResult.deckAreaSqFt || null,
+                coverageFt: currentCalcResult.coverageFt,
+                spanFt: currentCalcResult.spanFt,
+                isPolygon: true,
+                cutList: cpCutList,
+                cutSummary: currentCalcResult.cutSummary,
+                cutDetails: currentCalcResult.cutDetails,
+                materialSummary: {
+                    deckBoards: { qty: opt.totalBoards, length: opt.length, type: boardType, color: color },
+                    screwBoxes: fasteners.screwBoxes,
+                    plugBoxes: fasteners.plugBoxes
+                }
+            };
         }
 
         // Clean up and re-render
@@ -1948,6 +2077,173 @@
 
         draw();
     };
+
+    // === PRINT CUT PLAN ===
+    function printCutPlan() {
+        if (!currentCalcResult || selectedOptionIndex === null) {
+            alert('Please calculate a deck first.');
+            return;
+        }
+        var opt = currentCalcResult.options[selectedOptionIndex];
+        if (!opt) return;
+
+        if (!currentCalcResult.isPolygon || !currentCalcResult.cutDetails) {
+            alert('Cut plan is only available for polygon decks.');
+            return;
+        }
+
+        var boardTypeEl = document.getElementById('calc-board-type');
+        var boardType = boardTypeEl ? boardTypeEl.value : 'system';
+        var color = getActiveColor();
+        var pricePerFt = boardType === 'system' ? 8 : 6;
+        var solidPricePerFt = 6;
+        var boardTypeLabel = boardType === 'system' ? 'AmeriDex System'
+                           : boardType === 'grooved' ? 'Grooved' : 'Solid Edge';
+        var fasteners = calculateFasteners(opt.boardRows, currentCalcResult.joistCount);
+        var cutList = generateCutList(currentCalcResult.cutDetails, opt.length);
+        var cs = currentCalcResult.cutSummary;
+        var cd = currentCalcResult.cutDetails;
+
+        var quoteId = (window.currentQuote && window.currentQuote.quoteId) ? window.currentQuote.quoteId : '';
+        var today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+
+        function pm(n) { return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+
+        var phtml = '<!DOCTYPE html><html><head><title>AmeriDex Cut Plan</title>' +
+            '<style>body{font-family:Arial,sans-serif;padding:20px;margin:0;color:#1f2937}' +
+            'h1{color:#2563eb;margin:0 0 5px}h2{color:#374151;font-size:1.1rem;border-bottom:1px solid #ddd;padding-bottom:5px;margin-top:20px}' +
+            'table{width:100%;border-collapse:collapse;font-size:0.9rem}td,th{padding:4px 8px;text-align:left}' +
+            '.board-bar{display:flex;height:22px;border:1px solid #d1d5db;border-radius:4px;overflow:hidden;margin:2px 0}' +
+            '.cut-seg{display:flex;align-items:center;justify-content:center;overflow:hidden;white-space:nowrap;padding:0 3px;font-size:0.7rem;border-right:1px solid rgba(0,0,0,0.15)}' +
+            '.primary{background:#dbeafe;color:#1e3a5f}.reuse{background:#bbf7d0;color:#15803d}.waste{background:#fecaca;color:#991b1b}' +
+            '@media print{body{padding:0}}</style></head><body>';
+
+        // Header
+        phtml += '<h1>AmeriDex Cut Plan</h1>';
+        phtml += '<p style="color:#666;margin:2px 0">Generated: ' + today + '</p>';
+        if (quoteId) phtml += '<p style="color:#1e40af;font-weight:bold;margin:2px 0">Quote #: ' + quoteId + '</p>';
+        phtml += '<p style="margin:2px 0">Deck area: ' + (currentCalcResult.deckAreaSqFt ? currentCalcResult.deckAreaSqFt + ' sq ft' : fmtFtIn(currentCalcResult.coverageFt) + ' x ' + fmtFtIn(currentCalcResult.spanFt)) + '</p>';
+
+        // Material Shopping List
+        phtml += '<h2>Material Shopping List</h2>';
+        var deckBoardPrice = opt.totalBoards * opt.length * pricePerFt;
+        var estimatedTotal = deckBoardPrice;
+        phtml += '<table>';
+        phtml += '<tr style="border-bottom:1px solid #e5e7eb"><td colspan="2" style="font-weight:600">DECKING</td></tr>';
+        phtml += '<tr><td>' + opt.totalBoards + 'x ' + boardTypeLabel + ', ' + opt.length + '\', ' + color + '</td><td style="text-align:right">' + pm(deckBoardPrice) + '</td></tr>';
+        phtml += '<tr style="border-bottom:1px solid #e5e7eb"><td colspan="2" style="font-weight:600;padding-top:8px">FASTENERS</td></tr>';
+        var screwCost = fasteners.screwBoxes * 37;
+        var plugCost = fasteners.plugBoxes * 33.79;
+        estimatedTotal += screwCost + plugCost;
+        phtml += '<tr><td>' + fasteners.screwBoxes + 'x Screw box (375/box)</td><td style="text-align:right">' + pm(screwCost) + '</td></tr>';
+        phtml += '<tr><td>' + fasteners.plugBoxes + 'x Plug box (375/box)</td><td style="text-align:right">' + pm(plugCost) + '</td></tr>';
+
+        // Solid edge items
+        var pfChk = document.getElementById('pic-frame');
+        var bbChk = document.getElementById('breaker-board');
+        var stChk = document.getElementById('stairs');
+        var hasSolid = (pfChk && pfChk.checked) || (bbChk && bbChk.checked) || (stChk && stChk.checked);
+        if (hasSolid) {
+            phtml += '<tr style="border-bottom:1px solid #e5e7eb"><td colspan="2" style="font-weight:600;padding-top:8px">SOLID EDGE BOARDS</td></tr>';
+            if (pfChk && pfChk.checked) {
+                var pfT = (document.getElementById('pf-type') || {}).value || 'single';
+                var pfLS = Math.max(currentCalcResult.coverageFt, currentCalcResult.spanFt);
+                var pfBL = pfLS <= 12 ? 12 : pfLS <= 16 ? 16 : 20;
+                var pfB = Math.ceil(currentCalcResult.spanFt / pfBL) * 2 + Math.ceil(currentCalcResult.coverageFt / pfBL) * 2;
+                if (pfT === 'double') pfB = pfB * 2;
+                var pfC = ((document.getElementById('pf-color-swatches') || {}).dataset && document.getElementById('pf-color-swatches').dataset.selected) || color;
+                var pfP = pfB * pfBL * solidPricePerFt;
+                estimatedTotal += pfP;
+                phtml += '<tr><td>' + pfB + 'x Solid Edge, ' + pfBL + '\', ' + pfC + ' (picture frame)</td><td style="text-align:right">' + pm(pfP) + '</td></tr>';
+            }
+            if (bbChk && bbChk.checked) {
+                var bbC = currentCalcResult.coverageFt;
+                var bbBL = bbC <= 12 ? 12 : bbC <= 16 ? 16 : 20;
+                var bbBC = Math.ceil(bbC / bbBL);
+                var bbCol = ((document.getElementById('breaker-color-swatches') || {}).dataset && document.getElementById('breaker-color-swatches').dataset.selected) || color;
+                var bbP = bbBC * bbBL * solidPricePerFt;
+                estimatedTotal += bbP;
+                phtml += '<tr><td>' + bbBC + 'x Solid Edge, ' + bbBL + '\', ' + bbCol + ' (breaker board)</td><td style="text-align:right">' + pm(bbP) + '</td></tr>';
+            }
+            if (stChk && stChk.checked) {
+                var stSt = parseInt((document.getElementById('stair-steps') || {}).value) || 1;
+                var stTr = parseInt((document.getElementById('stair-treads') || {}).value) || 1;
+                var stTB = stSt * stTr;
+                var stHR = document.getElementById('stair-risers') && document.getElementById('stair-risers').checked;
+                var stRB = stHR ? stSt : 0;
+                var stW = parseFloat((document.getElementById('stair-width') || {}).value) || currentCalcResult.coverageFt;
+                var stBL = stW <= 12 ? 12 : stW <= 16 ? 16 : 20;
+                var stCol = ((document.getElementById('stair-color-swatches') || {}).dataset && document.getElementById('stair-color-swatches').dataset.selected) || color;
+                var stTP = stTB * stBL * solidPricePerFt;
+                estimatedTotal += stTP;
+                phtml += '<tr><td>' + stTB + 'x Solid Edge, ' + stBL + '\', ' + stCol + ' (stair treads)</td><td style="text-align:right">' + pm(stTP) + '</td></tr>';
+                if (stRB > 0) {
+                    var stRP = stRB * stBL * solidPricePerFt;
+                    estimatedTotal += stRP;
+                    phtml += '<tr><td>' + stRB + 'x Solid Edge, ' + stBL + '\', ' + stCol + ' (stair risers)</td><td style="text-align:right">' + pm(stRP) + '</td></tr>';
+                }
+            }
+        }
+        phtml += '<tr style="border-top:2px solid #1e40af"><td style="font-weight:700;color:#1e40af">ESTIMATED TOTAL</td><td style="text-align:right;font-weight:700;color:#1e40af;font-size:1.1rem">' + pm(estimatedTotal) + '</td></tr>';
+        phtml += '</table>';
+
+        // Cut angle summary
+        if (cs) {
+            phtml += '<h2>Cut Angle Summary</h2>';
+            if (cs.straightRows > 0) {
+                phtml += '<p>' + cs.straightRows + ' board' + (cs.straightRows !== 1 ? 's' : '') + ': Straight cuts only (square ends)</p>';
+            }
+            if (cs.angledRows > 0) {
+                var aDesc = cs.uniqueAngles.join('\u00B0/') + '\u00B0';
+                phtml += '<p>' + cs.angledRows + ' board' + (cs.angledRows !== 1 ? 's' : '') + ': ' + aDesc + ' angle cuts</p>';
+            }
+        }
+
+        // Cut plan summary
+        phtml += '<h2>Cut Plan (' + opt.length + '\' boards)</h2>';
+        phtml += '<p>Purchase: <strong>' + cutList.totalBoardsPurchased + ' boards</strong> | ' +
+            cutList.reuseNote + ' | Total waste: <strong>' + fmtFtIn(cutList.totalWasteFt) + '</strong> (' + cutList.wastePct + '%)</p>';
+
+        // Board-by-board with visual bars
+        for (var bi = 0; bi < cutList.boards.length; bi++) {
+            var brd = cutList.boards[bi];
+            phtml += '<div style="margin-bottom:6px">';
+            phtml += '<strong>Board #' + brd.boardNum + '</strong> (' + opt.length + '\'): ';
+            for (var ci = 0; ci < brd.cuts.length; ci++) {
+                var c = brd.cuts[ci];
+                if (ci > 0) phtml += ' &rarr; ';
+                var aNote = c.angle > 0 ? ' [' + c.angle + '\u00B0]' : ' [straight]';
+                phtml += 'Row ' + c.row + ': ' + fmtFtIn(c.cutLength) + aNote;
+                if (c.isReuse) phtml += ' (offcut)';
+            }
+            if (brd.wasteLength > 0.01) {
+                phtml += ' | Waste: ' + fmtFtIn(brd.wasteLength);
+            }
+
+            // Visual bar
+            phtml += '<div class="board-bar">';
+            for (var vc = 0; vc < brd.cuts.length; vc++) {
+                var seg = brd.cuts[vc];
+                var pct = (seg.cutLength / brd.boardLength * 100).toFixed(1);
+                var cls = seg.isReuse ? 'reuse' : 'primary';
+                phtml += '<div class="cut-seg ' + cls + '" style="flex:0 0 ' + pct + '%">R' + seg.row + ': ' + fmtFtIn(seg.cutLength) + '</div>';
+            }
+            if (brd.wasteLength > 0.01) {
+                var wPct = (brd.wasteLength / brd.boardLength * 100).toFixed(1);
+                phtml += '<div class="cut-seg waste" style="flex:0 0 ' + wPct + '%">' + fmtFtIn(brd.wasteLength) + '</div>';
+            }
+            phtml += '</div></div>';
+        }
+
+        phtml += '</body></html>';
+
+        var printWindow = window.open('', '_blank', 'width=800,height=600');
+        printWindow.document.write(phtml);
+        printWindow.document.close();
+        printWindow.focus();
+        setTimeout(function () { printWindow.print(); printWindow.close(); }, 250);
+    }
+    window.printCutPlan = printCutPlan;
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', function () {
