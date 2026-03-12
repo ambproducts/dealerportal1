@@ -2244,7 +2244,7 @@ function buildMiniColorSwatches(containerId, labelId) {
         sw.className = 'mini-swatch';
         sw.title = c;
         sw.dataset.color = c;
-        sw.style.backgroundImage = 'url(' + (COLOR_IMAGES[c] || c + '.png') + ')';
+        sw.style.backgroundImage = 'url(colors/' + (COLOR_IMAGES[c] || c + '.png') + ')';
         sw.onclick = function() { selectMiniSwatch(containerId, labelId, c, c); };
         container.appendChild(sw);
     });
