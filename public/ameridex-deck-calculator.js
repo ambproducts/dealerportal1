@@ -1165,7 +1165,7 @@
                 '</div>';
 
             // Visual board bars
-            html += '<details style="margin-top:0.5rem" open>' +
+            html += '<details style="margin-top:0.5rem">' +
                 '<summary style="cursor:pointer;font-size:0.82rem;color:#2563eb">Visual board plan</summary>' +
                 '<div style="margin-top:0.5rem">';
             for (var vbi = 0; vbi < cutList.boards.length; vbi++) {
