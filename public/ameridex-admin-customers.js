@@ -323,15 +323,15 @@
         // Enrich customers with quote data
         customers.forEach(c => {
             c._quotes = quotes.filter(q => {
-                // Clause 1-2: Direct ID match (most reliable)
-                if (q.customerId === c.id || q.customerId === c._id) return true;
-                // Clause 3-4: Email match (both sides must have email)
-                if (q.customerEmail && c.email && q.customerEmail.toLowerCase() === c.email.toLowerCase()) return true;
-                if (q.customer && q.customer.email && c.email && q.customer.email.toLowerCase() === c.email.toLowerCase()) return true;
-                // Clause 5: Name+zip fallback for email-less customers
+                if (!q.customer) return false;
+                // Clause 1: Direct customerId match (canonical)
+                if (q.customer.customerId === c.id) return true;
+                // Clause 2: Email match (both sides must have email)
+                if (q.customer.email && c.email && q.customer.email.toLowerCase() === c.email.toLowerCase()) return true;
+                // Clause 3: Name+zip fallback for email-less customers
                 // Only fires when customer has no email to avoid false-matching
                 // customers who share a name but have different email addresses.
-                if (!c.email && c.name && q.customer && q.customer.name) {
+                if (!c.email && c.name && q.customer.name) {
                     var cName = c.name.toLowerCase().trim();
                     var qName = q.customer.name.toLowerCase().trim();
                     var cZip = (c.zipCode || c.zip || '');

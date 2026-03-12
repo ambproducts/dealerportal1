@@ -934,6 +934,12 @@ router.post('/:id/items/:itemIndex/request-override', (req, res) => {
     quotes[qIdx] = quote;
     writeJSON(QUOTES_FILE, quotes);
 
+    // Recalculate customer stats when auto-approved override changes totalAmount
+    if (isAutoApprover) {
+        const custId = quote.customer ? quote.customer.customerId : null;
+        if (custId) recalcCustomerStats(custId);
+    }
+
     const action = isAutoApprover ? 'Override applied' : 'Override requested';
     console.log('[Quotes v3.8.1]', action + ':', quote.quoteNumber, 'item #' + itemIdx,
         '$' + item.tierPrice, '->', '$' + item.priceOverride.requestedPrice,
@@ -979,6 +985,10 @@ router.post('/:id/items/:itemIndex/approve-override', requireRole('admin', 'gm')
     const qIdx = quotes.findIndex(q => q.id === quote.id);
     quotes[qIdx] = quote;
     writeJSON(QUOTES_FILE, quotes);
+
+    // Recalculate customer stats (totalAmount changed)
+    const custId = quote.customer ? quote.customer.customerId : null;
+    if (custId) recalcCustomerStats(custId);
 
     console.log('[Quotes v3.8.1] Override APPROVED:', quote.quoteNumber, 'item #' + itemIdx,
         '$' + item.priceOverride.originalTierPrice, '->', '$' + item.priceOverride.requestedPrice,
@@ -1026,6 +1036,10 @@ router.post('/:id/items/:itemIndex/reject-override', requireRole('admin', 'gm'),
     const qIdx = quotes.findIndex(q => q.id === quote.id);
     quotes[qIdx] = quote;
     writeJSON(QUOTES_FILE, quotes);
+
+    // Recalculate customer stats (totalAmount reverted to tier price)
+    const custId = quote.customer ? quote.customer.customerId : null;
+    if (custId) recalcCustomerStats(custId);
 
     console.log('[Quotes v3.8.1] Override REJECTED:', quote.quoteNumber, 'item #' + itemIdx,
         'requested $' + item.priceOverride.requestedPrice,

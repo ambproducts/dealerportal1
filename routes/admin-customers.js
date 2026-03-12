@@ -211,7 +211,7 @@ router.delete('/:id', (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
     let cascadeCount = 0;
     quotes.forEach(q => {
-        if (q.customerId === customerId && !q.deleted) {
+        if (q.customer && q.customer.customerId === customerId && !q.deleted) {
             // For GM, only cascade-delete quotes that belong to their dealer
             if (req.user.role === 'gm') {
                 if (!q.dealerCode || q.dealerCode.toUpperCase() !== req.user.dealerCode.toUpperCase()) {
@@ -329,7 +329,7 @@ router.delete('/:id/permanent', requireAdmin, (req, res) => {
     // Also permanently remove cascade-deleted quotes
     const quotes = readJSON(QUOTES_FILE);
     const beforeCount = quotes.length;
-    const remaining = quotes.filter(q => q.customerId !== removed.id);
+    const remaining = quotes.filter(q => !(q.customer && q.customer.customerId === removed.id));
     if (remaining.length < beforeCount) {
         writeJSON(QUOTES_FILE, remaining);
     }
@@ -348,7 +348,7 @@ router.delete('/:id/permanent', requireAdmin, (req, res) => {
 // -----------------------------------------------------------
 router.get('/:id/quotes', (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
-    const customerQuotes = quotes.filter(q => q.customerId === req.params.id && !q.deleted);
+    const customerQuotes = quotes.filter(q => q.customer && q.customer.customerId === req.params.id && !q.deleted);
     res.json(customerQuotes);
 });
 
