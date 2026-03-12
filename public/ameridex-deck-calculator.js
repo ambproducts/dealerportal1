@@ -384,6 +384,54 @@
             });
         });
 
+        // Custom length option based on max cut needed (mirrors rectangular optimizer)
+        var maxCutLen = 0;
+        for (var mi = 0; mi < cutDetails.length; mi++) {
+            if (cutDetails[mi].lengthFt > maxCutLen) maxCutLen = cutDetails[mi].lengthFt;
+        }
+        var customLen = getCustomLength(maxCutLen);
+        var isCustomSameAsStandard = (STD_LENGTHS.indexOf(customLen) !== -1);
+        if (!isCustomSameAsStandard && customLen > 0) {
+            var custBoards = 0;
+            var custWasteLF = 0;
+            var custButtJoints = 0;
+            for (var ri = 0; ri < cutDetails.length; ri++) {
+                var angleFactor = (cutDetails[ri].startAngle > 0 || cutDetails[ri].endAngle > 0) ? (1 + ANGLE_CUT_WASTE) : 1;
+                var effectiveSegLen = cutDetails[ri].lengthFt * angleFactor;
+                if (customLen >= effectiveSegLen) {
+                    custBoards += 1;
+                    custWasteLF += (customLen - effectiveSegLen);
+                } else {
+                    var boardsNeeded = Math.ceil(effectiveSegLen / customLen);
+                    custBoards += boardsNeeded;
+                    custWasteLF += (boardsNeeded * customLen - effectiveSegLen);
+                    custButtJoints++;
+                }
+            }
+            var custTotalWithWaste = Math.ceil(custBoards * wasteMultiplier);
+            var custExtra = custTotalWithWaste - custBoards;
+            var custTotalLF = custTotalWithWaste * customLen;
+            var custTotalWasteLF = custWasteLF + custExtra * customLen;
+            var custWastePct = custTotalLF > 0 ? (custTotalWasteLF / custTotalLF * 100) : 0;
+
+            options.push({
+                length: customLen,
+                label: customLen + "' Custom",
+                isCustom: true,
+                boardsPerRow: custBoards > 0 ? Math.round(custBoards / Math.max(totalBoardRows, 1) * 10) / 10 : 0,
+                boardRows: totalBoardRows,
+                totalBoards: custTotalWithWaste,
+                totalLinearFt: Math.round(custTotalLF),
+                wasteLinearFt: Math.round(custTotalWasteLF),
+                wastePct: Math.round(custWastePct * 10) / 10,
+                buttJoints: custButtJoints > 0,
+                note: custButtJoints > 0
+                    ? custButtJoints + ' rows need butt joints, polygon shape'
+                    : 'Custom cut, minimal waste polygon shape',
+                recommended: false
+            });
+        }
+
         options.sort(function (a, b) {
             if (a.wasteLinearFt !== b.wasteLinearFt) return a.wasteLinearFt - b.wasteLinearFt;
             return a.totalLinearFt - b.totalLinearFt;
@@ -2218,27 +2266,32 @@
 
         var phtml = '<!DOCTYPE html><html><head><title>AmeriDex Cut Plan</title>' +
             '<style>body{font-family:Arial,sans-serif;padding:20px;margin:0;color:#1f2937}' +
-            'h1{color:#2563eb;margin:0 0 5px}h2{color:#374151;font-size:1.1rem;border-bottom:1px solid #ddd;padding-bottom:5px;margin-top:20px}' +
-            'table{width:100%;border-collapse:collapse;font-size:0.9rem}td,th{padding:4px 8px;text-align:left}' +
+            'h1{color:#2563eb;margin:0}h2{color:#374151;font-size:1.1rem;border-bottom:1px solid #ddd;padding-bottom:5px;margin-top:20px}' +
+            'table{width:100%;border-collapse:collapse;font-size:0.9rem}td,th{border:1px solid #ddd;padding:10px;text-align:left}' +
+            'thead tr{background:#f3f4f6}' +
             '.board-bar{display:flex;height:22px;border:1px solid #d1d5db;border-radius:4px;overflow:hidden;margin:2px 0}' +
             '.cut-seg{display:flex;align-items:center;justify-content:center;overflow:hidden;white-space:nowrap;padding:0 3px;font-size:0.7rem;border-right:1px solid rgba(0,0,0,0.15)}' +
             '.primary{background:#dbeafe;color:#1e3a5f}.reuse{background:#bbf7d0;color:#15803d}.waste{background:#fecaca;color:#991b1b}' +
-            '@media print{body{padding:0}}</style></head><body>';
+            '@media print{body{padding:0}}</style></head><body>' +
+            '<div style="max-width:800px;margin:0 auto">';
 
-        // Header
+        // Header — matches quote print theme
+        phtml += '<div style="border-bottom:3px solid #2563eb;padding-bottom:15px;margin-bottom:20px">';
         phtml += '<h1>AmeriDex Cut Plan</h1>';
-        phtml += '<p style="color:#666;margin:2px 0">Generated: ' + today + '</p>';
-        if (quoteId) phtml += '<p style="color:#1e40af;font-weight:bold;margin:2px 0">Quote #: ' + quoteId + '</p>';
-        phtml += '<p style="margin:2px 0">Deck area: ' + (currentCalcResult.deckAreaSqFt ? currentCalcResult.deckAreaSqFt + ' sq ft' : fmtFtIn(currentCalcResult.coverageFt) + ' x ' + fmtFtIn(currentCalcResult.spanFt)) + '</p>';
+        phtml += '<p style="color:#666;margin:5px 0 0">Generated: ' + today + '</p>';
+        if (quoteId) phtml += '<p style="color:#1e40af;font-weight:bold;margin:5px 0 0">Quote #: ' + quoteId + '</p>';
+        phtml += '<p style="margin:5px 0 0">Deck area: ' + (currentCalcResult.deckAreaSqFt ? currentCalcResult.deckAreaSqFt + ' sq ft' : fmtFtIn(currentCalcResult.coverageFt) + ' x ' + fmtFtIn(currentCalcResult.spanFt)) + '</p>';
+        phtml += '</div>';
 
         // Material Shopping List
-        phtml += '<h2>Material Shopping List</h2>';
+        phtml += '<div style="margin-bottom:20px"><h2>Material Shopping List</h2>';
         var deckBoardPrice = opt.totalBoards * opt.length * pricePerFt;
         var estimatedTotal = deckBoardPrice;
-        phtml += '<table>';
-        phtml += '<tr style="border-bottom:1px solid #e5e7eb"><td colspan="2" style="font-weight:600">DECKING</td></tr>';
+        phtml += '<table style="margin-top:10px">';
+        phtml += '<thead><tr><th>Item</th><th style="text-align:right">Price</th></tr></thead><tbody>';
+        phtml += '<tr style="background:#f9fafb"><td colspan="2" style="font-weight:600">DECKING</td></tr>';
         phtml += '<tr><td>' + opt.totalBoards + 'x ' + boardTypeLabel + ', ' + opt.length + '\', ' + color + '</td><td style="text-align:right">' + pm(deckBoardPrice) + '</td></tr>';
-        phtml += '<tr style="border-bottom:1px solid #e5e7eb"><td colspan="2" style="font-weight:600;padding-top:8px">FASTENERS</td></tr>';
+        phtml += '<tr style="background:#f9fafb"><td colspan="2" style="font-weight:600">FASTENERS</td></tr>';
         var screwCost = fasteners.screwBoxes * 37;
         var plugCost = fasteners.plugBoxes * 33.79;
         estimatedTotal += screwCost + plugCost;
@@ -2251,7 +2304,7 @@
         var stChk = document.getElementById('stairs');
         var hasSolid = (pfChk && pfChk.checked) || (bbChk && bbChk.checked) || (stChk && stChk.checked);
         if (hasSolid) {
-            phtml += '<tr style="border-bottom:1px solid #e5e7eb"><td colspan="2" style="font-weight:600;padding-top:8px">SOLID EDGE BOARDS</td></tr>';
+            phtml += '<tr style="background:#f9fafb"><td colspan="2" style="font-weight:600">SOLID EDGE BOARDS</td></tr>';
             if (pfChk && pfChk.checked) {
                 var pfT = (document.getElementById('pf-type') || {}).value || 'single';
                 var pfLS = Math.max(currentCalcResult.coverageFt, currentCalcResult.spanFt);
@@ -2291,43 +2344,43 @@
                 }
             }
         }
-        phtml += '<tr style="border-top:2px solid #1e40af"><td style="font-weight:700;color:#1e40af">ESTIMATED TOTAL</td><td style="text-align:right;font-weight:700;color:#1e40af;font-size:1.1rem">' + pm(estimatedTotal) + '</td></tr>';
-        phtml += '</table>';
+        phtml += '<tr style="background:#f3f4f6;font-weight:bold"><td style="color:#1e40af">ESTIMATED TOTAL</td><td style="text-align:right;color:#1e40af;font-size:1.1rem">' + pm(estimatedTotal) + '</td></tr>';
+        phtml += '</tbody></table></div>';
 
         // Cut angle summary
         if (cs) {
-            phtml += '<h2>Cut Angle Summary</h2>';
+            phtml += '<div style="margin-bottom:20px"><h2>Cut Angle Summary</h2>';
             if (cs.straightRows > 0) {
-                phtml += '<p>' + cs.straightRows + ' board' + (cs.straightRows !== 1 ? 's' : '') + ': Straight cuts only (square ends)</p>';
+                phtml += '<p style="margin:5px 0">' + cs.straightRows + ' board' + (cs.straightRows !== 1 ? 's' : '') + ': Straight cuts only (square ends)</p>';
             }
             if (cs.angledRows > 0) {
                 var aDesc = cs.uniqueAngles.join('\u00B0/') + '\u00B0';
-                phtml += '<p>' + cs.angledRows + ' board' + (cs.angledRows !== 1 ? 's' : '') + ': ' + aDesc + ' angle cuts</p>';
+                phtml += '<p style="margin:5px 0">' + cs.angledRows + ' board' + (cs.angledRows !== 1 ? 's' : '') + ': ' + aDesc + ' angle cuts</p>';
             }
+            phtml += '</div>';
         }
 
         // Cut plan summary
-        phtml += '<h2>Cut Plan (' + opt.length + '\' boards)</h2>';
-        phtml += '<p>Purchase: <strong>' + cutList.totalBoardsPurchased + ' boards</strong> | ' +
+        phtml += '<div style="margin-bottom:20px"><h2>Cut Plan (' + opt.length + '\' boards)</h2>';
+        phtml += '<p style="margin:5px 0">Purchase: <strong>' + cutList.totalBoardsPurchased + ' boards</strong> | ' +
             cutList.reuseNote + ' | Total waste: <strong>' + fmtFtIn(cutList.totalWasteFt) + '</strong> (' + cutList.wastePct + '%)</p>';
 
-        // Board-by-board with visual bars
+        // Board-by-board table with visual bars
+        phtml += '<table style="margin-top:10px;font-size:0.85rem"><thead><tr><th>Board</th><th>Cuts</th><th style="text-align:right">Waste</th></tr></thead><tbody>';
         for (var bi = 0; bi < cutList.boards.length; bi++) {
             var brd = cutList.boards[bi];
-            phtml += '<div style="margin-bottom:6px">';
-            phtml += '<strong>Board #' + brd.boardNum + '</strong> (' + opt.length + '\'): ';
+            var cutDesc = '';
             for (var ci = 0; ci < brd.cuts.length; ci++) {
                 var c = brd.cuts[ci];
-                if (ci > 0) phtml += ' &rarr; ';
-                var aNote = c.angle > 0 ? ' [' + c.angle + '\u00B0]' : ' [straight]';
-                phtml += 'Row ' + c.row + ': ' + fmtFtIn(c.cutLength) + aNote;
-                if (c.isReuse) phtml += ' (offcut)';
+                if (ci > 0) cutDesc += ' \u2192 ';
+                cutDesc += 'Row ' + c.row + ': ' + fmtFtIn(c.cutLength);
+                cutDesc += c.angle > 0 ? ' [' + c.angle + '\u00B0]' : ' [str]';
+                if (c.isReuse) cutDesc += ' (offcut)';
             }
-            if (brd.wasteLength > 0.01) {
-                phtml += ' | Waste: ' + fmtFtIn(brd.wasteLength);
-            }
-
-            // Visual bar
+            phtml += '<tr' + (bi % 2 === 1 ? ' style="background:#f9fafb"' : '') + '>';
+            phtml += '<td>#' + brd.boardNum + '</td>';
+            phtml += '<td>' + cutDesc;
+            // Visual bar inline
             phtml += '<div class="board-bar">';
             for (var vc = 0; vc < brd.cuts.length; vc++) {
                 var seg = brd.cuts[vc];
@@ -2339,10 +2392,12 @@
                 var wPct = (brd.wasteLength / brd.boardLength * 100).toFixed(1);
                 phtml += '<div class="cut-seg waste" style="flex:0 0 ' + wPct + '%">' + fmtFtIn(brd.wasteLength) + '</div>';
             }
-            phtml += '</div></div>';
+            phtml += '</div></td>';
+            phtml += '<td style="text-align:right">' + (brd.wasteLength > 0.01 ? fmtFtIn(brd.wasteLength) : '-') + '</td></tr>';
         }
+        phtml += '</tbody></table></div>';
 
-        phtml += '</body></html>';
+        phtml += '</div></body></html>';
 
         var printWindow = window.open('', '_blank', 'width=800,height=600');
         printWindow.document.write(phtml);
