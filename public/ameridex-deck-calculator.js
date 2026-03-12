@@ -587,33 +587,33 @@
                 SCREWS_PER_CROSSING + ' screws per crossing = ' + fasteners.totalScrews.toLocaleString() + ' screws' +
             '</span>';
 
-        // Additional Materials Preview
+        // Additional Materials Preview — read directly from DOM checkboxes
         var additionalItems = [];
-        var pfOpt = window.currentQuote && window.currentQuote.options && window.currentQuote.options.pictureFrame;
-        if (pfOpt === true) pfOpt = { enabled: true, type: 'single', color: null };
-        if (pfOpt && pfOpt.enabled) {
+        var pfCheck = document.getElementById('pic-frame');
+        if (pfCheck && pfCheck.checked) {
+            var pfType = (document.getElementById('pf-type') || {}).value || 'single';
             var perimeterFt = 2 * (result.coverageFt + result.spanFt);
             var pfBoardLen = result.spanFt <= 12 ? 12 : result.spanFt <= 16 ? 16 : 20;
             var pfBoards = Math.ceil(perimeterFt / pfBoardLen);
-            if (pfOpt.type === 'double') pfBoards = pfBoards * 2;
-            additionalItems.push('Picture frame: <strong>' + pfBoards + '</strong> solid edge board' + (pfBoards !== 1 ? 's' : '') + ' (' + (pfOpt.type === 'double' ? 'double' : 'single') + ')');
+            if (pfType === 'double') pfBoards = pfBoards * 2;
+            additionalItems.push('Picture frame: <strong>' + pfBoards + '</strong> solid edge board' + (pfBoards !== 1 ? 's' : '') + ' (' + (pfType === 'double' ? 'double' : 'single') + ')');
         }
 
-        var bbOpt = window.currentQuote && window.currentQuote.options && window.currentQuote.options.breakerBoard;
-        if (bbOpt && bbOpt.enabled) {
+        var bbCheck = document.getElementById('breaker-board');
+        if (bbCheck && bbCheck.checked) {
             var bbCoverage = result.coverageFt;
             var bbBoardLen = bbCoverage <= 12 ? 12 : bbCoverage <= 16 ? 16 : 20;
             var bbBoardCount = Math.ceil(bbCoverage / bbBoardLen);
             additionalItems.push('Breaker board: <strong>' + bbBoardCount + '</strong> solid edge board' + (bbBoardCount !== 1 ? 's' : ''));
         }
 
-        var stOpt = window.currentQuote && window.currentQuote.options && window.currentQuote.options.stairs;
-        if (stOpt === true) stOpt = { enabled: true, steps: 1, treadsPerStep: 1, risers: false, color: null, stairWidth: null };
-        if (stOpt && stOpt.enabled) {
-            var steps = stOpt.steps || 1;
-            var treadsPerStep = stOpt.treadsPerStep || 1;
+        var stCheck = document.getElementById('stairs');
+        if (stCheck && stCheck.checked) {
+            var steps = parseInt((document.getElementById('stair-steps') || {}).value) || 1;
+            var treadsPerStep = parseInt((document.getElementById('stair-treads') || {}).value) || 1;
             var treadBoards = steps * treadsPerStep;
-            var riserBoards = stOpt.risers ? steps : 0;
+            var hasRisers = document.getElementById('stair-risers') && document.getElementById('stair-risers').checked;
+            var riserBoards = hasRisers ? steps : 0;
             var stairDesc = 'Stairs: <strong>' + treadBoards + '</strong> tread board' + (treadBoards !== 1 ? 's' : '');
             if (riserBoards > 0) stairDesc += ' + <strong>' + riserBoards + '</strong> riser board' + (riserBoards !== 1 ? 's' : '');
             additionalItems.push(stairDesc);
@@ -776,9 +776,13 @@
         }
 
         // 4. Picture frame solid edge boards
-        var pfOpt = window.currentQuote.options && window.currentQuote.options.pictureFrame;
-        // Backward compat: boolean true means enabled single frame
-        if (pfOpt === true) pfOpt = { enabled: true, type: 'single', color: null };
+        // Read directly from DOM so it works even if the quote hasn't been saved yet
+        var pfCheckbox = document.getElementById('pic-frame');
+        var pfOpt = pfCheckbox && pfCheckbox.checked ? {
+            enabled: true,
+            type: (document.getElementById('pf-type') || {}).value || 'single',
+            color: (document.getElementById('pf-color-swatches') || {}).dataset && document.getElementById('pf-color-swatches').dataset.selected || null
+        } : null;
         if (pfOpt && pfOpt.enabled) {
             var perimeterFt = 2 * (currentCalcResult.coverageFt + currentCalcResult.spanFt);
             var pfBoardLen = currentCalcResult.spanFt <= 12 ? 12 :
@@ -802,7 +806,14 @@
         }
 
         // 5. Breaker board
-        var bbOpt = window.currentQuote.options && window.currentQuote.options.breakerBoard;
+        // Read directly from DOM
+        var bbCheckbox = document.getElementById('breaker-board');
+        var bbOpt = bbCheckbox && bbCheckbox.checked ? {
+            enabled: true,
+            position: (document.getElementById('breaker-position') || {}).value || 'center',
+            customOffset: (document.getElementById('breaker-position') || {}).value === 'custom' ? (parseFloat((document.getElementById('breaker-offset') || {}).value) || null) : null,
+            color: (document.getElementById('breaker-color-swatches') || {}).dataset && document.getElementById('breaker-color-swatches').dataset.selected || null
+        } : null;
         if (bbOpt && bbOpt.enabled) {
             var bbCoverage = currentCalcResult.coverageFt;
             var bbBoardLen = bbCoverage <= 12 ? 12 : bbCoverage <= 16 ? 16 : 20;
@@ -824,9 +835,16 @@
         }
 
         // 6. Stair boards
-        var stOpt = window.currentQuote.options && window.currentQuote.options.stairs;
-        // Backward compat: boolean true means enabled with defaults
-        if (stOpt === true) stOpt = { enabled: true, steps: 1, treadsPerStep: 1, risers: false, color: null, stairWidth: null };
+        // Read directly from DOM
+        var stCheckbox = document.getElementById('stairs');
+        var stOpt = stCheckbox && stCheckbox.checked ? {
+            enabled: true,
+            steps: parseInt((document.getElementById('stair-steps') || {}).value) || 1,
+            treadsPerStep: parseInt((document.getElementById('stair-treads') || {}).value) || 1,
+            risers: !!(document.getElementById('stair-risers') && document.getElementById('stair-risers').checked),
+            color: (document.getElementById('stair-color-swatches') || {}).dataset && document.getElementById('stair-color-swatches').dataset.selected || null,
+            stairWidth: parseFloat((document.getElementById('stair-width') || {}).value) || null
+        } : null;
         if (stOpt && stOpt.enabled) {
             var stairWidth = stOpt.stairWidth || currentCalcResult.coverageFt;
             var stBoardLen = stairWidth <= 12 ? 12 : stairWidth <= 16 ? 16 : 20;
