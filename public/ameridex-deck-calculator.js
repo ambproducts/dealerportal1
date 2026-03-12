@@ -451,6 +451,99 @@
         };
     }
 
+    // === CUT LIST OPTIMIZER (First-Fit-Decreasing Bin Packing) ===
+    var KERF_FT = 0.021;        // ~1/4" saw blade width
+    var MIN_REUSABLE_FT = 1.0;  // offcuts under 1' are always waste
+
+    function generateCutList(cutDetails, boardLength) {
+        // Build segment list from cutDetails
+        var segments = cutDetails.map(function (cd) {
+            var maxAngle = Math.max(cd.startAngle || 0, cd.endAngle || 0);
+            return {
+                row: cd.row,
+                cutLength: cd.lengthFt,
+                angle: maxAngle,
+                cutType: maxAngle > 0 ? 'angled' : 'straight'
+            };
+        });
+
+        // Sort longest-first (FFD)
+        segments.sort(function (a, b) { return b.cutLength - a.cutLength; });
+
+        var boards = []; // each: { boardNum, boardLength, cuts[], remaining }
+
+        for (var i = 0; i < segments.length; i++) {
+            var seg = segments[i];
+            var needed = seg.cutLength + KERF_FT; // cut + kerf
+            var placed = false;
+
+            // Try to fit into an existing board's remaining space
+            for (var b = 0; b < boards.length; b++) {
+                if (boards[b].remaining >= needed && boards[b].remaining >= MIN_REUSABLE_FT) {
+                    boards[b].cuts.push({
+                        row: seg.row,
+                        cutLength: seg.cutLength,
+                        angle: seg.angle,
+                        cutType: seg.cutType,
+                        isReuse: true
+                    });
+                    boards[b].remaining -= needed;
+                    placed = true;
+                    break;
+                }
+            }
+
+            // Allocate a new board
+            if (!placed) {
+                boards.push({
+                    boardNum: boards.length + 1,
+                    boardLength: boardLength,
+                    cuts: [{
+                        row: seg.row,
+                        cutLength: seg.cutLength,
+                        angle: seg.angle,
+                        cutType: seg.cutType,
+                        isReuse: false
+                    }],
+                    remaining: boardLength - needed
+                });
+            }
+        }
+
+        // Compute summary stats
+        var totalWaste = 0;
+        var reuseCount = 0;
+        for (var bi = 0; bi < boards.length; bi++) {
+            var bd = boards[bi];
+            var totalUsed = 0;
+            for (var ci = 0; ci < bd.cuts.length; ci++) {
+                totalUsed += bd.cuts[ci].cutLength + KERF_FT;
+                if (bd.cuts[ci].isReuse) reuseCount++;
+            }
+            bd.totalUsed = totalUsed;
+            bd.wasteLength = boardLength - totalUsed;
+            bd.offcutLength = bd.remaining;
+            bd.offcutUsed = bd.cuts.length > 1;
+        }
+        for (var wi = 0; wi < boards.length; wi++) {
+            totalWaste += boards[wi].wasteLength;
+        }
+
+        var totalLinear = boards.length * boardLength;
+        var wastePct = totalLinear > 0 ? (totalWaste / totalLinear * 100) : 0;
+
+        return {
+            boards: boards,
+            totalBoardsPurchased: boards.length,
+            totalWasteFt: Math.round(totalWaste * 10) / 10,
+            wastePct: Math.round(wastePct * 10) / 10,
+            reuseCount: reuseCount,
+            reuseNote: reuseCount > 0
+                ? reuseCount + ' offcut' + (reuseCount !== 1 ? 's' : '') + ' reused, saving ' + reuseCount + ' board' + (reuseCount !== 1 ? 's' : '')
+                : 'No offcuts large enough to reuse'
+        };
+    }
+
     // === FASTENER CALCULATION ===
     function calculateFasteners(boardRows, joistCount) {
         var screwsPerBoard = joistCount * SCREWS_PER_CROSSING;
@@ -935,7 +1028,6 @@
             }
             if (cs.angledRows > 0) {
                 var angleDesc = cs.uniqueAngles.join('\u00B0/') + '\u00B0';
-                // Determine which side(s) have angled cuts
                 var hasStartAngle = cd.some(function(c) { return c.startAngle > 0; });
                 var hasEndAngle = cd.some(function(c) { return c.endAngle > 0; });
                 var sideStr = [];
@@ -945,13 +1037,96 @@
             }
             html += '<span style="font-size:0.8rem;color:#6b7280">Angled cuts add ~5% waste. Set your miter saw to the angles shown above.</span>';
 
-            // Expandable row-by-row detail table
+            // === Cut List Optimization ===
+            var cutList = generateCutList(result.cutDetails, opt.length);
+
+            // Build a row→boardNum lookup for the detail table
+            var rowBoardMap = {};
+            for (var bli = 0; bli < cutList.boards.length; bli++) {
+                var brd = cutList.boards[bli];
+                for (var bci = 0; bci < brd.cuts.length; bci++) {
+                    rowBoardMap[brd.cuts[bci].row] = brd.boardNum;
+                }
+            }
+
+            // Summary stats
+            html += '<div style="margin-top:0.6rem;padding:0.5rem 0.75rem;background:#f0fdf4;border:1px solid #86efac;border-radius:6px;font-size:0.85rem">' +
+                '<strong>Cut Plan for ' + opt.length + '\' boards:</strong><br>' +
+                '\u2022 Purchase: <strong>' + cutList.totalBoardsPurchased + ' boards</strong> (' + opt.length + '\')<br>' +
+                '\u2022 ' + cutList.reuseNote + '<br>' +
+                '\u2022 Total waste: <strong>' + fmtFtIn(cutList.totalWasteFt) + '</strong> (' + cutList.wastePct + '%)<br>' +
+                '<span style="font-size:0.75rem;color:#6b7280">\u2702 Kerf allowance: \u00BC" per cut (saw blade width)</span>' +
+                '</div>';
+
+            // Visual board bars
+            html += '<details style="margin-top:0.5rem" open>' +
+                '<summary style="cursor:pointer;font-size:0.82rem;color:#2563eb">Visual board plan</summary>' +
+                '<div style="margin-top:0.5rem">';
+            for (var vbi = 0; vbi < cutList.boards.length; vbi++) {
+                var vb = cutList.boards[vbi];
+                html += '<div style="display:flex;align-items:center;margin-bottom:3px;font-size:0.72rem">' +
+                    '<span style="width:52px;flex-shrink:0;color:#374151;font-weight:600">#' + vb.boardNum + '</span>' +
+                    '<div style="flex:1;display:flex;height:22px;border:1px solid #d1d5db;border-radius:4px;overflow:hidden">';
+                for (var vci = 0; vci < vb.cuts.length; vci++) {
+                    var vc = vb.cuts[vci];
+                    var pct = (vc.cutLength / vb.boardLength * 100).toFixed(1);
+                    var bgColor = vc.isReuse ? '#bbf7d0' : '#dbeafe';
+                    var borderRight = 'border-right:1px solid rgba(0,0,0,0.15);';
+                    var angleTag = vc.angle > 0 ? ' \u2220' + vc.angle + '\u00B0' : '';
+                    html += '<div style="flex:0 0 ' + pct + '%;background:' + bgColor + ';' + borderRight +
+                        'display:flex;align-items:center;justify-content:center;overflow:hidden;white-space:nowrap;padding:0 3px" ' +
+                        'title="Row ' + vc.row + ': ' + fmtFtIn(vc.cutLength) + angleTag + (vc.isReuse ? ' (reused offcut)' : '') + '">' +
+                        '<span style="color:#1e3a5f;font-size:0.65rem">R' + vc.row + ': ' + fmtFtIn(vc.cutLength) + '</span></div>';
+                }
+                // Waste segment
+                if (vb.wasteLength > 0.01) {
+                    var wastePct = (vb.wasteLength / vb.boardLength * 100).toFixed(1);
+                    var wasteColor = vb.wasteLength < MIN_REUSABLE_FT ? '#fecaca' : '#fee2e2';
+                    html += '<div style="flex:0 0 ' + wastePct + '%;background:' + wasteColor +
+                        ';display:flex;align-items:center;justify-content:center;overflow:hidden;white-space:nowrap;padding:0 2px" ' +
+                        'title="Waste: ' + fmtFtIn(vb.wasteLength) + '">' +
+                        '<span style="color:#991b1b;font-size:0.6rem">' + fmtFtIn(vb.wasteLength) + '</span></div>';
+                }
+                html += '</div></div>';
+            }
+            // Legend
+            html += '<div style="display:flex;gap:12px;margin-top:4px;font-size:0.7rem;color:#6b7280">' +
+                '<span><span style="display:inline-block;width:10px;height:10px;background:#dbeafe;border:1px solid #93c5fd;border-radius:2px;vertical-align:middle"></span> Primary cut</span>' +
+                '<span><span style="display:inline-block;width:10px;height:10px;background:#bbf7d0;border:1px solid #86efac;border-radius:2px;vertical-align:middle"></span> Reused offcut</span>' +
+                '<span><span style="display:inline-block;width:10px;height:10px;background:#fecaca;border:1px solid #fca5a5;border-radius:2px;vertical-align:middle"></span> Waste</span>' +
+                '</div></div></details>';
+
+            // Board-by-board text detail
+            html += '<details style="margin-top:0.5rem">' +
+                '<summary style="cursor:pointer;font-size:0.82rem;color:#2563eb">Board-by-board cutting instructions</summary>' +
+                '<div style="max-height:260px;overflow-y:auto;margin-top:0.5rem;font-size:0.78rem">';
+            for (var tbi = 0; tbi < cutList.boards.length; tbi++) {
+                var tb = cutList.boards[tbi];
+                html += '<div style="margin-bottom:4px;padding:3px 6px;background:' + (tbi % 2 === 0 ? '#fff' : '#f9fafb') + ';border-radius:3px">' +
+                    '<strong>Board #' + tb.boardNum + '</strong> (' + opt.length + '\'):&nbsp; ';
+                for (var tci = 0; tci < tb.cuts.length; tci++) {
+                    var tc = tb.cuts[tci];
+                    if (tci > 0) html += ' &rarr; ';
+                    var cutStyle = tc.isReuse ? 'color:#15803d' : '';
+                    var angleNote = tc.angle > 0 ? ' <span style="color:#d97706">[' + tc.angle + '\u00B0]</span>' : ' [straight]';
+                    html += '<span style="' + cutStyle + '">Row ' + tc.row + ': cut ' + fmtFtIn(tc.cutLength) + angleNote + '</span>';
+                    if (tc.isReuse) html += ' <span style="font-size:0.7rem;color:#16a34a">(from offcut)</span>';
+                }
+                if (tb.wasteLength > 0.01) {
+                    html += ' | <span style="color:#dc2626">Waste: ' + fmtFtIn(tb.wasteLength) + '</span>';
+                }
+                html += '</div>';
+            }
+            html += '</div></details>';
+
+            // Expandable row-by-row detail table with Board # column
             html += '<details style="margin-top:0.5rem">' +
                 '<summary style="cursor:pointer;font-size:0.82rem;color:#2563eb">View row-by-row cut details</summary>' +
                 '<div style="max-height:200px;overflow-y:auto;margin-top:0.5rem">' +
                 '<table style="width:100%;font-size:0.78rem;border-collapse:collapse">' +
                 '<thead><tr style="border-bottom:1px solid #e5e7eb;text-align:left">' +
                 '<th style="padding:2px 6px">Row</th>' +
+                '<th style="padding:2px 6px">Board\u00A0#</th>' +
                 '<th style="padding:2px 6px">Position</th>' +
                 '<th style="padding:2px 6px">Length</th>' +
                 '<th style="padding:2px 6px">Start</th>' +
@@ -962,8 +1137,10 @@
                 var startLabel = row.startAngle > 0 ? row.startAngle + '\u00B0' : 'straight';
                 var endLabel = row.endAngle > 0 ? row.endAngle + '\u00B0' : 'straight';
                 var rowBg = ri % 2 === 0 ? '' : ' style="background:#f9fafb"';
+                var boardRef = rowBoardMap[row.row] || '—';
                 html += '<tr' + rowBg + '>' +
                     '<td style="padding:2px 6px">' + row.row + '</td>' +
+                    '<td style="padding:2px 6px">' + boardRef + '</td>' +
                     '<td style="padding:2px 6px">' + fmtFtIn(row.positionFt) + '</td>' +
                     '<td style="padding:2px 6px">' + fmtFtIn(row.lengthFt) + '</td>' +
                     '<td style="padding:2px 6px">' + startLabel + '</td>' +
