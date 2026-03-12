@@ -56,7 +56,7 @@
 
     var API_BASE = window.AMERIDEX_API_BASE || '';
 
-    var _authToken    = sessionStorage.getItem('ameridex-token') || null;
+    var _authToken    = localStorage.getItem('ameridex-token') || sessionStorage.getItem('ameridex-token') || null;
     var _currentUser  = null;
     var _currentDealer = null;
     var _serverOnline = true;
@@ -81,6 +81,7 @@
                 if (res.status === 401) {
                     if (!skipAuthRedirect) {
                         sessionStorage.removeItem('ameridex-token');
+                        localStorage.removeItem('ameridex-token');
                         _authToken = null; _currentUser = null; _currentDealer = null;
                         showLoginScreen();
                         showLoginError('Session expired. Please log in again.');
@@ -320,7 +321,14 @@
         api('POST', '/api/auth/login', { dealerCode: code, username: username, password: password }, { skipAuthRedirect: true })
             .then(function (data) {
                 _authToken = data.token;
-                sessionStorage.setItem('ameridex-token', data.token);
+                var rememberMe = document.getElementById('remember-me');
+                if (rememberMe && rememberMe.checked) {
+                    localStorage.setItem('ameridex-token', data.token);
+                    sessionStorage.removeItem('ameridex-token');
+                } else {
+                    sessionStorage.setItem('ameridex-token', data.token);
+                    localStorage.removeItem('ameridex-token');
+                }
                 _currentUser   = data.user;
                 _currentDealer = data.dealer;
                 _currentDealer.role = data.user.role;
@@ -670,6 +678,7 @@
         if (_authToken) api('POST', '/api/auth/logout', null, { skipAuthRedirect: true }).catch(function () {});
         _authToken = null; _currentUser = null; _currentDealer = null;
         sessionStorage.removeItem('ameridex-token');
+        localStorage.removeItem('ameridex-token');
         clearTimeout(window.idleTimer); clearTimeout(window.warningTimer); clearInterval(window.countdownInterval);
         window.dealerSettings.dealerCode = ''; window.dealerSettings.role = '';
         saveDealerSettings();
@@ -975,6 +984,7 @@
             })
             .catch(function () {
                 sessionStorage.removeItem('ameridex-token');
+                localStorage.removeItem('ameridex-token');
                 _authToken = null; _currentUser = null; _currentDealer = null;
                 showLoginScreen();
             });
