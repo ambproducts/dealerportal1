@@ -981,6 +981,33 @@
         var fromSpan = document.getElementById('polygon-from');
 
         var SNAP_RADIUS = 10;
+        var ALIGN_THRESHOLD = 6;
+
+        // Returns alignment snap info for a cursor position against all existing vertices.
+        // Returns { x, y, alignedVerts } where alignedVerts contains { vert, axis } entries.
+        function alignToVertices(cursor, verts) {
+            var result = { x: cursor.x, y: cursor.y, alignedVerts: [] };
+            var bestDx = ALIGN_THRESHOLD + 1;
+            var bestDy = ALIGN_THRESHOLD + 1;
+            for (var i = 0; i < verts.length; i++) {
+                var dx = Math.abs(cursor.x - verts[i].x);
+                var dy = Math.abs(cursor.y - verts[i].y);
+                if (dx <= ALIGN_THRESHOLD && dx < bestDx) {
+                    bestDx = dx;
+                    result.x = verts[i].x;
+                    // Remove any previous x-aligned entry
+                    result.alignedVerts = result.alignedVerts.filter(function(a) { return a.axis !== 'x'; });
+                    result.alignedVerts.push({ vert: verts[i], axis: 'x' });
+                }
+                if (dy <= ALIGN_THRESHOLD && dy < bestDy) {
+                    bestDy = dy;
+                    result.y = verts[i].y;
+                    result.alignedVerts = result.alignedVerts.filter(function(a) { return a.axis !== 'y'; });
+                    result.alignedVerts.push({ vert: verts[i], axis: 'y' });
+                }
+            }
+            return result;
+        }
         var ANGLE_SNAP_THRESHOLD = 8; // degrees — how close to a snap angle before it locks
 
         function getScale() {
@@ -1117,7 +1144,43 @@
             // Live rubber-band line from last vertex to cursor
             if (!polyState.closed && verts.length > 0 && polyState.mousePos) {
                 var lastVert = verts[verts.length - 1];
-                var snappedMouse = (snapToggle && snapToggle.checked) ? snapAngle(lastVert, polyState.mousePos) : polyState.mousePos;
+
+                // Vertex alignment guides (always active, independent of angle snap)
+                var aligned = alignToVertices(polyState.mousePos, verts);
+                var cursorPos = { x: aligned.x, y: aligned.y };
+
+                // Draw alignment guide lines and indicators
+                if (aligned.alignedVerts.length > 0) {
+                    ctx.save();
+                    ctx.setLineDash([3, 3]);
+                    ctx.strokeStyle = 'rgba(220, 38, 38, 0.3)';
+                    ctx.lineWidth = 1;
+                    for (var ai = 0; ai < aligned.alignedVerts.length; ai++) {
+                        var av = aligned.alignedVerts[ai];
+                        ctx.beginPath();
+                        if (av.axis === 'x') {
+                            ctx.moveTo(av.vert.x, 0);
+                            ctx.lineTo(av.vert.x, canvas.height);
+                        } else {
+                            ctx.moveTo(0, av.vert.y);
+                            ctx.lineTo(canvas.width, av.vert.y);
+                        }
+                        ctx.stroke();
+                        // Diamond indicator on the aligned vertex
+                        ctx.fillStyle = 'rgba(220, 38, 38, 0.5)';
+                        ctx.beginPath();
+                        ctx.moveTo(av.vert.x, av.vert.y - 5);
+                        ctx.lineTo(av.vert.x + 5, av.vert.y);
+                        ctx.lineTo(av.vert.x, av.vert.y + 5);
+                        ctx.lineTo(av.vert.x - 5, av.vert.y);
+                        ctx.closePath();
+                        ctx.fill();
+                    }
+                    ctx.restore();
+                }
+
+                // Angle snap (takes priority over alignment when both active)
+                var snappedMouse = (snapToggle && snapToggle.checked) ? snapAngle(lastVert, cursorPos) : cursorPos;
 
                 // Draw snap guide line (extended faint line showing the snap axis)
                 if (snappedMouse.snapped) {
@@ -1137,7 +1200,7 @@
                 // Rubber-band line
                 ctx.save();
                 ctx.setLineDash([6, 4]);
-                ctx.strokeStyle = snappedMouse.snapped ? '#16a34a' : '#93c5fd';
+                ctx.strokeStyle = snappedMouse.snapped ? '#16a34a' : (aligned.alignedVerts.length > 0 ? '#dc2626' : '#93c5fd');
                 ctx.lineWidth = 2;
                 ctx.beginPath();
                 ctx.moveTo(lastVert.x, lastVert.y);
@@ -1160,7 +1223,7 @@
                 var textWidth = ctx.measureText(labelText).width;
                 ctx.fillStyle = 'rgba(255,255,255,0.9)';
                 ctx.fillRect(mx - textWidth / 2 - 4, my - 18, textWidth + 8, 16);
-                ctx.fillStyle = snappedMouse.snapped ? '#16a34a' : '#1e40af';
+                ctx.fillStyle = snappedMouse.snapped ? '#16a34a' : (aligned.alignedVerts.length > 0 ? '#dc2626' : '#1e40af');
                 ctx.textAlign = 'center';
                 ctx.fillText(labelText, mx, my - 5);
                 ctx.textAlign = 'left';
@@ -1168,7 +1231,7 @@
                 // Draw a small dot at the snapped cursor position
                 ctx.beginPath();
                 ctx.arc(snappedMouse.x, snappedMouse.y, 3, 0, Math.PI * 2);
-                ctx.fillStyle = snappedMouse.snapped ? '#16a34a' : '#93c5fd';
+                ctx.fillStyle = snappedMouse.snapped ? '#16a34a' : (aligned.alignedVerts.length > 0 ? '#dc2626' : '#93c5fd');
                 ctx.fill();
             }
 
@@ -1238,6 +1301,12 @@
             if (polyState.closed) return;
             var pt = canvasCoords(e);
             var verts = polyState.vertices;
+
+            // Apply vertex alignment snapping (always active)
+            if (verts.length > 0) {
+                var aligned = alignToVertices(pt, verts);
+                pt = { x: aligned.x, y: aligned.y };
+            }
 
             // Apply angle snapping if there's a previous vertex and toggle is checked
             if (verts.length > 0 && snapToggle && snapToggle.checked) {
