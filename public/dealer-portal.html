@@ -948,6 +948,67 @@
                             <input type="number" id="waste-pct" step="1" min="0" max="50" placeholder="0">
                         </div>
                     </div>
+                    <!-- Picture Frame & Stair Options -->
+                    <div class="inline-checks" style="margin-top:0.25rem;">
+                        <!-- Picture Framing -->
+                        <div class="check-row">
+                            <input type="checkbox" id="pic-frame">
+                            <label for="pic-frame">Picture Framing</label>
+                        </div>
+                        <div id="pic-frame-config" class="option-config-panel">
+                            <div class="note-inline" style="display:block; margin-bottom:0.5rem;">Add Solid Edge boards to frame the deck perimeter.</div>
+                            <div class="config-row">
+                                <span class="config-label">Frame type:</span>
+                                <select id="pf-type">
+                                    <option value="single">Single board</option>
+                                    <option value="double">Double board</option>
+                                </select>
+                            </div>
+                            <div class="config-row">
+                                <span class="config-label">Frame color:</span>
+                                <div class="mini-color-swatches" id="pf-color-swatches"></div>
+                            </div>
+                            <div class="config-row">
+                                <span class="mini-swatch-label" id="pf-color-label">Using deck color</span>
+                            </div>
+                        </div>
+
+                        <!-- Stairs -->
+                        <div class="check-row" style="margin-top:0.2rem;">
+                            <input type="checkbox" id="stairs">
+                            <label for="stairs">Stairs</label>
+                        </div>
+                        <div id="stairs-config" class="option-config-panel">
+                            <div class="note-inline" style="display:block; margin-bottom:0.5rem;">Add Solid Edge boards for stair treads and risers.</div>
+                            <div class="config-row">
+                                <span class="config-label">Steps:</span>
+                                <select id="stair-steps">
+                                    <option value="1">1</option>
+                                    <option value="2">2</option>
+                                    <option value="3">3</option>
+                                </select>
+                            </div>
+                            <div class="config-row">
+                                <span class="config-label">Treads/step:</span>
+                                <select id="stair-treads">
+                                    <option value="1">1 board</option>
+                                    <option value="2">2 boards</option>
+                                    <option value="3">3 boards</option>
+                                </select>
+                            </div>
+                            <div class="config-row">
+                                <input type="checkbox" id="stair-risers" style="width:16px;height:16px;cursor:pointer;">
+                                <label for="stair-risers" style="font-size:0.85rem;cursor:pointer;">Include risers</label>
+                            </div>
+                            <div class="config-row">
+                                <span class="config-label">Stair color:</span>
+                                <div class="mini-color-swatches" id="stair-color-swatches"></div>
+                            </div>
+                            <div class="config-row">
+                                <span class="mini-swatch-label" id="stair-color-label">Using deck color</span>
+                            </div>
+                        </div>
+                    </div>
                     <div class="calc-buttons-row">
                         <button type="button" class="btn btn-outline" id="calc-btn">Calculate</button>
                     </div>
@@ -1038,66 +1099,6 @@
                     <div>
                         <h2 class="card-title">Order Details</h2>
                         <p class="card-subtitle">Select products, colors, and quantities.</p>
-                    </div>
-                </div>
-                <div class="inline-checks">
-                    <!-- Picture Framing -->
-                    <div class="check-row">
-                        <input type="checkbox" id="pic-frame">
-                        <label for="pic-frame">Picture Framing</label>
-                    </div>
-                    <div id="pic-frame-config" class="option-config-panel">
-                        <div class="note-inline" style="display:block; margin-bottom:0.5rem;">Add Solid Edge boards to frame the deck perimeter.</div>
-                        <div class="config-row">
-                            <span class="config-label">Frame type:</span>
-                            <select id="pf-type">
-                                <option value="single">Single board</option>
-                                <option value="double">Double board</option>
-                            </select>
-                        </div>
-                        <div class="config-row">
-                            <span class="config-label">Frame color:</span>
-                            <div class="mini-color-swatches" id="pf-color-swatches"></div>
-                        </div>
-                        <div class="config-row">
-                            <span class="mini-swatch-label" id="pf-color-label">Using deck color</span>
-                        </div>
-                    </div>
-
-                    <!-- Stairs -->
-                    <div class="check-row" style="margin-top:0.2rem;">
-                        <input type="checkbox" id="stairs">
-                        <label for="stairs">Stairs</label>
-                    </div>
-                    <div id="stairs-config" class="option-config-panel">
-                        <div class="note-inline" style="display:block; margin-bottom:0.5rem;">Add Solid Edge boards for stair treads and risers.</div>
-                        <div class="config-row">
-                            <span class="config-label">Steps:</span>
-                            <select id="stair-steps">
-                                <option value="1">1</option>
-                                <option value="2">2</option>
-                                <option value="3">3</option>
-                            </select>
-                        </div>
-                        <div class="config-row">
-                            <span class="config-label">Treads/step:</span>
-                            <select id="stair-treads">
-                                <option value="1">1 board</option>
-                                <option value="2">2 boards</option>
-                                <option value="3">3 boards</option>
-                            </select>
-                        </div>
-                        <div class="config-row">
-                            <input type="checkbox" id="stair-risers" style="width:16px;height:16px;cursor:pointer;">
-                            <label for="stair-risers" style="font-size:0.85rem;cursor:pointer;">Include risers</label>
-                        </div>
-                        <div class="config-row">
-                            <span class="config-label">Stair color:</span>
-                            <div class="mini-color-swatches" id="stair-color-swatches"></div>
-                        </div>
-                        <div class="config-row">
-                            <span class="mini-swatch-label" id="stair-color-label">Using deck color</span>
-                        </div>
                     </div>
                 </div>
                 <div id="fastener-hint" class="fastener-block" style="display:none;"></div>
