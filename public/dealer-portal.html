@@ -191,7 +191,7 @@
     .saved-quote-actions button { padding: 0.35rem 0.65rem; font-size: 0.75rem; border-radius: 6px; border: none; cursor: pointer; font-weight: 600; }
     .btn-load { background: var(--primary-soft); color: var(--primary); }
     .btn-delete-quote { background: #fee2e2; color: var(--danger); }
-    .no-saved-quotes { padding: 2rem; text-align: center; color: var(--text-muted); font-size: 0.9rem; }
+    .no-saved-quotes { padding: 2.5rem 2rem; text-align: center; color: var(--text-muted); font-size: 0.9rem; }
 
     .customer-lookup-results {
         position: absolute;
@@ -783,7 +783,18 @@
                         </div>
                     </div>
                     <div class="saved-quotes-list" id="saved-quotes-list">
-                        <div class="no-saved-quotes">No saved quotes yet</div>
+                        <div class="no-saved-quotes">
+                            <div style="font-size: 2rem; margin-bottom: 0.75rem; opacity: 0.4;">📋</div>
+                            <h3 style="margin: 0 0 0.5rem; font-size: 1.05rem; color: var(--text-main);">Welcome to the AmeriDex Dealer Portal</h3>
+                            <p style="margin: 0 0 1rem; font-size: 0.9rem;">Get started by creating your first quote:</p>
+                            <ol style="text-align: left; max-width: 320px; margin: 0 auto 1.25rem; font-size: 0.88rem; color: var(--text-muted); line-height: 1.8;">
+                                <li>Enter customer info below</li>
+                                <li>Use the Deck Calculator to estimate materials</li>
+                                <li>Add line items to the order</li>
+                                <li>Save or submit your quote</li>
+                            </ol>
+                            <button type="button" class="btn btn-primary btn-sm" onclick="document.getElementById('cust-name').focus(); document.getElementById('customer').scrollIntoView({behavior:'smooth'});">Start Your First Quote</button>
+                        </div>
                     </div>
                 </div>
             </section>
