@@ -592,9 +592,11 @@
         var pfCheck = document.getElementById('pic-frame');
         if (pfCheck && pfCheck.checked) {
             var pfType = (document.getElementById('pf-type') || {}).value || 'single';
-            var perimeterFt = 2 * (result.coverageFt + result.spanFt);
-            var pfBoardLen = result.spanFt <= 12 ? 12 : result.spanFt <= 16 ? 16 : 20;
-            var pfBoards = Math.ceil(perimeterFt / pfBoardLen);
+            var pfLongSide = Math.max(result.coverageFt, result.spanFt);
+            var pfBoardLen = pfLongSide <= 12 ? 12 : pfLongSide <= 16 ? 16 : 20;
+            var boardsAlongSpan = Math.ceil(result.spanFt / pfBoardLen) * 2;
+            var boardsAlongCoverage = Math.ceil(result.coverageFt / pfBoardLen) * 2;
+            var pfBoards = boardsAlongSpan + boardsAlongCoverage;
             if (pfType === 'double') pfBoards = pfBoards * 2;
             additionalItems.push('Picture frame: <strong>' + pfBoards + '</strong> solid edge board' + (pfBoards !== 1 ? 's' : '') + ' (' + (pfType === 'double' ? 'double' : 'single') + ')');
         }
@@ -784,12 +786,17 @@
             color: (document.getElementById('pf-color-swatches') || {}).dataset && document.getElementById('pf-color-swatches').dataset.selected || null
         } : null;
         if (pfOpt && pfOpt.enabled) {
-            var perimeterFt = 2 * (currentCalcResult.coverageFt + currentCalcResult.spanFt);
-            var pfBoardLen = currentCalcResult.spanFt <= 12 ? 12 :
-                             currentCalcResult.spanFt <= 16 ? 16 : 20;
-            var pfBoards = Math.ceil(perimeterFt / pfBoardLen);
+            // Picture frame runs around the full perimeter. Use the longest side
+            // to pick board length so boards cover any side without butt joints.
+            var pfLongSide = Math.max(currentCalcResult.coverageFt, currentCalcResult.spanFt);
+            var pfBoardLen = pfLongSide <= 12 ? 12 : pfLongSide <= 16 ? 16 : 20;
+            // Calculate boards per side, then total for all 4 sides
+            var boardsAlongSpan = Math.ceil(currentCalcResult.spanFt / pfBoardLen) * 2;  // 2 sides
+            var boardsAlongCoverage = Math.ceil(currentCalcResult.coverageFt / pfBoardLen) * 2;  // 2 sides
+            var pfBoards = boardsAlongSpan + boardsAlongCoverage;
             if (pfOpt.type === 'double') pfBoards = pfBoards * 2;
             var pfColor = pfOpt.color || color;
+            var perimeterFt = 2 * (currentCalcResult.coverageFt + currentCalcResult.spanFt);
 
             window.currentQuote.lineItems.push({
                 type: 'solid',
@@ -800,7 +807,7 @@
                 customDesc: '',
                 customUnitPrice: 0,
                 _source: 'calculator',
-                _sourceNote: 'Picture frame (' + (pfOpt.type === 'double' ? 'double' : 'single') + '): ' + Math.round(perimeterFt) + ' LF perimeter'
+                _sourceNote: 'Picture frame (' + (pfOpt.type === 'double' ? 'double' : 'single') + '): ' + Math.round(perimeterFt) + ' LF perimeter, ' + pfBoardLen + "' boards"
             });
             itemsAdded.push(pfBoards + ' solid edge boards (picture frame, ' + (pfOpt.type === 'double' ? 'double' : 'single') + ')');
         }
@@ -967,6 +974,8 @@
         var scaleInput = document.getElementById('polygon-scale');
         var useBtn = document.getElementById('polygon-use-btn');
         var clearBtn = document.getElementById('polygon-clear-btn');
+        var undoBtn = document.getElementById('polygon-undo-btn');
+        var snapToggle = document.getElementById('polygon-snap-toggle');
         var dimsDiv = document.getElementById('polygon-dimensions');
         var alongSpan = document.getElementById('polygon-along');
         var fromSpan = document.getElementById('polygon-from');
@@ -1108,7 +1117,7 @@
             // Live rubber-band line from last vertex to cursor
             if (!polyState.closed && verts.length > 0 && polyState.mousePos) {
                 var lastVert = verts[verts.length - 1];
-                var snappedMouse = snapAngle(lastVert, polyState.mousePos);
+                var snappedMouse = (snapToggle && snapToggle.checked) ? snapAngle(lastVert, polyState.mousePos) : polyState.mousePos;
 
                 // Draw snap guide line (extended faint line showing the snap axis)
                 if (snappedMouse.snapped) {
@@ -1199,12 +1208,17 @@
             useBtn.style.display = '';
         }
 
+        function updateUndoBtn() {
+            if (undoBtn) undoBtn.style.display = polyState.vertices.length > 0 ? '' : 'none';
+        }
+
         function clearPoly() {
             polyState.vertices = [];
             polyState.closed = false;
             polyState.mousePos = null;
             dimsDiv.style.display = 'none';
             useBtn.style.display = 'none';
+            updateUndoBtn();
             draw();
         }
 
@@ -1225,8 +1239,8 @@
             var pt = canvasCoords(e);
             var verts = polyState.vertices;
 
-            // Apply angle snapping if there's a previous vertex
-            if (verts.length > 0) {
+            // Apply angle snapping if there's a previous vertex and toggle is checked
+            if (verts.length > 0 && snapToggle && snapToggle.checked) {
                 pt = snapAngle(verts[verts.length - 1], pt);
             }
 
@@ -1242,6 +1256,7 @@
             }
 
             verts.push({ x: pt.x, y: pt.y });
+            updateUndoBtn();
             draw();
         });
 
@@ -1255,6 +1270,17 @@
         });
 
         clearBtn.addEventListener('click', clearPoly);
+
+        if (undoBtn) {
+            undoBtn.addEventListener('click', function () {
+                if (polyState.vertices.length === 0) return;
+                polyState.vertices.pop();
+                polyState.closed = false;
+                updateUndoBtn();
+                draw();
+                computeBoundingBox();
+            });
+        }
 
         useBtn.addEventListener('click', function () {
             var along = parseFloat(alongSpan.textContent) || 0;

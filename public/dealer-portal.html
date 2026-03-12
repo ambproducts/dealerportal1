@@ -915,12 +915,16 @@
                     <div id="polygon-tool-section" style="display:none;margin-bottom:0.75rem;padding:1rem;background:#f9fafb;border-radius:10px;border:1px solid #e5e7eb;">
                         <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;">
                             <label style="font-size:0.9rem;font-weight:600;color:#374151;">Draw Deck Shape</label>
-                            <span style="font-size:0.78rem;color:#6b7280;">Click to place corners. Lines snap to 0/45/90° angles. Double-click or click first point to close.</span>
+                            <span style="font-size:0.78rem;color:#6b7280;">Click to place corners. Double-click or click first point to close. Use checkbox to toggle angle snapping.</span>
                         </div>
                         <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem;">
                             <span style="font-size:0.85rem;color:#374151;">1 grid square =</span>
                             <input type="number" id="polygon-scale" min="0.5" step="0.5" value="2" style="width:60px;">
                             <span style="font-size:0.85rem;color:#374151;">ft</span>
+                            <label style="display:flex;align-items:center;gap:0.3rem;font-size:0.85rem;color:#374151;margin-left:1rem;cursor:pointer;">
+                                <input type="checkbox" id="polygon-snap-toggle" checked style="width:16px;height:16px;cursor:pointer;">
+                                Snap to angles (0°/45°/90°)
+                            </label>
                         </div>
                         <canvas id="polygon-canvas" width="600" height="300" style="width:100%;border:1px solid #d1d5db;border-radius:6px;cursor:crosshair;background:#fff;"></canvas>
                         <div id="polygon-dimensions" style="display:none;margin-top:0.5rem;padding:0.5rem 0.75rem;background:#eff6ff;border-radius:6px;font-size:0.88rem;color:#1e40af;">
@@ -928,6 +932,7 @@
                         </div>
                         <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
                             <button type="button" class="btn btn-primary btn-sm" id="polygon-use-btn" style="display:none;">Use These Dimensions</button>
+                            <button type="button" class="btn btn-ghost btn-sm" id="polygon-undo-btn" style="display:none;">Undo Last Point</button>
                             <button type="button" class="btn btn-ghost btn-sm" id="polygon-clear-btn">Clear Drawing</button>
                         </div>
                     </div>
