@@ -954,7 +954,7 @@
     }
 
     // === POLYGON DRAWING TOOL ===
-    var polyState = { vertices: [], scale: 2, closed: false };
+    var polyState = { vertices: [], scale: 2, closed: false, mousePos: null };
     var polyInitialized = false;
 
     window.initPolygonTool = function () {
@@ -972,9 +972,44 @@
         var fromSpan = document.getElementById('polygon-from');
 
         var SNAP_RADIUS = 10;
+        var ANGLE_SNAP_THRESHOLD = 8; // degrees — how close to a snap angle before it locks
 
         function getScale() {
             return parseFloat(scaleInput.value) || 2;
+        }
+
+        // Snap a point to 0/45/90/135/180/225/270/315 degree angles relative to an anchor
+        function snapAngle(anchor, pt) {
+            var dx = pt.x - anchor.x;
+            var dy = pt.y - anchor.y;
+            var distance = Math.sqrt(dx * dx + dy * dy);
+            if (distance < 5) return pt; // too close to snap meaningfully
+
+            var angle = Math.atan2(dy, dx) * (180 / Math.PI); // -180 to 180
+            var snapAngles = [0, 45, 90, 135, 180, -180, -135, -90, -45];
+            var closest = null;
+            var closestDiff = Infinity;
+
+            for (var i = 0; i < snapAngles.length; i++) {
+                var diff = Math.abs(angle - snapAngles[i]);
+                if (diff > 180) diff = 360 - diff;
+                if (diff < closestDiff) {
+                    closestDiff = diff;
+                    closest = snapAngles[i];
+                }
+            }
+
+            if (closestDiff <= ANGLE_SNAP_THRESHOLD) {
+                var rad = closest * (Math.PI / 180);
+                return {
+                    x: anchor.x + distance * Math.cos(rad),
+                    y: anchor.y + distance * Math.sin(rad),
+                    snapped: true,
+                    snapAngle: closest
+                };
+            }
+
+            return pt;
         }
 
         function getGridSize() {
@@ -1038,7 +1073,7 @@
             drawGrid();
 
             var verts = polyState.vertices;
-            if (verts.length === 0) return;
+            if (verts.length === 0 && !polyState.mousePos) return;
 
             // Draw filled polygon if closed
             if (polyState.closed && verts.length >= 3) {
@@ -1068,6 +1103,64 @@
                 ctx.lineTo(verts[0].x, verts[0].y);
                 ctx.stroke();
                 drawEdgeLabel(verts[verts.length - 1], verts[0]);
+            }
+
+            // Live rubber-band line from last vertex to cursor
+            if (!polyState.closed && verts.length > 0 && polyState.mousePos) {
+                var lastVert = verts[verts.length - 1];
+                var snappedMouse = snapAngle(lastVert, polyState.mousePos);
+
+                // Draw snap guide line (extended faint line showing the snap axis)
+                if (snappedMouse.snapped) {
+                    var rad = snappedMouse.snapAngle * (Math.PI / 180);
+                    var guideLen = Math.max(canvas.width, canvas.height);
+                    ctx.save();
+                    ctx.setLineDash([4, 4]);
+                    ctx.strokeStyle = 'rgba(37, 99, 235, 0.2)';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(lastVert.x - guideLen * Math.cos(rad), lastVert.y - guideLen * Math.sin(rad));
+                    ctx.lineTo(lastVert.x + guideLen * Math.cos(rad), lastVert.y + guideLen * Math.sin(rad));
+                    ctx.stroke();
+                    ctx.restore();
+                }
+
+                // Rubber-band line
+                ctx.save();
+                ctx.setLineDash([6, 4]);
+                ctx.strokeStyle = snappedMouse.snapped ? '#16a34a' : '#93c5fd';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(lastVert.x, lastVert.y);
+                ctx.lineTo(snappedMouse.x, snappedMouse.y);
+                ctx.stroke();
+                ctx.restore();
+
+                // Live dimension label on the rubber-band line
+                var liveLen = edgeLengthFt(lastVert, snappedMouse);
+                var mx = (lastVert.x + snappedMouse.x) / 2;
+                var my = (lastVert.y + snappedMouse.y) / 2;
+
+                // Background pill for readability
+                var labelText = liveLen.toFixed(1) + ' ft';
+                if (snappedMouse.snapped) {
+                    var snapDeg = ((snappedMouse.snapAngle % 360) + 360) % 360;
+                    labelText += ' (' + snapDeg + '\u00B0)';
+                }
+                ctx.font = 'bold 11px sans-serif';
+                var textWidth = ctx.measureText(labelText).width;
+                ctx.fillStyle = 'rgba(255,255,255,0.9)';
+                ctx.fillRect(mx - textWidth / 2 - 4, my - 18, textWidth + 8, 16);
+                ctx.fillStyle = snappedMouse.snapped ? '#16a34a' : '#1e40af';
+                ctx.textAlign = 'center';
+                ctx.fillText(labelText, mx, my - 5);
+                ctx.textAlign = 'left';
+
+                // Draw a small dot at the snapped cursor position
+                ctx.beginPath();
+                ctx.arc(snappedMouse.x, snappedMouse.y, 3, 0, Math.PI * 2);
+                ctx.fillStyle = snappedMouse.snapped ? '#16a34a' : '#93c5fd';
+                ctx.fill();
             }
 
             // Draw vertices
@@ -1109,27 +1202,46 @@
         function clearPoly() {
             polyState.vertices = [];
             polyState.closed = false;
+            polyState.mousePos = null;
             dimsDiv.style.display = 'none';
             useBtn.style.display = 'none';
             draw();
         }
+
+        // Track mouse movement for live preview and angle snapping
+        canvas.addEventListener('mousemove', function (e) {
+            if (polyState.closed) return;
+            polyState.mousePos = canvasCoords(e);
+            draw();
+        });
+
+        canvas.addEventListener('mouseleave', function () {
+            polyState.mousePos = null;
+            draw();
+        });
 
         canvas.addEventListener('click', function (e) {
             if (polyState.closed) return;
             var pt = canvasCoords(e);
             var verts = polyState.vertices;
 
+            // Apply angle snapping if there's a previous vertex
+            if (verts.length > 0) {
+                pt = snapAngle(verts[verts.length - 1], pt);
+            }
+
             // Snap to first vertex to close
             if (verts.length >= 3) {
                 if (dist(pt, verts[0]) < SNAP_RADIUS) {
                     polyState.closed = true;
+                    polyState.mousePos = null;
                     draw();
                     computeBoundingBox();
                     return;
                 }
             }
 
-            verts.push(pt);
+            verts.push({ x: pt.x, y: pt.y });
             draw();
         });
 
@@ -1137,6 +1249,7 @@
             e.preventDefault();
             if (polyState.closed || polyState.vertices.length < 3) return;
             polyState.closed = true;
+            polyState.mousePos = null;
             draw();
             computeBoundingBox();
         });
