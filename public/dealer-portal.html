@@ -772,6 +772,41 @@
             }
         }
 
+/* Collapsible cards */
+.card-header.collapsible {
+    cursor: pointer;
+    user-select: none;
+}
+
+.card-header.collapsible:hover {
+    opacity: 0.85;
+}
+
+.card-header .collapse-chevron {
+    font-size: 1.2rem;
+    transition: transform 0.25s ease;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.card-header .collapse-chevron.collapsed {
+    transform: rotate(-90deg);
+}
+
+.card-body-collapsible {
+    overflow: hidden;
+    transition: max-height 0.35s ease, opacity 0.25s ease;
+    max-height: 2000px;
+    opacity: 1;
+}
+
+.card-body-collapsible.collapsed {
+    max-height: 0;
+    opacity: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+}
+
 </style>
 <script>
     window.AMERIDEX_API_BASE = 'https://ameridex-dealer-portal.onrender.com';
@@ -887,12 +922,14 @@
 
             <!-- Deck Calculator -->
             <section class="card" id="calculator">
-                <div class="card-header">
+                <div class="card-header collapsible" id="calc-header">
                     <div>
                         <h2 class="card-title">Deck Calculator</h2>
                         <p class="card-subtitle">Enter deck dimensions relative to the house.</p>
                     </div>
+                    <span class="collapse-chevron collapsed" id="calc-chevron">▼</span>
                 </div>
+                <div class="card-body-collapsible collapsed" id="calc-body">
                 <div class="form-grid">
                     <div class="deck-diagram-container">
                         <div class="deck-diagram">
@@ -945,16 +982,19 @@
                         </div>
                     </div>
                 </div>
+                </div>
             </section>
 
             <!-- Color Selection -->
             <section class="card" id="colors">
-                <div class="card-header">
+                <div class="card-header collapsible" id="colors-header">
                     <div>
                         <h2 class="card-title">Select Colors</h2>
                         <p class="card-subtitle">Preview and compare available color options.</p>
                     </div>
+                    <span class="collapse-chevron collapsed" id="colors-chevron">▼</span>
                 </div>
+                <div class="card-body-collapsible collapsed" id="colors-body">
                 <div class="color-grid" id="color-grid"></div>
                 <div class="comparison-panel">
                     <div class="color-preview">
@@ -967,6 +1007,7 @@
                         <img id="color2-preview" src="colors/Khaki.png" alt="Color 2">
                         <div id="color2-name" style="margin-top: 0.5rem; font-weight: 600;">Khaki</div>
                     </div>
+                </div>
                 </div>
             </section>
 
@@ -2610,6 +2651,29 @@ function sendFormalRequest() {
 // INITIALIZATION - ALL EVENT HANDLERS
 // ============================================
 
+// Collapsible card toggle
+function setupCollapsible(headerId, bodyId, chevronId, storageKey) {
+    var header = document.getElementById(headerId);
+    var body = document.getElementById(bodyId);
+    var chevron = document.getElementById(chevronId);
+    if (!header || !body || !chevron) return;
+
+    // Restore saved state
+    var saved = localStorage.getItem(storageKey);
+    if (saved === 'open') {
+        body.classList.remove('collapsed');
+        chevron.classList.remove('collapsed');
+    }
+
+    header.addEventListener('click', function (e) {
+        // Don't toggle if clicking a button or input inside the header
+        if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+        var isCollapsed = body.classList.toggle('collapsed');
+        chevron.classList.toggle('collapsed', isCollapsed);
+        localStorage.setItem(storageKey, isCollapsed ? 'closed' : 'open');
+    });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     loadFromStorage();
     if (dealerSettings.dealerCode && validateDealerCode(dealerSettings.dealerCode)) showMainApp();
@@ -2620,6 +2684,10 @@ document.addEventListener('DOMContentLoaded', () => {
     updateConnectivityStatus();
     renderSavedQuotes();
     setQuoteMode('quick');
+
+    // Setup collapsible cards
+    setupCollapsible('calc-header', 'calc-body', 'calc-chevron', 'ameridex_calc_collapsed');
+    setupCollapsible('colors-header', 'colors-body', 'colors-chevron', 'ameridex_colors_collapsed');
 
     // Login
     document.getElementById('login-btn').onclick = handleLogin;
