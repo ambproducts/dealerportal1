@@ -62,7 +62,13 @@
         '.adx-perm-del-btn { padding:0.25rem 0.55rem; background:#fee2e2; color:#dc2626; border:none; border-radius:6px; font-size:0.75rem; font-weight:600; cursor:pointer; margin:0.1rem; }' +
         '.adx-perm-del-btn:hover { background:#fecaca; }' +
         '.adx-deleted-empty { text-align:center; padding:2rem; color:#9ca3af; font-size:0.9rem; }' +
-        '.adx-deleted-meta { font-size:0.75rem; color:#9ca3af; }';
+        '.adx-deleted-meta { font-size:0.75rem; color:#9ca3af; }' +
+        '.adx-bulk-bar { display:flex; align-items:center; gap:0.75rem; margin-bottom:0.75rem; flex-wrap:wrap; }' +
+        '.adx-bulk-bar .adx-selected-count { font-size:0.85rem; color:#6b7280; }' +
+        '.adx-bulk-del-btn { padding:0.4rem 0.85rem; background:#dc2626; color:#fff; border:none; border-radius:6px; font-size:0.82rem; font-weight:600; cursor:pointer; display:none; }' +
+        '.adx-bulk-del-btn:hover { background:#b91c1c; }' +
+        '.adx-bulk-del-btn.visible { display:inline-block; }' +
+        '.adx-chk { width:16px; height:16px; cursor:pointer; accent-color:#dc2626; }';
     document.head.appendChild(style);
 
     // ----------------------------------------------------------
@@ -455,8 +461,18 @@
         if (deletedQuotes.length === 0) {
             html += '<div class="adx-deleted-empty">No deleted quotes</div>';
         } else {
-            html += '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:0.88rem;">';
+            if (isAdmin()) {
+                html += '<div class="adx-bulk-bar" id="adx-quote-bulk-bar">';
+                html += '<label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;font-size:0.85rem;color:#374151;font-weight:600;"><input type="checkbox" class="adx-chk" id="adx-quote-select-all"> Select All</label>';
+                html += '<span class="adx-selected-count" id="adx-quote-selected-count"></span>';
+                html += '<button class="adx-bulk-del-btn" id="adx-quote-bulk-delete">Permanently Delete Selected</button>';
+                html += '</div>';
+            }
+            html += '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:0.88rem;" id="adx-deleted-quotes-table">';
             html += '<thead><tr style="background:#fef2f2;">';
+            if (isAdmin()) {
+                html += '<th style="padding:0.6rem;text-align:center;border-bottom:2px solid #fecaca;width:40px;"></th>';
+            }
             ['Quote #','Dealer','Customer','Total','Status','Deleted By','Deleted At','Reason','Actions'].forEach(function (h) {
                 html += '<th style="padding:0.6rem;text-align:left;border-bottom:2px solid #fecaca;font-size:0.8rem;color:#6b7280;">' + h + '</th>';
             });
@@ -465,6 +481,9 @@
                 var delDate = q.deletedAt ? new Date(q.deletedAt).toLocaleString() : 'Unknown';
                 var reason = q.deletedReason ? 'Cascade (customer deleted)' : 'Direct';
                 html += '<tr style="border-bottom:1px solid #fef2f2;">';
+                if (isAdmin()) {
+                    html += '<td style="padding:0.6rem;text-align:center;"><input type="checkbox" class="adx-chk adx-quote-chk" data-id="' + (q.id || '') + '" data-name="' + esc(q.quoteNumber || 'N/A') + '"></td>';
+                }
                 html += '<td style="padding:0.6rem;font-weight:600;color:#2563eb;">' + esc(q.quoteNumber || 'N/A') + '</td>';
                 html += '<td style="padding:0.6rem;">' + esc(q.dealerCode || '') + '</td>';
                 html += '<td style="padding:0.6rem;">' + esc((q.customer && q.customer.name) || '') + '</td>';
@@ -525,6 +544,84 @@
                             .catch(function (err) { alert('Failed to permanently delete: ' + err.message); });
                     }
                 });
+            });
+        });
+
+        // Wire quote checkbox selection (admin only)
+        wireQuoteCheckboxes();
+    }
+
+    // ----------------------------------------------------------
+    // CHECKBOX BULK-DELETE FOR QUOTES
+    // ----------------------------------------------------------
+    function wireQuoteCheckboxes() {
+        var selectAll = document.getElementById('adx-quote-select-all');
+        var bulkBtn = document.getElementById('adx-quote-bulk-delete');
+        var countLabel = document.getElementById('adx-quote-selected-count');
+        if (!selectAll || !bulkBtn) return;
+
+        function getCheckboxes() {
+            return _deletedWrapper.querySelectorAll('.adx-quote-chk');
+        }
+
+        function updateBulkUI() {
+            var boxes = getCheckboxes();
+            var checked = Array.from(boxes).filter(function (cb) { return cb.checked; });
+            var count = checked.length;
+            if (count > 0) {
+                bulkBtn.classList.add('visible');
+                countLabel.textContent = count + ' of ' + boxes.length + ' selected';
+            } else {
+                bulkBtn.classList.remove('visible');
+                countLabel.textContent = '';
+            }
+            // Update select-all state
+            selectAll.checked = boxes.length > 0 && checked.length === boxes.length;
+            selectAll.indeterminate = count > 0 && count < boxes.length;
+        }
+
+        selectAll.addEventListener('change', function () {
+            var checked = selectAll.checked;
+            getCheckboxes().forEach(function (cb) { cb.checked = checked; });
+            updateBulkUI();
+        });
+
+        getCheckboxes().forEach(function (cb) {
+            cb.addEventListener('change', updateBulkUI);
+        });
+
+        bulkBtn.addEventListener('click', function () {
+            var checked = Array.from(getCheckboxes()).filter(function (cb) { return cb.checked; });
+            if (checked.length === 0) return;
+
+            var names = checked.map(function (cb) { return cb.dataset.name; });
+            var preview = names.length <= 5
+                ? names.map(function (n) { return '<strong>' + esc(n) + '</strong>'; }).join(', ')
+                : names.slice(0, 5).map(function (n) { return '<strong>' + esc(n) + '</strong>'; }).join(', ') + ' and ' + (names.length - 5) + ' more';
+
+            showConfirm({
+                title: 'Permanently Delete ' + checked.length + ' Quote' + (checked.length > 1 ? 's' : ''),
+                message: 'Permanently delete ' + preview + '?',
+                warning: 'This action CANNOT be undone. All ' + checked.length + ' quote(s) will be permanently removed.',
+                confirmLabel: 'Delete ' + checked.length + ' Quote' + (checked.length > 1 ? 's' : ''),
+                onConfirm: function () {
+                    var ids = checked.map(function (cb) { return cb.dataset.id; });
+                    bulkBtn.textContent = 'Deleting...';
+                    bulkBtn.disabled = true;
+
+                    var chain = Promise.resolve();
+                    ids.forEach(function (id) {
+                        chain = chain.then(function () {
+                            return apiCall('DELETE', '/api/admin/quotes/' + id + '/permanent');
+                        });
+                    });
+                    chain
+                        .then(renderDeletedContent)
+                        .catch(function (err) {
+                            alert('Some deletions may have failed: ' + err.message);
+                            renderDeletedContent();
+                        });
+                }
             });
         });
     }
