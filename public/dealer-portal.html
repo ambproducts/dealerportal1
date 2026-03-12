@@ -777,6 +777,8 @@
     window.AMERIDEX_API_BASE = 'https://ameridex-dealer-portal.onrender.com';
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<link rel="stylesheet" href="ameridex-toast.css">
+<script src="ameridex-toast.js"></script>
 </head>
 <body>
 
@@ -2234,6 +2236,8 @@ function resetFormOnly() {
 
     // Scroll to top
     window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    if (typeof window.showToast === 'function') { window.showToast('Form cleared', 'info'); }
 }
 
 // Find and REPLACE your existing handleLogout function with this improved version:
@@ -2662,7 +2666,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('add-row').onclick = () => { currentQuote.lineItems.push({ type: 'system', color: selectedColor1, length: 16, customLength: null, qty: 1, customDesc: '', customUnitPrice: 0 }); deletedItems = []; render(); updateTotalAndFasteners(); };
 
     // Save/Reset
-    document.getElementById('save-quote-btn').onclick = () => { const id = saveCurrentQuote(); alert('Quote saved!\nQuote ID: ' + id); };
+    document.getElementById('save-quote-btn').onclick = () => { const id = saveCurrentQuote(); if (typeof window.showToast === 'function') { window.showToast('Quote saved', 'success'); } };
     document.getElementById('reset').onclick = () => { if (currentQuote.lineItems.length > 0 && !confirm('Reset form?')) return; resetFormOnly(); };
 
     // Print dropdown
@@ -2707,7 +2711,7 @@ document.addEventListener('DOMContentLoaded', () => {
         dealerSettings.dealerPhone = document.getElementById('settings-dealer-phone').value.trim();
         saveDealerSettings();
         document.getElementById('settingsModal').classList.remove('active');
-        alert('Settings saved!');
+        if (typeof window.showToast === 'function') { window.showToast('Settings updated', 'info'); }
     };
 
     // Timeout

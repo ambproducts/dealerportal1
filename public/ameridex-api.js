@@ -586,16 +586,16 @@
 
         if (quote._serverId) {
             return api('PUT', '/api/quotes/' + quote._serverId, payload)
-                .then(function (u) { quote._serverId = u.id; quote.status = u.status; return u; })
-                .catch(function (err) { console.warn('[Sync] Update failed:', err.message); return null; });
+                .then(function (u) { quote._serverId = u.id; quote.status = u.status; if (typeof window.showToast === 'function') { window.showToast('Quote synced to server', 'success'); } return u; })
+                .catch(function (err) { console.warn('[Sync] Update failed:', err.message); if (typeof window.showToast === 'function') { window.showToast('Sync failed — changes saved locally', 'warning'); } return null; });
         } else {
             if (isServerQuoteNumber(quote.quoteId)) {
                 console.error('[Sync v2.18] BLOCKED POST for server-originated quote', quote.quoteId);
                 return Promise.resolve(null);
             }
             return api('POST', '/api/quotes', payload)
-                .then(function (c) { quote._serverId = c.id; quote.status = c.status; return c; })
-                .catch(function (err) { console.warn('[Sync] Create failed:', err.message); return null; });
+                .then(function (c) { quote._serverId = c.id; quote.status = c.status; if (typeof window.showToast === 'function') { window.showToast('Quote synced to server', 'success'); } return c; })
+                .catch(function (err) { console.warn('[Sync] Create failed:', err.message); if (typeof window.showToast === 'function') { window.showToast('Sync failed — changes saved locally', 'warning'); } return null; });
         }
     }
 
