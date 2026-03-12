@@ -36,6 +36,17 @@
     var PLUGS_PER_BOX = 375;
     var SCREWS_PER_CROSSING = 2;
 
+    // Convert decimal feet to feet-inches string, e.g. 12.5 → 12' 6"
+    function fmtFtIn(decimalFt) {
+        var totalInches = Math.round(decimalFt * 12);
+        var feet = Math.floor(totalInches / 12);
+        var inches = totalInches % 12;
+        if (inches === 0) return feet + "'";
+        if (feet === 0) return inches + '"';
+        return feet + "' " + inches + '"';
+    }
+    window.fmtFtIn = fmtFtIn;
+
     // === STATE ===
     var currentCalcResult = null;
     var selectedOptionIndex = null;
@@ -434,7 +445,7 @@
         if (summaryEl) {
             summaryEl.textContent =
                 result.deckAreaSqFt + ' sq ft | ' +
-                result.coverageFt + "' x " + result.spanFt + "' | " +
+                fmtFtIn(result.coverageFt) + ' x ' + fmtFtIn(result.spanFt) + ' | ' +
                 result.boardRows + ' board rows | ' +
                 result.joistCount + ' joists @ ' + result.joistSpacingIn + '" OC';
         }
@@ -475,9 +486,9 @@
             if (opt.buttJoints) html += ' <span style="background:#fef3c7;color:#92400e;padding:0.15rem 0.45rem;border-radius:999px;font-size:0.7rem;vertical-align:middle">BUTT JOINTS</span>';
             html += '</td>';
             html += '<td style="padding:0.5rem;text-align:right;border:1px solid ' + borderColor + '">' + opt.totalBoards + '</td>';
-            html += '<td style="padding:0.5rem;text-align:right;border:1px solid ' + borderColor + '">' + opt.totalLinearFt + ' ft</td>';
+            html += '<td style="padding:0.5rem;text-align:right;border:1px solid ' + borderColor + '">' + fmtFtIn(opt.totalLinearFt) + '</td>';
             html += '<td style="padding:0.5rem;text-align:right;border:1px solid ' + borderColor + ';color:' + wasteColor + ';font-weight:600">';
-            html += opt.wasteLinearFt + ' ft (' + opt.wastePct + '%)';
+            html += fmtFtIn(opt.wasteLinearFt) + ' (' + opt.wastePct + '%)';
             html += '</td>';
             html += '<td style="padding:0.5rem;border:1px solid ' + borderColor + ';font-size:0.8rem;color:#6b7280">' + opt.note + '</td>';
             html += '</tr>';
@@ -502,8 +513,8 @@
             html += '</div>';
             html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.4rem;font-size:0.85rem">';
             html += '<div>Boards: <strong>' + opt.totalBoards + '</strong></div>';
-            html += '<div>Linear ft: <strong>' + opt.totalLinearFt + '</strong></div>';
-            html += '<div style="color:' + wasteColor + '">Waste: <strong>' + opt.wasteLinearFt + ' ft (' + opt.wastePct + '%)</strong></div>';
+            html += '<div>Linear ft: <strong>' + fmtFtIn(opt.totalLinearFt) + '</strong></div>';
+            html += '<div style="color:' + wasteColor + '">Waste: <strong>' + fmtFtIn(opt.wasteLinearFt) + ' (' + opt.wastePct + '%)</strong></div>';
             html += '</div>';
             html += '<div style="font-size:0.8rem;color:#6b7280;margin-top:0.4rem">' + opt.note + '</div>';
             html += '</div>';
@@ -1100,7 +1111,7 @@
             ctx.font = 'bold 11px sans-serif';
             ctx.fillStyle = '#1e40af';
             ctx.textAlign = 'center';
-            ctx.fillText(len.toFixed(1) + ' ft', mx, my - 5);
+            ctx.fillText(fmtFtIn(len), mx, my - 5);
             ctx.textAlign = 'left';
         }
 
@@ -1214,7 +1225,7 @@
                 var my = (lastVert.y + snappedMouse.y) / 2;
 
                 // Background pill for readability
-                var labelText = liveLen.toFixed(1) + ' ft';
+                var labelText = fmtFtIn(liveLen);
                 if (snappedMouse.snapped) {
                     var snapDeg = ((snappedMouse.snapAngle % 360) + 360) % 360;
                     labelText += ' (' + snapDeg + '\u00B0)';
@@ -1265,8 +1276,10 @@
             }
             var alongFt = Math.round(((maxX - minX) / gs * scale) * 10) / 10;
             var fromFt = Math.round(((maxY - minY) / gs * scale) * 10) / 10;
-            alongSpan.textContent = alongFt;
-            fromSpan.textContent = fromFt;
+            alongSpan.textContent = fmtFtIn(alongFt);
+            alongSpan.dataset.rawFt = alongFt;
+            fromSpan.textContent = fmtFtIn(fromFt);
+            fromSpan.dataset.rawFt = fromFt;
             dimsDiv.style.display = '';
             useBtn.style.display = '';
         }
@@ -1352,8 +1365,8 @@
         }
 
         useBtn.addEventListener('click', function () {
-            var along = parseFloat(alongSpan.textContent) || 0;
-            var from = parseFloat(fromSpan.textContent) || 0;
+            var along = parseFloat(alongSpan.dataset.rawFt) || 0;
+            var from = parseFloat(fromSpan.dataset.rawFt) || 0;
             if (along > 0 && from > 0) {
                 document.getElementById('deck-len').value = along;
                 document.getElementById('deck-wid').value = from;

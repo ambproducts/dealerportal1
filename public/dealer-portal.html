@@ -928,7 +928,7 @@
                         </div>
                         <canvas id="polygon-canvas" width="600" height="300" style="width:100%;border:1px solid #d1d5db;border-radius:6px;cursor:crosshair;background:#fff;"></canvas>
                         <div id="polygon-dimensions" style="display:none;margin-top:0.5rem;padding:0.5rem 0.75rem;background:#eff6ff;border-radius:6px;font-size:0.88rem;color:#1e40af;">
-                            <strong>Bounding box:</strong> Along House = <span id="polygon-along">0</span> ft, From House = <span id="polygon-from">0</span> ft
+                            <strong>Bounding box:</strong> Along House = <span id="polygon-along">0'</span>, From House = <span id="polygon-from">0'</span>
                         </div>
                         <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
                             <button type="button" class="btn btn-primary btn-sm" id="polygon-use-btn" style="display:none;">Use These Dimensions</button>
@@ -2209,7 +2209,7 @@ function calculateOnly() {
     const boardsNeeded = Math.ceil(((isPerpendicular ? alongHouse : fromHouse) / EFFECTIVE_FT) * wasteMultiplier);
     let suggestedLength = span <= 12 ? 12 : (span <= 16 ? 16 : 20);
     lastCalculation = { boardsNeeded: boardsNeeded, suggestedLength: suggestedLength, wastePct: wastePct };
-    const msg = "<strong>Deck Size:</strong> " + alongHouse + " ft x " + fromHouse + " ft<br><strong>Suggested:</strong> " + boardsNeeded + " boards at " + suggestedLength + " ft each";
+    const msg = "<strong>Deck Size:</strong> " + fmtFtIn(alongHouse) + " x " + fmtFtIn(fromHouse) + "<br><strong>Suggested:</strong> " + boardsNeeded + " boards at " + suggestedLength + "' each";
     document.getElementById("calc-result").innerHTML = msg;
     document.getElementById("calc-result-container").style.display = "block";
 }
@@ -2611,13 +2611,13 @@ function generatePrintHTML(type) {
             html += '<p style="margin: 5px 0;">' + pfDesc + '</p>';
         }
         if (hasBreaker) {
-            var bbDesc = '✓ Breaker Board — ' + (bbOpt.position === 'custom' && bbOpt.customOffset ? bbOpt.customOffset + ' ft from house' : 'Center');
+            var bbDesc = '✓ Breaker Board — ' + (bbOpt.position === 'custom' && bbOpt.customOffset ? fmtFtIn(bbOpt.customOffset) + ' from house' : 'Center');
             if (bbOpt.color) bbDesc += ', ' + bbOpt.color;
             html += '<p style="margin: 5px 0;">' + bbDesc + '</p>';
         }
         if (hasStairs) {
             var stDesc = '✓ Stairs — ' + (stOpt.steps || 1) + ' step(s), ' + (stOpt.treadsPerStep || 1) + ' tread(s)/step';
-            if (stOpt.stairWidth) stDesc += ', ' + stOpt.stairWidth + ' ft wide';
+            if (stOpt.stairWidth) stDesc += ', ' + fmtFtIn(stOpt.stairWidth) + ' wide';
             if (stOpt.risers) stDesc += ', with risers';
             if (stOpt.color) stDesc += ', ' + stOpt.color;
             html += '<p style="margin: 5px 0;">' + stDesc + '</p>';
