@@ -169,6 +169,199 @@
         };
     }
 
+    // === POLYGON AREA (Shoelace formula) ===
+    function polygonAreaSqFt(verts, gs, scale) {
+        var n = verts.length;
+        var area = 0;
+        for (var i = 0; i < n; i++) {
+            var j = (i + 1) % n;
+            area += verts[i].x * verts[j].y;
+            area -= verts[j].x * verts[i].y;
+        }
+        area = Math.abs(area) / 2;
+        var pxPerFt = gs / scale;
+        return area / (pxPerFt * pxPerFt);
+    }
+
+    // === POLYGON-AWARE BOARD CALCULATION ===
+    // Sweeps across the polygon in EFFECTIVE_FT increments, finds line-polygon
+    // intersections for each row, determines board counts per row, and returns
+    // a result structure compatible with optimizeBoards().
+    function computePolygonBoards(verts, gs, scale, orientation, wastePct, joistSpacingIn) {
+        var isPerpendicular = (orientation === 'perpendicular');
+        var wasteMultiplier = 1 + (wastePct / 100);
+        var pxPerFt = gs / scale;
+
+        // Convert vertices to feet
+        var vertsFt = verts.map(function (v) {
+            return { x: v.x / pxPerFt, y: v.y / pxPerFt };
+        });
+
+        // Bounding box in feet
+        var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        for (var i = 0; i < vertsFt.length; i++) {
+            if (vertsFt[i].x < minX) minX = vertsFt[i].x;
+            if (vertsFt[i].x > maxX) maxX = vertsFt[i].x;
+            if (vertsFt[i].y < minY) minY = vertsFt[i].y;
+            if (vertsFt[i].y > maxY) maxY = vertsFt[i].y;
+        }
+        var alongHouse = maxX - minX;
+        var fromHouse = maxY - minY;
+        var truAreaSqFt = polygonAreaSqFt(verts, gs, scale);
+
+        // Sweep axis: perpendicular boards run vertically (sweep along X),
+        // parallel boards run horizontally (sweep along Y).
+        var sweepMin, sweepMax;
+        if (isPerpendicular) {
+            sweepMin = minX; sweepMax = maxX;
+        } else {
+            sweepMin = minY; sweepMax = maxY;
+        }
+
+        // Find intersections of a sweep line with the polygon edges.
+        // sweepVal is the position on the sweep axis; returns sorted list of
+        // intersection values on the board axis.
+        function findIntersections(sweepVal) {
+            var hits = [];
+            var n = vertsFt.length;
+            for (var i = 0; i < n; i++) {
+                var j = (i + 1) % n;
+                var a = vertsFt[i], b = vertsFt[j];
+                var aSweep, bSweep, aBoard, bBoard;
+                if (isPerpendicular) {
+                    aSweep = a.x; bSweep = b.x; aBoard = a.y; bBoard = b.y;
+                } else {
+                    aSweep = a.y; bSweep = b.y; aBoard = a.x; bBoard = b.x;
+                }
+                // Check if edge straddles the sweep line
+                if ((aSweep <= sweepVal && bSweep > sweepVal) ||
+                    (bSweep <= sweepVal && aSweep > sweepVal)) {
+                    var t = (sweepVal - aSweep) / (bSweep - aSweep);
+                    hits.push(aBoard + t * (bBoard - aBoard));
+                }
+            }
+            hits.sort(function (a, b) { return a - b; });
+            return hits;
+        }
+
+        // Detect whether an edge crossing the sweep line at a given position
+        // is angled (not perpendicular to the board direction).
+        function hasAngledEdgeAt(sweepVal) {
+            var n = vertsFt.length;
+            for (var i = 0; i < n; i++) {
+                var j = (i + 1) % n;
+                var a = vertsFt[i], b = vertsFt[j];
+                var aSweep, bSweep;
+                if (isPerpendicular) {
+                    aSweep = a.x; bSweep = b.x;
+                } else {
+                    aSweep = a.y; bSweep = b.y;
+                }
+                if ((aSweep <= sweepVal && bSweep > sweepVal) ||
+                    (bSweep <= sweepVal && aSweep > sweepVal)) {
+                    // If the edge also has a component along the sweep axis,
+                    // the cut will be angled.
+                    var dSweep = Math.abs(bSweep - aSweep);
+                    var dBoard = Math.abs(isPerpendicular ? (b.y - a.y) : (b.x - a.x));
+                    if (dSweep > 0.01 && dBoard > 0.01) return true;
+                }
+            }
+            return false;
+        }
+
+        var ANGLE_CUT_WASTE = 0.05; // 5% extra waste for angled cuts
+        var MIN_SEGMENT_FT = 0.5;   // ignore slivers smaller than 6 inches
+
+        // Build per-standard-length tallies
+        var optionData = {};
+        STD_LENGTHS.forEach(function (stdLen) {
+            optionData[stdLen] = { totalBoards: 0, totalLinearFt: 0, wasteLinearFt: 0, buttJointRows: 0 };
+        });
+
+        var totalBoardRows = 0;
+
+        for (var pos = sweepMin + EFFECTIVE_FT / 2; pos < sweepMax; pos += EFFECTIVE_FT) {
+            var hits = findIntersections(pos);
+            var angled = hasAngledEdgeAt(pos);
+
+            // Pair intersections: [entry, exit, entry, exit, ...]
+            for (var h = 0; h + 1 < hits.length; h += 2) {
+                var segLen = hits[h + 1] - hits[h];
+                if (segLen < MIN_SEGMENT_FT) continue;
+
+                totalBoardRows++;
+                var angleFactor = angled ? (1 + ANGLE_CUT_WASTE) : 1;
+
+                STD_LENGTHS.forEach(function (stdLen) {
+                    var d = optionData[stdLen];
+                    var effectiveSegLen = segLen * angleFactor;
+                    if (stdLen >= effectiveSegLen) {
+                        d.totalBoards += 1;
+                        d.totalLinearFt += stdLen;
+                        d.wasteLinearFt += (stdLen - effectiveSegLen);
+                    } else {
+                        var boardsNeeded = Math.ceil(effectiveSegLen / stdLen);
+                        d.totalBoards += boardsNeeded;
+                        d.totalLinearFt += boardsNeeded * stdLen;
+                        d.wasteLinearFt += (boardsNeeded * stdLen - effectiveSegLen);
+                        d.buttJointRows++;
+                    }
+                });
+            }
+        }
+
+        // Build options array matching optimizeBoards() format
+        var options = [];
+        STD_LENGTHS.forEach(function (stdLen) {
+            var d = optionData[stdLen];
+            var totalBoardsWithWaste = Math.ceil(d.totalBoards * wasteMultiplier);
+            var extraWasteBoards = totalBoardsWithWaste - d.totalBoards;
+            var totalLF = totalBoardsWithWaste * stdLen;
+            var wasteLF = d.wasteLinearFt + extraWasteBoards * stdLen;
+            var wastePctActual = totalLF > 0 ? (wasteLF / totalLF * 100) : 0;
+
+            options.push({
+                length: stdLen,
+                label: stdLen + "' Standard",
+                isCustom: false,
+                boardsPerRow: d.totalBoards > 0 ? Math.round(d.totalBoards / Math.max(totalBoardRows, 1) * 10) / 10 : 0,
+                boardRows: totalBoardRows,
+                totalBoards: totalBoardsWithWaste,
+                totalLinearFt: Math.round(totalLF),
+                wasteLinearFt: Math.round(wasteLF),
+                wastePct: Math.round(wastePctActual * 10) / 10,
+                buttJoints: d.buttJointRows > 0,
+                note: d.buttJointRows > 0
+                    ? d.buttJointRows + ' rows need butt joints, polygon shape'
+                    : 'Single board/row, polygon shape',
+                recommended: false
+            });
+        });
+
+        options.sort(function (a, b) {
+            if (a.wasteLinearFt !== b.wasteLinearFt) return a.wasteLinearFt - b.wasteLinearFt;
+            return a.totalLinearFt - b.totalLinearFt;
+        });
+        if (options.length > 0) options[0].recommended = true;
+
+        var joistCount = Math.floor(alongHouse * 12 / joistSpacingIn) + 1;
+
+        return {
+            deckAreaSqFt: Math.round(truAreaSqFt * 10) / 10,
+            spanFt: isPerpendicular ? fromHouse : alongHouse,
+            coverageFt: isPerpendicular ? alongHouse : fromHouse,
+            alongHouse: Math.round(alongHouse * 10) / 10,
+            fromHouse: Math.round(fromHouse * 10) / 10,
+            boardRows: totalBoardRows,
+            orientation: orientation,
+            joistCount: joistCount,
+            joistSpacingIn: joistSpacingIn,
+            wastePct: wastePct,
+            options: options,
+            isPolygon: true
+        };
+    }
+
     // === FASTENER CALCULATION ===
     function calculateFasteners(boardRows, joistCount) {
         var screwsPerBoard = joistCount * SCREWS_PER_CROSSING;
@@ -443,11 +636,12 @@
 
         var summaryEl = document.getElementById('calc-deck-summary');
         if (summaryEl) {
-            summaryEl.textContent =
-                result.deckAreaSqFt + ' sq ft | ' +
+            var summaryText = result.deckAreaSqFt + ' sq ft' +
+                (result.isPolygon ? ' (polygon)' : '') + ' | ' +
                 fmtFtIn(result.coverageFt) + ' x ' + fmtFtIn(result.spanFt) + ' | ' +
                 result.boardRows + ' board rows | ' +
                 result.joistCount + ' joists @ ' + result.joistSpacingIn + '" OC';
+            summaryEl.textContent = summaryText;
         }
 
         var colorChip = document.getElementById('calc-result-color-chip');
@@ -670,7 +864,18 @@
         var joistSpacingEl = document.getElementById('calc-joist-spacing');
         var joistSpacing = joistSpacingEl ? (parseInt(joistSpacingEl.value) || 16) : 16;
 
-        currentCalcResult = optimizeBoards(alongHouse, fromHouse, orientation, wastePct, joistSpacing);
+        // Use polygon-aware calculation when a closed polygon shape exists
+        var polyIndicator = document.getElementById('polygon-active-indicator');
+        if (polyState.closed && polyState.vertices.length >= 3) {
+            var gs = 30; // getGridSize() inside polygon tool
+            var scaleInput = document.getElementById('polygon-scale');
+            var polyScale = scaleInput ? (parseFloat(scaleInput.value) || 2) : 2;
+            currentCalcResult = computePolygonBoards(polyState.vertices, gs, polyScale, orientation, wastePct, joistSpacing);
+            if (polyIndicator) polyIndicator.style.display = '';
+        } else {
+            currentCalcResult = optimizeBoards(alongHouse, fromHouse, orientation, wastePct, joistSpacing);
+            if (polyIndicator) polyIndicator.style.display = 'none';
+        }
 
         selectedOptionIndex = currentCalcResult.options.findIndex(function (o) { return o.recommended; });
         if (selectedOptionIndex === -1) selectedOptionIndex = 0;
@@ -1280,6 +1485,13 @@
             alongSpan.dataset.rawFt = alongFt;
             fromSpan.textContent = fmtFtIn(fromFt);
             fromSpan.dataset.rawFt = fromFt;
+            // Show true polygon area
+            var areaSpan = document.getElementById('polygon-area');
+            if (areaSpan) {
+                var trueArea = Math.round(polygonAreaSqFt(verts, gs, scale) * 10) / 10;
+                areaSpan.textContent = trueArea + ' sq ft';
+                areaSpan.parentElement.style.display = '';
+            }
             dimsDiv.style.display = '';
             useBtn.style.display = '';
         }
@@ -1294,6 +1506,10 @@
             polyState.mousePos = null;
             dimsDiv.style.display = 'none';
             useBtn.style.display = 'none';
+            var indicator = document.getElementById('polygon-active-indicator');
+            if (indicator) indicator.style.display = 'none';
+            var areaEl = document.getElementById('polygon-area');
+            if (areaEl) areaEl.parentElement.style.display = 'none';
             updateUndoBtn();
             draw();
         }
@@ -1370,6 +1586,11 @@
             if (along > 0 && from > 0) {
                 document.getElementById('deck-len').value = along;
                 document.getElementById('deck-wid').value = from;
+            }
+            // Show polygon active indicator when polygon is closed
+            var indicator = document.getElementById('polygon-active-indicator');
+            if (indicator && polyState.closed && polyState.vertices.length >= 3) {
+                indicator.style.display = '';
             }
         });
 
