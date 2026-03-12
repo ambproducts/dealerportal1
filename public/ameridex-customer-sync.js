@@ -37,7 +37,7 @@
     var API_BASE = window.AMERIDEX_API_BASE || '';
 
     function getSyncToken() {
-        return window.getAuthToken ? window.getAuthToken() : sessionStorage.getItem('ameridex-token');
+        return window.getAuthToken ? window.getAuthToken() : (localStorage.getItem('ameridex-token') || sessionStorage.getItem('ameridex-token'));
     }
 
     // ----------------------------------------------------------

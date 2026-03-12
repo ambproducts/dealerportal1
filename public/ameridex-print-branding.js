@@ -99,9 +99,10 @@
     // AUTH TOKEN — reads whichever key the auth module uses
     // =========================================================================
     function getAuthToken() {
-        // ameridex-api.js stores the token in sessionStorage under 'ameridex-token'.
-        // A fallback to localStorage('authToken') covers any older code paths.
-        return sessionStorage.getItem('ameridex-token')
+        // ameridex-api.js stores the token in localStorage (remember-me) or sessionStorage.
+        // Check both, plus legacy localStorage('authToken') for older code paths.
+        return localStorage.getItem('ameridex-token')
+            || sessionStorage.getItem('ameridex-token')
             || localStorage.getItem('authToken')
             || '';
     }

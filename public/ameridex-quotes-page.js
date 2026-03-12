@@ -122,7 +122,7 @@
     // AUTH
     // ============================================================
     function checkAuth() {
-        authToken = sessionStorage.getItem('ameridex-token') || null;
+        authToken = localStorage.getItem('ameridex-token') || sessionStorage.getItem('ameridex-token') || null;
 
         var settings = null;
         try {
@@ -153,6 +153,7 @@
     function handleLogout() {
         try {
             sessionStorage.removeItem('ameridex-token');
+            localStorage.removeItem('ameridex-token');
             var raw = localStorage.getItem('ameridex_dealer_settings');
             if (raw) {
                 var settings = JSON.parse(raw);
