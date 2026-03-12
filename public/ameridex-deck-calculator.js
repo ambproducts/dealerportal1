@@ -269,6 +269,39 @@
             return false;
         }
 
+        // Compute the cut angle (deviation from perpendicular) for edges
+        // crossing the sweep line at a given board-axis hit position.
+        // Returns an array of { angle, side } for the entry (min) and exit (max) hits.
+        function edgeCutAngles(sweepVal, hitMin, hitMax) {
+            var n = vertsFt.length;
+            var startAngle = 0, endAngle = 0;
+            for (var i = 0; i < n; i++) {
+                var j = (i + 1) % n;
+                var a = vertsFt[i], b = vertsFt[j];
+                var aSweep, bSweep, aBoard, bBoard;
+                if (isPerpendicular) {
+                    aSweep = a.x; bSweep = b.x; aBoard = a.y; bBoard = b.y;
+                } else {
+                    aSweep = a.y; bSweep = b.y; aBoard = a.x; bBoard = b.x;
+                }
+                if ((aSweep <= sweepVal && bSweep > sweepVal) ||
+                    (bSweep <= sweepVal && aSweep > sweepVal)) {
+                    var t = (sweepVal - aSweep) / (bSweep - aSweep);
+                    var hitBoard = aBoard + t * (bBoard - aBoard);
+                    // Edge angle: atan2(dSweep, dBoard) gives angle from board axis
+                    var dSweep = Math.abs(bSweep - aSweep);
+                    var dBoard = Math.abs(bBoard - aBoard);
+                    var angleDeg = (dSweep > 0.01 && dBoard > 0.01)
+                        ? Math.round(Math.atan2(dSweep, dBoard) * (180 / Math.PI))
+                        : 0;
+                    // Assign to start (entry) or end (exit) based on proximity
+                    if (Math.abs(hitBoard - hitMin) < 0.01) startAngle = angleDeg;
+                    if (Math.abs(hitBoard - hitMax) < 0.01) endAngle = angleDeg;
+                }
+            }
+            return { startAngle: startAngle, endAngle: endAngle };
+        }
+
         var ANGLE_CUT_WASTE = 0.05; // 5% extra waste for angled cuts
         var MIN_SEGMENT_FT = 0.5;   // ignore slivers smaller than 6 inches
 
@@ -279,6 +312,7 @@
         });
 
         var totalBoardRows = 0;
+        var cutDetails = [];
 
         for (var pos = sweepMin + EFFECTIVE_FT / 2; pos < sweepMax; pos += EFFECTIVE_FT) {
             var hits = findIntersections(pos);
@@ -291,6 +325,18 @@
 
                 totalBoardRows++;
                 var angleFactor = angled ? (1 + ANGLE_CUT_WASTE) : 1;
+
+                // Collect cut detail for this row
+                var angles = edgeCutAngles(pos, hits[h], hits[h + 1]);
+                cutDetails.push({
+                    row: totalBoardRows,
+                    positionFt: Math.round((pos - sweepMin) * 100) / 100,
+                    lengthFt: Math.round(segLen * 100) / 100,
+                    startCut: angles.startAngle > 0 ? 'angled' : 'straight',
+                    endCut: angles.endAngle > 0 ? 'angled' : 'straight',
+                    startAngle: angles.startAngle,
+                    endAngle: angles.endAngle
+                });
 
                 STD_LENGTHS.forEach(function (stdLen) {
                     var d = optionData[stdLen];
@@ -346,6 +392,47 @@
 
         var joistCount = Math.floor(alongHouse * 12 / joistSpacingIn) + 1;
 
+        // Build cut summary
+        var straightRows = 0;
+        var angledRows = 0;
+        var uniqueAnglesSet = {};
+        for (var ci = 0; ci < cutDetails.length; ci++) {
+            var cd = cutDetails[ci];
+            if (cd.startAngle === 0 && cd.endAngle === 0) {
+                straightRows++;
+            } else {
+                angledRows++;
+                if (cd.startAngle > 0) uniqueAnglesSet[cd.startAngle] = true;
+                if (cd.endAngle > 0) uniqueAnglesSet[cd.endAngle] = true;
+            }
+        }
+        var uniqueAngles = Object.keys(uniqueAnglesSet).map(Number).sort(function(a, b) { return a - b; });
+
+        // Build descriptive waste note
+        var angledWasteNote = '';
+        if (angledRows > 0) {
+            // Find contiguous runs of angled rows
+            var angledRowNums = cutDetails.filter(function(c) { return c.startAngle > 0 || c.endAngle > 0; })
+                .map(function(c) { return c.row; });
+            var firstAngled = angledRowNums[0];
+            var lastAngled = angledRowNums[angledRowNums.length - 1];
+            var angleDesc = uniqueAngles.join('\u00B0/') + '\u00B0';
+            var sideDesc = [];
+            var hasStart = cutDetails.some(function(c) { return c.startAngle > 0; });
+            var hasEnd = cutDetails.some(function(c) { return c.endAngle > 0; });
+            if (hasStart) sideDesc.push('house-side');
+            if (hasEnd) sideDesc.push('yard-side');
+            angledWasteNote = 'Rows ' + firstAngled + '\u2013' + lastAngled + ' need a ' + angleDesc + ' angled cut on ' + sideDesc.join(' and ') + ' end';
+        }
+
+        var cutSummary = {
+            totalRows: totalBoardRows,
+            straightRows: straightRows,
+            angledRows: angledRows,
+            uniqueAngles: uniqueAngles,
+            angledWasteNote: angledWasteNote
+        };
+
         return {
             deckAreaSqFt: Math.round(truAreaSqFt * 10) / 10,
             spanFt: isPerpendicular ? fromHouse : alongHouse,
@@ -358,7 +445,9 @@
             joistSpacingIn: joistSpacingIn,
             wastePct: wastePct,
             options: options,
-            isPolygon: true
+            isPolygon: true,
+            cutDetails: cutDetails,
+            cutSummary: cutSummary
         };
     }
 
@@ -835,6 +924,55 @@
             html += '</div>';
         }
 
+        // Cut Guide — only for polygon mode
+        if (result.isPolygon && result.cutSummary && result.cutDetails) {
+            var cs = result.cutSummary;
+            var cd = result.cutDetails;
+            html += '<div style="margin-top:0.75rem;padding-top:0.6rem;border-top:1px solid #fde68a">' +
+                '<strong>\u2702\uFE0F Cut Guide:</strong><br>';
+            if (cs.straightRows > 0) {
+                html += '\u2022 ' + cs.straightRows + ' board' + (cs.straightRows !== 1 ? 's' : '') + ': Straight cuts only (square ends)<br>';
+            }
+            if (cs.angledRows > 0) {
+                var angleDesc = cs.uniqueAngles.join('\u00B0/') + '\u00B0';
+                // Determine which side(s) have angled cuts
+                var hasStartAngle = cd.some(function(c) { return c.startAngle > 0; });
+                var hasEndAngle = cd.some(function(c) { return c.endAngle > 0; });
+                var sideStr = [];
+                if (hasStartAngle) sideStr.push('house-side');
+                if (hasEndAngle) sideStr.push('yard-side');
+                html += '\u2022 ' + cs.angledRows + ' board' + (cs.angledRows !== 1 ? 's' : '') + ': ' + angleDesc + ' angle cut on ' + sideStr.join(' and ') + ' end<br>';
+            }
+            html += '<span style="font-size:0.8rem;color:#6b7280">Angled cuts add ~5% waste. Set your miter saw to the angles shown above.</span>';
+
+            // Expandable row-by-row detail table
+            html += '<details style="margin-top:0.5rem">' +
+                '<summary style="cursor:pointer;font-size:0.82rem;color:#2563eb">View row-by-row cut details</summary>' +
+                '<div style="max-height:200px;overflow-y:auto;margin-top:0.5rem">' +
+                '<table style="width:100%;font-size:0.78rem;border-collapse:collapse">' +
+                '<thead><tr style="border-bottom:1px solid #e5e7eb;text-align:left">' +
+                '<th style="padding:2px 6px">Row</th>' +
+                '<th style="padding:2px 6px">Position</th>' +
+                '<th style="padding:2px 6px">Length</th>' +
+                '<th style="padding:2px 6px">Start</th>' +
+                '<th style="padding:2px 6px">End</th>' +
+                '</tr></thead><tbody>';
+            for (var ri = 0; ri < cd.length; ri++) {
+                var row = cd[ri];
+                var startLabel = row.startAngle > 0 ? row.startAngle + '\u00B0' : 'straight';
+                var endLabel = row.endAngle > 0 ? row.endAngle + '\u00B0' : 'straight';
+                var rowBg = ri % 2 === 0 ? '' : ' style="background:#f9fafb"';
+                html += '<tr' + rowBg + '>' +
+                    '<td style="padding:2px 6px">' + row.row + '</td>' +
+                    '<td style="padding:2px 6px">' + fmtFtIn(row.positionFt) + '</td>' +
+                    '<td style="padding:2px 6px">' + fmtFtIn(row.lengthFt) + '</td>' +
+                    '<td style="padding:2px 6px">' + startLabel + '</td>' +
+                    '<td style="padding:2px 6px">' + endLabel + '</td>' +
+                    '</tr>';
+            }
+            html += '</tbody></table></div></details></div>';
+        }
+
         container.innerHTML = html;
         container.style.display = 'block';
     }
@@ -1169,6 +1307,33 @@
                     helpText.textContent = this.value === 'perpendicular'
                         ? 'Boards will run away from the house, toward the yard'
                         : 'Boards will run along the house wall';
+                }
+            });
+        }
+
+        // Live feet-inches conversion displays next to inputs
+        var deckLenInput = document.getElementById('deck-len');
+        var deckWidInput = document.getElementById('deck-wid');
+        var lenFtIn = document.getElementById('deck-len-ftin');
+        var widFtIn = document.getElementById('deck-wid-ftin');
+        var dimAlongLabel = document.querySelector('.dim-along .dim-label-bg');
+        var dimFromLabel = document.querySelector('.dim-out .dim-label-bg');
+
+        if (deckLenInput && lenFtIn) {
+            deckLenInput.addEventListener('input', function () {
+                var val = parseFloat(this.value);
+                lenFtIn.textContent = val > 0 ? '= ' + fmtFtIn(val) : '';
+                if (dimAlongLabel) {
+                    dimAlongLabel.textContent = val > 0 ? fmtFtIn(val) + ' Along House' : 'Along House';
+                }
+            });
+        }
+        if (deckWidInput && widFtIn) {
+            deckWidInput.addEventListener('input', function () {
+                var val = parseFloat(this.value);
+                widFtIn.textContent = val > 0 ? '= ' + fmtFtIn(val) : '';
+                if (dimFromLabel) {
+                    dimFromLabel.textContent = val > 0 ? fmtFtIn(val) + ' From House' : 'From House';
                 }
             });
         }
@@ -1584,8 +1749,12 @@
             var along = parseFloat(alongSpan.dataset.rawFt) || 0;
             var from = parseFloat(fromSpan.dataset.rawFt) || 0;
             if (along > 0 && from > 0) {
-                document.getElementById('deck-len').value = along;
-                document.getElementById('deck-wid').value = from;
+                var lenInput = document.getElementById('deck-len');
+                var widInput = document.getElementById('deck-wid');
+                lenInput.value = along;
+                widInput.value = from;
+                lenInput.dispatchEvent(new Event('input'));
+                widInput.dispatchEvent(new Event('input'));
             }
             // Show polygon active indicator when polygon is closed
             var indicator = document.getElementById('polygon-active-indicator');

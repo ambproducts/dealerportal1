@@ -346,6 +346,7 @@
     }
 
     .fastener-block { margin-top: 0.9rem; padding: 0.8rem 0.9rem; background-color: var(--primary-soft); border-radius: 10px; border: 1px dashed #bfdbfe; font-size: 0.88rem; color: #1d4ed8; }
+    .ft-in-display { font-size: 0.82rem; color: #2563eb; font-weight: 600; margin-left: 0.5rem; min-height: 1.2em; }
     .fastener-warning { color: #b91c1c; font-size: 0.82rem; margin-top: 0.5rem; }
 
     .total-bar { display: flex; justify-content: flex-end; align-items: center; padding: 1rem 1.25rem; border-radius: var(--radius-card); background: #f9fafb; border: 1px solid var(--border-subtle); }
@@ -960,11 +961,13 @@
                         <div class="field">
                             <label for="deck-len">Distance Along House (ft)<span class="required-indicator">*</span></label>
                             <input type="number" id="deck-len" step="0.1" min="0" placeholder="e.g., 20">
+                            <span class="ft-in-display" id="deck-len-ftin"></span>
                             <div class="help-text">How wide is the deck running parallel to the house?</div>
                         </div>
                         <div class="field">
                             <label for="deck-wid">Distance From House (ft)<span class="required-indicator">*</span></label>
                             <input type="number" id="deck-wid" step="0.1" min="0" placeholder="e.g., 10">
+                            <span class="ft-in-display" id="deck-wid-ftin"></span>
                             <div class="help-text">How far does the deck extend into the yard?</div>
                         </div>
                     </div>
