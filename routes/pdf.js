@@ -55,16 +55,39 @@ function getPuppeteer() {
 const PDF_MAX_BODY = 500 * 1024; // 500 KB
 const pdfBodyLimit = express.json({ limit: PDF_MAX_BODY });
 
-// ---- Security: strip dangerous HTML tags (defense-in-depth) ----
-function sanitizeHtml(raw) {
-    // Remove <script>, <iframe>, <object>, <embed>, <link> tags and their content
-    // (for void/self-closing tags like <embed> and <link>, just remove the tag)
-    return raw
+// ---- Security: robust HTML sanitizer (defense-in-depth) ----
+// Request interception is the primary SSRF control; this sanitizer is a
+// secondary layer that strips markup patterns that should never appear in
+// a pre-filled PDF template.
+function sanitizePdfHtml(raw) {
+    // 1. Strip dangerous tags AND their contents (paired tags)
+    let html = raw
         .replace(/<script[\s>][\s\S]*?<\/script>/gi, '')
         .replace(/<iframe[\s>][\s\S]*?<\/iframe>/gi, '')
         .replace(/<object[\s>][\s\S]*?<\/object>/gi, '')
+        .replace(/<form[\s>][\s\S]*?<\/form>/gi, '');
+
+    // 2. Strip dangerous void / self-closing tags
+    html = html
         .replace(/<embed[^>]*\/?>/gi, '')
-        .replace(/<link[^>]*\/?>/gi, '');
+        .replace(/<link[^>]*\/?>/gi, '')
+        .replace(/<meta[^>]*\/?>/gi, '')
+        .replace(/<base[^>]*\/?>/gi, '')
+        .replace(/<input[^>]*\/?>/gi, '');
+
+    // 3. Remove event-handler attributes (on*)
+    html = html.replace(/(<[^>]*?)\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '$1');
+
+    // 4. Remove javascript: protocol from href/src attributes
+    html = html.replace(/(href|src)\s*=\s*(?:"|')?\s*javascript\s*:/gi, '$1="');
+
+    // 5. Remove data: URIs from src except data:image/*
+    html = html.replace(
+        /src\s*=\s*(["']?)\s*data:(?!image\/)/gi,
+        'src=$1data:blocked:'
+    );
+
+    return html;
 }
 
 router.post('/generate', requireAuth, pdfBodyLimit, async (req, res) => {
@@ -74,7 +97,7 @@ router.post('/generate', requireAuth, pdfBodyLimit, async (req, res) => {
         return res.status(400).json({ error: 'html is required' });
     }
 
-    const html = sanitizeHtml(rawHtml);
+    const html = sanitizePdfHtml(rawHtml);
 
     const safeFilename = (filename || 'AmeriDex-Quote')
         .replace(/[^a-zA-Z0-9-_]/g, '-')
@@ -122,11 +145,12 @@ router.post('/generate', requireAuth, pdfBodyLimit, async (req, res) => {
         // The HTML is already fully filled (logo inlined as base64,
         // all placeholders replaced) by the client before sending.
         // Using 'domcontentloaded' since outbound requests are blocked.
-        await page.setContent(html, { waitUntil: 'domcontentloaded' });
+        await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 30_000 });
 
         const pdfBuffer = await page.pdf({
             format: 'Letter',
             printBackground: true,
+            timeout: 30_000,
             margin: {
                 top:    '0.5in',
                 bottom: '0.5in',
@@ -134,9 +158,6 @@ router.post('/generate', requireAuth, pdfBodyLimit, async (req, res) => {
                 right:  '0.5in'
             }
         });
-
-        await browser.close();
-        browser = null;
 
         res.set({
             'Content-Type':        'application/pdf',
@@ -149,13 +170,14 @@ router.post('/generate', requireAuth, pdfBodyLimit, async (req, res) => {
 
     } catch (err) {
         console.error('[PDF Route] Generation failed:', err);
-        if (browser) {
-            try { await browser.close(); } catch (_) {}
-        }
         return res.status(500).json({
             error:  'PDF generation failed',
             detail: err.message
         });
+    } finally {
+        if (browser) {
+            try { await browser.close(); } catch (_) {}
+        }
     }
 });
 
