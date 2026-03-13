@@ -305,6 +305,10 @@ router.delete('/:id/permanent', (req, res) => {
     const idx = dealers.findIndex(d => d.id === req.params.id);
     if (idx === -1) return res.status(404).json({ error: 'Dealer not found' });
 
+    if (!dealers[idx].isDeleted) {
+        return res.status(400).json({ error: 'Dealer must be soft-deleted before permanent deletion' });
+    }
+
     const dealerCode = dealers[idx].dealerCode;
     const deleted = dealers.splice(idx, 1)[0];
     writeJSON(DEALERS_FILE, dealers);

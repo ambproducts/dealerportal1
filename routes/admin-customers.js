@@ -375,13 +375,17 @@ router.delete('/:id/permanent', requireAdmin, (req, res) => {
         return res.status(404).json({ error: 'Customer not found' });
     }
 
+    if (!customers[idx].deleted) {
+        return res.status(400).json({ error: 'Customer must be soft-deleted before permanent deletion' });
+    }
+
     const removed = customers.splice(idx, 1)[0];
     writeJSON(CUSTOMERS_FILE, customers);
 
     // Also permanently remove cascade-deleted quotes
     const quotes = readJSON(QUOTES_FILE);
     const beforeCount = quotes.length;
-    const remaining = quotes.filter(q => !(q.customer && q.customer.customerId === removed.id));
+    const remaining = quotes.filter(q => !(q.customer && q.customer.customerId === removed.id && q.deleted));
     if (remaining.length < beforeCount) {
         writeJSON(QUOTES_FILE, remaining);
     }

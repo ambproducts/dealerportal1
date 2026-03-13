@@ -344,6 +344,10 @@ router.delete('/:id/permanent', (req, res) => {
     const idx = users.findIndex(u => u.id === req.params.id);
     if (idx === -1) return res.status(404).json({ error: 'User not found' });
 
+    if (!users[idx].isDeleted) {
+        return res.status(400).json({ error: 'User must be soft-deleted before permanent deletion' });
+    }
+
     if (users[idx].id === req.user.id) {
         return res.status(400).json({ error: 'Cannot delete your own account' });
     }
