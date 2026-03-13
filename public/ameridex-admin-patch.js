@@ -48,8 +48,12 @@
     function patchAlert(containerId, msg, type) {
         var el = document.getElementById(containerId);
         if (!el) return;
-        el.innerHTML = '<div class="admin-' + (type || 'success') + '">' + msg + '</div>';
-        setTimeout(function () { el.innerHTML = ''; }, 4000);
+        el.textContent = '';
+        var div = document.createElement('div');
+        div.className = 'admin-' + (type || 'success');
+        div.textContent = msg;
+        el.appendChild(div);
+        setTimeout(function () { el.textContent = ''; }, 4000);
     }
 
     function esc(str) {

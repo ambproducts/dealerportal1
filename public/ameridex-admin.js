@@ -586,8 +586,12 @@
     function showAlert(containerId, msg, type) {
         var el = document.getElementById(containerId);
         if (!el) return;
-        el.innerHTML = '<div class="admin-' + (type || 'success') + '">' + msg + '</div>';
-        setTimeout(function () { el.innerHTML = ''; }, 4000);
+        el.textContent = '';
+        var div = document.createElement('div');
+        div.className = 'admin-' + (type || 'success');
+        div.textContent = msg;
+        el.appendChild(div);
+        setTimeout(function () { el.textContent = ''; }, 4000);
     }
 
     function esc(str) {
@@ -791,7 +795,12 @@
         var codes = [];
         _allQuotes.forEach(function (q) { if (q.dealerCode && codes.indexOf(q.dealerCode) === -1) codes.push(q.dealerCode); });
         select.innerHTML = '<option value="">All Dealers</option>';
-        codes.sort().forEach(function (c) { select.innerHTML += '<option value="' + c + '">' + c + '</option>'; });
+        codes.sort().forEach(function (c) {
+            var opt = document.createElement('option');
+            opt.value = c;
+            opt.textContent = c;
+            select.appendChild(opt);
+        });
     }
 
     function renderQuotesTable() {
@@ -1434,13 +1443,19 @@
         var filterSelect = document.getElementById('admin-user-dealer-filter');
         filterSelect.innerHTML = '<option value="">All Dealer Codes</option>';
         codes.forEach(function (c) {
-            filterSelect.innerHTML += '<option value="' + c + '">' + c + '</option>';
+            var opt = document.createElement('option');
+            opt.value = c;
+            opt.textContent = c;
+            filterSelect.appendChild(opt);
         });
 
         var createSelect = document.getElementById('admin-new-user-dealer');
         createSelect.innerHTML = '';
         codes.forEach(function (c) {
-            createSelect.innerHTML += '<option value="' + c + '">' + c + '</option>';
+            var opt = document.createElement('option');
+            opt.value = c;
+            opt.textContent = c;
+            createSelect.appendChild(opt);
         });
     }
 

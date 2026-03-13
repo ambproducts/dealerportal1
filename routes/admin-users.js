@@ -32,7 +32,7 @@
 
 const express = require('express');
 const router = express.Router();
-const { readJSON, writeJSON, USERS_FILE, generateId } = require('../lib/helpers');
+const { readJSON, writeJSON, USERS_FILE, generateId, sanitizeInput } = require('../lib/helpers');
 const { hashPassword } = require('../lib/password');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 
@@ -159,10 +159,10 @@ router.post('/', (req, res) => {
     const newUser = {
         id: generateId(),
         dealerCode: normalizedCode,
-        username: normalizedUsername,
-        displayName: displayName || username,
+        username: sanitizeInput(normalizedUsername),
+        displayName: sanitizeInput(displayName || username),
         role: role || 'frontdesk',
-        email: email || '',
+        email: sanitizeInput(email || ''),
         phone: phone || '',
         status: 'active',
         passwordHash: hashPassword(password),
@@ -199,8 +199,8 @@ router.put('/:id', (req, res) => {
 
     const { displayName, role, email, phone, dealerCode, status } = req.body;
 
-    if (displayName !== undefined) users[idx].displayName = displayName;
-    if (email !== undefined) users[idx].email = email;
+    if (displayName !== undefined) users[idx].displayName = sanitizeInput(displayName);
+    if (email !== undefined) users[idx].email = sanitizeInput(email);
     if (phone !== undefined) users[idx].phone = phone;
     if (dealerCode !== undefined) users[idx].dealerCode = dealerCode.toUpperCase();
     if (status !== undefined) users[idx].status = status;

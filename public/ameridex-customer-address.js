@@ -349,7 +349,13 @@
                         if (address) {
                             var addrDiv = document.createElement('div');
                             addrDiv.className = 'review-item review-address-extra';
-                            addrDiv.innerHTML = '<span class="review-item-label">Address:</span><span>' + (address || 'N/A') + '</span>';
+                            var addrLabel = document.createElement('span');
+                            addrLabel.className = 'review-item-label';
+                            addrLabel.textContent = 'Address:';
+                            var addrVal = document.createElement('span');
+                            addrVal.textContent = address || 'N/A';
+                            addrDiv.appendChild(addrLabel);
+                            addrDiv.appendChild(addrVal);
                             insertAfter.parentNode.insertBefore(addrDiv, insertAfter.nextSibling);
                             insertAfter = addrDiv;
                         }
@@ -357,7 +363,13 @@
                         if (locationLine) {
                             var locDiv = document.createElement('div');
                             locDiv.className = 'review-item review-address-extra';
-                            locDiv.innerHTML = '<span class="review-item-label">City/State:</span><span>' + locationLine + '</span>';
+                            var locLabel = document.createElement('span');
+                            locLabel.className = 'review-item-label';
+                            locLabel.textContent = 'City/State:';
+                            var locVal = document.createElement('span');
+                            locVal.textContent = locationLine;
+                            locDiv.appendChild(locLabel);
+                            locDiv.appendChild(locVal);
                             insertAfter.parentNode.insertBefore(locDiv, insertAfter.nextSibling);
                         }
                     }

@@ -27,7 +27,8 @@ const crypto = require('crypto');
 const {
     readJSON, writeJSON,
     QUOTES_FILE, CUSTOMERS_FILE, PRODUCTS_FILE,
-    generateId, getDealerPrice, recalcCustomerStats
+    generateId, getDealerPrice, recalcCustomerStats,
+    sanitizeInput
 } = require('../lib/helpers');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { generateQuotePDF } = require('../lib/quote-pdf');
@@ -663,11 +664,11 @@ router.post('/', (req, res) => {
         createdByRole:       req.user.role,
         customer:            customerSnapshot,
         lineItems:           items,
-        notes:               notes || '',
+        notes:               sanitizeInput(notes || ''),
         options:             options || { pictureFrame: false, stairs: false },
-        specialInstructions: specialInstructions || '',
-        internalNotes:       internalNotes       || '',
-        shippingAddress:     shippingAddress     || '',
+        specialInstructions: sanitizeInput(specialInstructions || ''),
+        internalNotes:       sanitizeInput(internalNotes       || ''),
+        shippingAddress:     sanitizeInput(shippingAddress     || ''),
         deliveryDate:        deliveryDate        || '',
         pricingModel:        'per-dealer',
         totalAmount:         Math.round(totalAmount * 100) / 100,
@@ -737,11 +738,11 @@ router.put('/:id', async (req, res) => {
         };
     }
 
-    if (notes !== undefined)               quotes[idx].notes               = notes;
+    if (notes !== undefined)               quotes[idx].notes               = sanitizeInput(notes);
     if (options !== undefined)              quotes[idx].options             = options;
-    if (specialInstructions !== undefined)  quotes[idx].specialInstructions = specialInstructions;
-    if (internalNotes !== undefined)        quotes[idx].internalNotes       = internalNotes;
-    if (shippingAddress !== undefined)      quotes[idx].shippingAddress     = shippingAddress;
+    if (specialInstructions !== undefined)  quotes[idx].specialInstructions = sanitizeInput(specialInstructions);
+    if (internalNotes !== undefined)        quotes[idx].internalNotes       = sanitizeInput(internalNotes);
+    if (shippingAddress !== undefined)      quotes[idx].shippingAddress     = sanitizeInput(shippingAddress);
     if (deliveryDate !== undefined)         quotes[idx].deliveryDate        = deliveryDate;
 
     if (lineItems) {

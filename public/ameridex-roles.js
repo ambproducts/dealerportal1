@@ -303,8 +303,12 @@
     function showTeamAlert(msg, type) {
         var el = document.getElementById('team-alert');
         if (!el) return;
-        el.innerHTML = '<div class="team-alert team-alert-' + (type || 'success') + '">' + msg + '</div>';
-        setTimeout(function () { el.innerHTML = ''; }, 4000);
+        el.textContent = '';
+        var div = document.createElement('div');
+        div.className = 'team-alert team-alert-' + (type || 'success');
+        div.textContent = msg;
+        el.appendChild(div);
+        setTimeout(function () { el.textContent = ''; }, 4000);
     }
 
 

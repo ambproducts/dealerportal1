@@ -17,7 +17,8 @@ const crypto = require('crypto');
 const {
     readJSON, writeJSON,
     DEALERS_FILE, USERS_FILE, PRODUCTS_FILE,
-    generateId, buildDefaultPricing, getDealerPrice
+    generateId, buildDefaultPricing, getDealerPrice,
+    sanitizeInput
 } = require('../lib/helpers');
 const { hashPassword } = require('../lib/password');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
@@ -127,9 +128,9 @@ router.post('/', (req, res) => {
         id: generateId(),
         dealerCode: dealerCode.toUpperCase(),
         passwordHash: hashPassword(password),
-        dealerName: dealerName || '',
-        contactPerson: contactPerson || '',
-        email: email || '',
+        dealerName: sanitizeInput(dealerName || ''),
+        contactPerson: sanitizeInput(contactPerson || ''),
+        email: sanitizeInput(email || ''),
         phone: phone || '',
         pricing: buildDefaultPricing(),
         role: role || 'dealer',
@@ -150,8 +151,8 @@ router.post('/', (req, res) => {
         passwordHash: hashPassword(password),
         dealerCode: dealerCode.toUpperCase(),
         role: 'gm',
-        displayName: contactPerson || dealerName || dealerCode,
-        email: email || '',
+        displayName: sanitizeInput(contactPerson || dealerName || dealerCode),
+        email: sanitizeInput(email || ''),
         phone: phone || '',
         status: 'active',
         createdBy: req.user.username,
@@ -192,8 +193,13 @@ router.put('/:id', (req, res) => {
     if (idx === -1) return res.status(404).json({ error: 'Dealer not found' });
 
     const allowed = ['dealerName', 'contactPerson', 'email', 'phone', 'role', 'isActive'];
+    const sanitizeFields = ['dealerName', 'contactPerson', 'email'];
     allowed.forEach(field => {
-        if (req.body[field] !== undefined) dealers[idx][field] = req.body[field];
+        if (req.body[field] !== undefined) {
+            dealers[idx][field] = sanitizeFields.includes(field)
+                ? sanitizeInput(req.body[field])
+                : req.body[field];
+        }
     });
     writeJSON(DEALERS_FILE, dealers);
 

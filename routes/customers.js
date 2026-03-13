@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
-const { readJSON, writeJSON, CUSTOMERS_FILE, QUOTES_FILE } = require('../lib/helpers');
+const { readJSON, writeJSON, CUSTOMERS_FILE, QUOTES_FILE, sanitizeInput } = require('../lib/helpers');
 const { requireAuth } = require('../middleware/auth');
 
 router.use(requireAuth);
@@ -208,7 +208,10 @@ router.post('/', (req, res) => {
 
     const customers = readJSON(CUSTOMERS_FILE);
     const dealerCode = req.user.dealerCode;
-    const normalizedEmail = (email || '').toLowerCase().trim();
+    const sanitizedName = sanitizeInput(name);
+    const sanitizedCompany = sanitizeInput(company);
+    const sanitizedPhone = sanitizeInput(phone);
+    const normalizedEmail = sanitizeInput((email || '').toLowerCase().trim());
     const trimmedZip = zipCode.trim();
 
     // Dedup strategy:
@@ -229,10 +232,10 @@ router.post('/', (req, res) => {
     }
 
     if (existing) {
-        if (name) existing.name = name;
+        if (name) existing.name = sanitizedName;
         if (normalizedEmail) existing.email = normalizedEmail;
-        if (company !== undefined) existing.company = company;
-        if (phone !== undefined) existing.phone = phone;
+        if (company !== undefined) existing.company = sanitizedCompany;
+        if (phone !== undefined) existing.phone = sanitizedPhone;
         if (zipCode !== undefined) existing.zipCode = trimmedZip;
         if (!existing.dealers) existing.dealers = [];
         if (!existing.dealers.includes(dealerCode)) {
@@ -247,10 +250,10 @@ router.post('/', (req, res) => {
 
     const newCustomer = {
         id: crypto.randomUUID(),
-        name: name.trim(),
+        name: sanitizedName.trim(),
         email: normalizedEmail,
-        company: company || '',
-        phone: phone || '',
+        company: sanitizedCompany || '',
+        phone: sanitizedPhone || '',
         zipCode: trimmedZip,
         dealers: [dealerCode],
         quoteCount: 0,
@@ -266,7 +269,7 @@ router.post('/', (req, res) => {
     writeJSON(CUSTOMERS_FILE, customers);
 
     const logEmail = normalizedEmail || '(no email)';
-    console.log('[CustomerDB] New customer: ' + name + ' ' + logEmail + ' zip:' + trimmedZip + ' by ' + dealerCode);
+    console.log('[CustomerDB] New customer: ' + sanitizedName + ' ' + logEmail + ' zip:' + trimmedZip + ' by ' + dealerCode);
     res.status(201).json(newCustomer);
 });
 
@@ -292,8 +295,8 @@ router.put('/:id', (req, res) => {
     allowed.forEach(field => {
         if (req.body[field] !== undefined) {
             customers[idx][field] = field === 'email'
-                ? (req.body[field] || '').toLowerCase().trim()
-                : req.body[field];
+                ? sanitizeInput((req.body[field] || '').toLowerCase().trim())
+                : sanitizeInput(req.body[field]);
         }
     });
     customers[idx].updatedAt = new Date().toISOString();

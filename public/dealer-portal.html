@@ -1755,7 +1755,14 @@ function showCustomerLookup(results) {
     results.forEach(customer => {
         const item = document.createElement('div');
         item.className = 'customer-lookup-item';
-        item.innerHTML = '<div class="customer-lookup-name">' + customer.name + (customer.company ? ' (' + customer.company + ')' : '') + '</div><div class="customer-lookup-email">' + customer.email + '</div>';
+        var nameDiv = document.createElement('div');
+        nameDiv.className = 'customer-lookup-name';
+        nameDiv.textContent = customer.name + (customer.company ? ' (' + customer.company + ')' : '');
+        var emailDiv = document.createElement('div');
+        emailDiv.className = 'customer-lookup-email';
+        emailDiv.textContent = customer.email;
+        item.appendChild(nameDiv);
+        item.appendChild(emailDiv);
         item.addEventListener('click', () => {
             document.getElementById('cust-name').value = customer.name;
             document.getElementById('cust-email').value = customer.email;
@@ -2921,7 +2928,12 @@ function showReviewModal() {
         const productName = item.type === 'custom' && item.customDesc ? item.customDesc : prod.name;
         const div = document.createElement('div');
         div.className = 'review-item';
-        div.innerHTML = '<span>' + productName + (prod.hasColor && item.color ? ' (' + item.color + ')' : '') + ' x ' + item.qty + '</span><span>' + formatCurrency(sub) + '</span>';
+        var nameSpan = document.createElement('span');
+        nameSpan.textContent = productName + (prod.hasColor && item.color ? ' (' + item.color + ')' : '') + ' x ' + item.qty;
+        var priceSpan = document.createElement('span');
+        priceSpan.textContent = formatCurrency(sub);
+        div.appendChild(nameSpan);
+        div.appendChild(priceSpan);
         itemsContainer.appendChild(div);
     });
     document.getElementById('review-total').textContent = formatCurrency(grandTotal);
