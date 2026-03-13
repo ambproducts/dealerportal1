@@ -4,6 +4,9 @@
 
 const express = require('express');
 const path = require('path');
+const helmet = require('helmet');
+const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -13,6 +16,38 @@ const pkg = require('./package.json');
 // Middleware
 app.use(express.json({ limit: '5mb' })); // raised for full HTML bodies sent to /api/pdf/generate
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ----------------------------------------------------------
+// Security Middleware
+// ----------------------------------------------------------
+
+// Helmet — security headers (CSP disabled until inline scripts are audited)
+app.use(helmet({
+    contentSecurityPolicy: false
+}));
+
+// CORS — reflect request origin (same-origin SPA)
+app.use(cors({
+    origin: true,
+    credentials: true
+}));
+
+// General API rate limit
+app.use('/api/', rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100,
+    standardHeaders: true,
+    legacyHeaders: false
+}));
+
+// Strict rate limit on login
+app.use('/api/auth/login', rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many login attempts, please try again later' }
+}));
 
 // ----------------------------------------------------------
 // API Routes
