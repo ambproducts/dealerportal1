@@ -4,7 +4,10 @@
 // ============================================================
 const express = require('express');
 const router = express.Router();
+const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { readJSON, writeJSON, PRODUCTS_FILE, DEALERS_FILE, generateId } = require('../lib/helpers');
+
+router.use(requireAuth, requireAdmin);
 
 // Default seed products (used if products.json is empty/missing)
 const SEED_PRODUCTS = [
