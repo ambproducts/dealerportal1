@@ -33,13 +33,13 @@ router.get('/', (req, res) => {
 
     let filtered;
 
-    // Frontdesk: only see customers whose dealers[] includes their dealerCode
-    if (userRole === 'frontdesk') {
+    // Non-admin users: only see customers whose dealers[] includes their dealerCode
+    if (userRole !== 'admin') {
         filtered = customers.filter(c =>
             c.dealers && c.dealers.includes(dealerCode)
         );
     } else {
-        // GM and Admin: see all customers across all dealers
+        // Admin: see all customers across all dealers
         filtered = customers;
     }
 
@@ -161,13 +161,13 @@ router.get('/search', (req, res) => {
 
     let searchPool;
 
-    // Frontdesk: only search within their dealer's customers
-    if (userRole === 'frontdesk') {
+    // Non-admin users: only search within their dealer's customers
+    if (userRole !== 'admin') {
         searchPool = customers.filter(c =>
             c.dealers && c.dealers.includes(dealerCode)
         );
     } else {
-        // GM and Admin: search across all customers
+        // Admin: search across all customers
         searchPool = customers;
     }
 
@@ -281,6 +281,11 @@ router.put('/:id', (req, res) => {
     const idx = customers.findIndex(c => c.id === req.params.id);
     if (idx === -1) {
         return res.status(404).json({ error: 'Customer not found' });
+    }
+
+    // Dealer-scope authorization: non-admin users can only update customers belonging to their dealer
+    if (req.user.role !== 'admin' && (!customers[idx].dealers || !customers[idx].dealers.includes(req.user.dealerCode))) {
+        return res.status(403).json({ error: 'Access denied' });
     }
 
     // Validate: name and zipCode cannot be set to empty
