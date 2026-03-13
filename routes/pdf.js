@@ -51,12 +51,30 @@ function getPuppeteer() {
 //   401  { error: 'Authentication required' }   (from requireAuth)
 //   500  { error: 'PDF generation failed', detail: '...' }
 // =============================================================
-router.post('/generate', requireAuth, async (req, res) => {
-    const { html, filename } = req.body;
+// ---- Security: body size limit for this route (500 KB) ----
+const PDF_MAX_BODY = 500 * 1024; // 500 KB
+const pdfBodyLimit = express.json({ limit: PDF_MAX_BODY });
 
-    if (!html || typeof html !== 'string' || !html.trim()) {
+// ---- Security: strip dangerous HTML tags (defense-in-depth) ----
+function sanitizeHtml(raw) {
+    // Remove <script>, <iframe>, <object>, <embed>, <link> tags and their content
+    // (for void/self-closing tags like <embed> and <link>, just remove the tag)
+    return raw
+        .replace(/<script[\s>][\s\S]*?<\/script>/gi, '')
+        .replace(/<iframe[\s>][\s\S]*?<\/iframe>/gi, '')
+        .replace(/<object[\s>][\s\S]*?<\/object>/gi, '')
+        .replace(/<embed[^>]*\/?>/gi, '')
+        .replace(/<link[^>]*\/?>/gi, '');
+}
+
+router.post('/generate', requireAuth, pdfBodyLimit, async (req, res) => {
+    const { html: rawHtml, filename } = req.body;
+
+    if (!rawHtml || typeof rawHtml !== 'string' || !rawHtml.trim()) {
         return res.status(400).json({ error: 'html is required' });
     }
+
+    const html = sanitizeHtml(rawHtml);
 
     const safeFilename = (filename || 'AmeriDex-Quote')
         .replace(/[^a-zA-Z0-9-_]/g, '-')
@@ -88,10 +106,23 @@ router.post('/generate', requireAuth, async (req, res) => {
 
         const page = await browser.newPage();
 
+        // ---- Security: block all outbound network requests (SSRF mitigation) ----
+        await page.setRequestInterception(true);
+        page.on('request', (interceptedRequest) => {
+            const url = interceptedRequest.url();
+            // Allow data: URIs (e.g. base64-inlined images) and about:blank
+            if (url.startsWith('data:') || url === 'about:blank') {
+                interceptedRequest.continue();
+            } else {
+                interceptedRequest.abort('blockedbyclient');
+            }
+        });
+
         // Set the HTML content directly — no network round-trip needed.
         // The HTML is already fully filled (logo inlined as base64,
         // all placeholders replaced) by the client before sending.
-        await page.setContent(html, { waitUntil: 'networkidle0' });
+        // Using 'domcontentloaded' since outbound requests are blocked.
+        await page.setContent(html, { waitUntil: 'domcontentloaded' });
 
         const pdfBuffer = await page.pdf({
             format: 'Letter',
