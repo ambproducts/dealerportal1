@@ -1486,13 +1486,14 @@ function getItemLength(item) { return item.length === "custom" ? (item.customLen
 function getItemPrice(item) {
     const prod = PRODUCTS[item.type] || PRODUCTS.custom;
     if (item.type === "custom") return item.customUnitPrice || 0;
+    if (!prod) return 0;
     return prod.price;
 }
 function getItemSubtotal(item) {
     const prod = PRODUCTS[item.type] || PRODUCTS.custom;
     const price = getItemPrice(item);
     if (item.type === "dexerdry") return item.length * item.qty * price;
-    if (prod.isFt) return getItemLength(item) * (item.qty || 0) * price;
+    if (prod && prod.isFt) return getItemLength(item) * (item.qty || 0) * price;
     return (item.qty || 0) * price;
 }
 function validateDealerCode(code) { return /^[A-Z0-9]{6}$/.test(code.toUpperCase()); }
@@ -1827,8 +1828,9 @@ function renderDesktop() {
         sel.onchange = () => {
             item.type = sel.value;
             if (item.type !== "custom") { item.customDesc = ""; item.customUnitPrice = 0; }
+            const newProd = PRODUCTS[item.type];
             if (item.type === "dexerdry") item.length = 240;
-            else if (PRODUCTS[item.type].isFt) { item.length = 16; item.customLength = null; }
+            else if (newProd && newProd.isFt) { item.length = 16; item.customLength = null; }
             else item.length = null;
             render();
             updateTotalAndFasteners();
@@ -1862,18 +1864,18 @@ function renderDesktop() {
         } else {
             const helpDiv = document.createElement("div");
             helpDiv.className = "help-text";
-            helpDiv.textContent = prod.help || "";
+            helpDiv.textContent = (prod && prod.help) || "";
             td.appendChild(helpDiv);
             const priceDiv = document.createElement("div");
             priceDiv.style.cssText = "margin-top:0.3rem;font-size:0.8rem;color:#1e40af;font-weight:600";
-            priceDiv.textContent = "Price: " + formatCurrency(prod.price) + (prod.isFt ? "/ft" : " each");
+            priceDiv.textContent = "Price: " + formatCurrency(prod ? prod.price : 0) + ((prod && prod.isFt) ? "/ft" : " each");
             td.appendChild(priceDiv);
         }
         row.appendChild(td);
 
         // Color column
         td = document.createElement("td");
-        if (prod.hasColor) {
+        if (prod && prod.hasColor) {
             const csel = document.createElement("select");
             COLORS.forEach(c => {
                 const o = document.createElement("option");
@@ -1924,7 +1926,7 @@ function renderDesktop() {
             footageDiv.id = "footage-" + i;
             wrapper.appendChild(footageDiv);
             td.appendChild(wrapper);
-        } else if (prod.isFt) {
+        } else if (prod && prod.isFt) {
             const wrapper = document.createElement("div");
             wrapper.className = "length-wrapper";
             const lenSel = document.createElement("select");
@@ -2002,7 +2004,7 @@ function renderMobile() {
         const card = document.createElement("div");
         card.className = "line-item-card";
         const title = document.createElement("h4");
-        title.textContent = "Item " + (i + 1) + ": " + (item.type === "custom" && item.customDesc ? item.customDesc : prod.name);
+        title.textContent = "Item " + (i + 1) + ": " + (item.type === "custom" && item.customDesc ? item.customDesc : (prod ? prod.name : item.type));
         card.appendChild(title);
 
         // Product selector
@@ -2026,8 +2028,9 @@ function renderMobile() {
         prodSel.onchange = () => {
             item.type = prodSel.value;
             if (item.type !== "custom") { item.customDesc = ""; item.customUnitPrice = 0; }
+            const newProdM = PRODUCTS[item.type];
             if (item.type === "dexerdry") item.length = 240;
-            else if (PRODUCTS[item.type].isFt) { item.length = 16; item.customLength = null; }
+            else if (newProdM && newProdM.isFt) { item.length = 16; item.customLength = null; }
             else item.length = null;
             render();
             updateTotalAndFasteners();
@@ -2068,7 +2071,7 @@ function renderMobile() {
             card.appendChild(priceRow);
         }
 
-        if (prod.hasColor) {
+        if (prod && prod.hasColor) {
             const colorRow = document.createElement("div");
             colorRow.className = "line-item-row full";
             const colorLabel = document.createElement("label");
@@ -2105,7 +2108,7 @@ function renderMobile() {
             lengthDiv.appendChild(lengthLabel);
             lengthDiv.appendChild(lengthSel);
             lengthQtyRow.appendChild(lengthDiv);
-        } else if (prod.isFt) {
+        } else if (prod && prod.isFt) {
             const lengthDiv = document.createElement("div");
             const lengthLabel = document.createElement("label");
             lengthLabel.textContent = "Length (ft)";
@@ -2276,9 +2279,9 @@ function renderSavedQuotes() {
 
 function getItemSubtotalFromData(item) {
     const prod = PRODUCTS[item.type] || PRODUCTS.custom;
-    const price = item.type === "custom" ? (item.customUnitPrice || 0) : prod.price;
+    const price = item.type === "custom" ? (item.customUnitPrice || 0) : (prod ? prod.price : 0);
     if (item.type === "dexerdry") return item.length * item.qty * price;
-    if (prod.isFt) return (item.length === "custom" ? (item.customLength || 0) : (item.length || 0)) * (item.qty || 0) * price;
+    if (prod && prod.isFt) return (item.length === "custom" ? (item.customLength || 0) : (item.length || 0)) * (item.qty || 0) * price;
     return (item.qty || 0) * price;
 }
 
@@ -2657,13 +2660,13 @@ function generatePrintHTML(type) {
         grandTotal += sub;
         let lengthDisplay = '';
         if (item.type === 'dexerdry') lengthDisplay = item.length + ' ft box';
-        else if (prod.isFt) {
+        else if (prod && prod.isFt) {
             const len = item.length === 'custom' ? (item.customLength || 0) : (item.length || 0);
             lengthDisplay = len + ' ft';
         }
-        const productName = item.type === 'custom' && item.customDesc ? item.customDesc : prod.name;
+        const productName = item.type === 'custom' && item.customDesc ? item.customDesc : (prod ? prod.name : item.type);
         html += '<tr><td style="border: 1px solid #ddd; padding: 10px;">' + productName + '</td>';
-        html += '<td style="border: 1px solid #ddd; padding: 10px;">' + (prod.hasColor ? (item.color || '') : '') + '</td>';
+        html += '<td style="border: 1px solid #ddd; padding: 10px;">' + ((prod && prod.hasColor) ? (item.color || '') : '') + '</td>';
         html += '<td style="border: 1px solid #ddd; padding: 10px;">' + lengthDisplay + '</td>';
         html += '<td style="border: 1px solid #ddd; padding: 10px; text-align: center;">' + item.qty + '</td>';
         html += '<td style="border: 1px solid #ddd; padding: 10px; text-align: right;">' + formatCurrency(sub) + '</td></tr>';
@@ -2806,10 +2809,10 @@ function generatePDF() {
         const prod = PRODUCTS[item.type] || PRODUCTS.custom;
         const sub = getItemSubtotal(item);
         grandTotal += sub;
-        const productName = item.type === 'custom' && item.customDesc ? item.customDesc : prod.name;
+        const productName = item.type === 'custom' && item.customDesc ? item.customDesc : (prod ? prod.name : item.type);
         let desc = productName;
-        if (prod.hasColor && item.color) desc += ' (' + item.color + ')';
-        if (prod.isFt) {
+        if (prod && prod.hasColor && item.color) desc += ' (' + item.color + ')';
+        if (prod && prod.isFt) {
             const len = item.length === 'custom' ? (item.customLength || 0) : (item.length || 0);
             desc += ' - ' + len + 'ft x ' + item.qty;
         } else if (item.type === 'dexerdry') {
@@ -2860,12 +2863,12 @@ function generateOrderTextForEmail() {
         const price = getItemPrice(item);
         const sub = getItemSubtotal(item);
         grandTotal += sub;
-        const productName = item.type === 'custom' && item.customDesc ? item.customDesc : prod.name;
+        const productName = item.type === 'custom' && item.customDesc ? item.customDesc : (prod ? prod.name : item.type);
         txt += 'Item ' + (i + 1) + ': ' + productName + '\n';
-        if (prod.hasColor && item.color) txt += '   Color: ' + item.color + '\n';
+        if (prod && prod.hasColor && item.color) txt += '   Color: ' + item.color + '\n';
         if (item.type === 'dexerdry') {
             txt += '   Size: ' + item.length + ' ft box, Qty: ' + item.qty + ' (' + (item.length * item.qty) + ' ft total)\n';
-        } else if (prod.isFt) {
+        } else if (prod && prod.isFt) {
             const len = item.length === 'custom' ? (item.customLength || 0) : (item.length || 0);
             txt += '   Length: ' + len + ' ft, Qty: ' + item.qty + '\n';
         } else {
@@ -2915,11 +2918,11 @@ function showReviewModal() {
         const prod = PRODUCTS[item.type] || PRODUCTS.custom;
         const sub = getItemSubtotal(item);
         grandTotal += sub;
-        const productName = item.type === 'custom' && item.customDesc ? item.customDesc : prod.name;
+        const productName = item.type === 'custom' && item.customDesc ? item.customDesc : (prod ? prod.name : item.type);
         const div = document.createElement('div');
         div.className = 'review-item';
         var nameSpan = document.createElement('span');
-        nameSpan.textContent = productName + (prod.hasColor && item.color ? ' (' + item.color + ')' : '') + ' x ' + item.qty;
+        nameSpan.textContent = productName + ((prod && prod.hasColor && item.color) ? ' (' + item.color + ')' : '') + ' x ' + item.qty;
         var priceSpan = document.createElement('span');
         priceSpan.textContent = formatCurrency(sub);
         div.appendChild(nameSpan);

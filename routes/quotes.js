@@ -1,7 +1,13 @@
 // ============================================================
 // routes/quotes.js - Quote CRUD with per-dealer pricing
-// Date: 2026-03-04
+// Date: 2026-03-15
 // ============================================================
+// v3.8.2 (2026-03-15):
+//   FIX: Admin cross-dealer quote editing now resolves the quote
+//        owner's dealer for pricing instead of using the admin's
+//        dealer. Prevents pricing corruption when admin edits or
+//        generates PDFs for another dealer's quotes.
+//
 // v3.8.1 (2026-03-04):
 //   FIX: GET /api/quotes/pending-actions now merges BOTH:
 //        1. Quotes with pendingAction (delete/revision requests)
@@ -26,7 +32,7 @@ const router = express.Router();
 const crypto = require('crypto');
 const {
     readJSON, writeJSON,
-    QUOTES_FILE, CUSTOMERS_FILE, PRODUCTS_FILE,
+    QUOTES_FILE, CUSTOMERS_FILE, PRODUCTS_FILE, DEALERS_FILE,
     generateId, getDealerPrice, recalcCustomerStats,
     sanitizeInput
 } = require('../lib/helpers');
@@ -746,7 +752,18 @@ router.put('/:id', async (req, res) => {
     if (deliveryDate !== undefined)         quotes[idx].deliveryDate        = deliveryDate;
 
     if (lineItems) {
-        const dealer = req.dealer;
+        // Use the quote owner's dealer for pricing, not the logged-in user's dealer.
+        // When admin edits another dealer's quote, req.dealer is the admin's dealer
+        // which would apply the wrong pricing. Look up the quote's dealerCode instead.
+        let dealer = req.dealer;
+        if (req.user.role === 'admin' && quotes[idx].dealerCode &&
+            quotes[idx].dealerCode.toUpperCase() !== req.user.dealerCode.toUpperCase()) {
+            const dealers = readJSON(DEALERS_FILE);
+            const ownerDealer = dealers.find(d =>
+                d.dealerCode.toUpperCase() === quotes[idx].dealerCode.toUpperCase() && d.isActive
+            );
+            if (ownerDealer) dealer = ownerDealer;
+        }
         quotes[idx].lineItems = lineItems.map(item => buildLineItem(item, dealer));
         recalcQuoteTotal(quotes[idx]);
         quotes[idx].hasPendingOverrides = quotes[idx].lineItems.some(
@@ -1177,7 +1194,16 @@ router.get('/:id/pdf', async (req, res) => {
         const quote  = findQuoteByParam(quotes, req.params.id, req.user);
         if (!quote) return res.status(404).json({ error: 'Quote not found' });
 
-        const dealer    = req.dealer;
+        // Use the quote owner's dealer for PDF generation, not the logged-in user's dealer
+        let dealer = req.dealer;
+        if (req.user.role === 'admin' && quote.dealerCode &&
+            quote.dealerCode.toUpperCase() !== req.user.dealerCode.toUpperCase()) {
+            const dealers = readJSON(DEALERS_FILE);
+            const ownerDealer = dealers.find(d =>
+                d.dealerCode.toUpperCase() === quote.dealerCode.toUpperCase() && d.isActive
+            );
+            if (ownerDealer) dealer = ownerDealer;
+        }
         const customers = readJSON(CUSTOMERS_FILE);
         const customer  = customers.find(c => c.id === quote.customer.customerId) || quote.customer;
         const pdfBuffer = await generateQuotePDF(quote, dealer, customer);
