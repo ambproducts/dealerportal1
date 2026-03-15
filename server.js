@@ -32,6 +32,19 @@ app.use(cors({
     credentials: true
 }));
 
+// ----------------------------------------------------------
+// Health check + version — BEFORE rate limiter so Render's
+// health check bot never gets rate-limited (HTTP 429) during
+// deploy cycles and crash-loop restarts.
+// ----------------------------------------------------------
+app.get('/api/health', (req, res) => {
+    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+app.get('/api/version', (req, res) => {
+    res.status(200).json({ version: pkg.version, name: pkg.name });
+});
+
 // General API rate limit
 app.use('/api/', rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
@@ -102,16 +115,8 @@ const adminCustomerRoutes = require('./routes/admin-customers');
 app.use('/api/admin/customers', adminCustomerRoutes);
 
 // ----------------------------------------------------------
-// Health check, version, + SPA fallback
+// SPA fallback
 // ----------------------------------------------------------
-app.get('/api/health', (req, res) => {
-    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
-});
-
-app.get('/api/version', (req, res) => {
-    res.status(200).json({ version: pkg.version, name: pkg.name });
-});
-
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'dealer-portal.html'));
 });
