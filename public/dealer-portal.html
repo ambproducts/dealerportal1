@@ -1043,7 +1043,7 @@
                             <label for="stairs">Stairs</label>
                         </div>
                         <div id="stairs-config" class="option-config-panel">
-                            <div class="note-inline" style="display:block; margin-bottom:0.5rem;">Add Solid Edge boards for stair treads and risers.</div>
+                            <div class="note-inline" style="display:block; margin-bottom:0.5rem;">Add Solid Edge boards for stair treads.</div>
                             <div class="config-row">
                                 <span class="config-label">Steps:</span>
                                 <input type="number" id="stair-steps" min="1" value="1" style="width:70px;">
@@ -1056,10 +1056,6 @@
                                 <span class="config-label">Stair width (ft):</span>
                                 <input type="number" id="stair-width" min="1" step="0.5" placeholder="e.g., 4" style="width:80px;">
                                 <span class="help-text" style="margin-left:0.25rem;font-size:0.78rem;">Board length based on stair width</span>
-                            </div>
-                            <div class="config-row">
-                                <input type="checkbox" id="stair-risers" style="width:16px;height:16px;cursor:pointer;">
-                                <label for="stair-risers" style="font-size:0.85rem;cursor:pointer;">Include risers</label>
                             </div>
                             <div class="config-row">
                                 <span class="config-label">Stair color:</span>
@@ -1433,7 +1429,7 @@ var currentQuote = {
     lineItems: [],
     options: {
         pictureFrame: { enabled: false, type: 'single', color: null },
-        stairs: { enabled: false, steps: 1, treadsPerStep: 2, risers: false, color: null }
+        stairs: { enabled: false, steps: 1, treadsPerStep: 2, color: null }
     },
     specialInstructions: '',
     internalNotes: '',
@@ -2372,7 +2368,6 @@ function saveCurrentQuote() {
         enabled: document.getElementById('stairs').checked,
         steps: parseInt(document.getElementById('stair-steps').value) || 1,
         treadsPerStep: 2,
-        risers: document.getElementById('stair-risers').checked,
         color: document.getElementById('stair-color-swatches').dataset.selected || null,
         stairWidth: parseFloat(document.getElementById('stair-width').value) || null
     };
@@ -2404,9 +2399,9 @@ function normalizeOptions(opts) {
     }
     // Backward compat: boolean stairs -> object
     if (typeof opts.stairs === 'boolean') {
-        opts.stairs = { enabled: opts.stairs, steps: 1, treadsPerStep: 2, risers: false, color: null, stairWidth: null };
+        opts.stairs = { enabled: opts.stairs, steps: 1, treadsPerStep: 2, color: null, stairWidth: null };
     } else if (!opts.stairs) {
-        opts.stairs = { enabled: false, steps: 1, treadsPerStep: 2, risers: false, color: null, stairWidth: null };
+        opts.stairs = { enabled: false, steps: 1, treadsPerStep: 2, color: null, stairWidth: null };
     } else {
         if (opts.stairs.stairWidth === undefined) opts.stairs.stairWidth = null;
     }
@@ -2432,7 +2427,6 @@ function restoreOptionPanels() {
     document.getElementById('stairs').checked = st.enabled;
     document.getElementById('stair-steps').value = st.steps || 1;
     document.getElementById('stair-width').value = st.stairWidth || '';
-    document.getElementById('stair-risers').checked = st.risers || false;
     setMiniSwatchSelection('stair-color-swatches', st.color);
     document.getElementById('stairs-config').classList.toggle('visible', st.enabled);
 }
@@ -2476,7 +2470,7 @@ function resetFormOnly() {
         options: {
             pictureFrame: { enabled: false, type: 'single', color: null },
             breakerBoard: { enabled: false, position: 'center', customOffset: null, color: null },
-            stairs: { enabled: false, steps: 1, treadsPerStep: 2, risers: false, color: null, stairWidth: null }
+            stairs: { enabled: false, steps: 1, treadsPerStep: 2, color: null, stairWidth: null }
         },
         specialInstructions: '',
         internalNotes: '',
@@ -2510,7 +2504,6 @@ function resetFormOnly() {
     document.getElementById('stairs-config').classList.remove('visible');
     document.getElementById('stair-steps').value = '1';
     document.getElementById('stair-width').value = '';
-    document.getElementById('stair-risers').checked = false;
     setMiniSwatchSelection('stair-color-swatches', null);
 
     // Clear calculator results
@@ -2643,7 +2636,6 @@ function generatePrintHTML(type) {
         if (hasStairs) {
             var stDesc = '✓ Stairs — ' + (stOpt.steps || 1) + ' step(s), 2 tread(s)/step';
             if (stOpt.stairWidth) stDesc += ', ' + fmtFtIn(stOpt.stairWidth) + ' wide';
-            if (stOpt.risers) stDesc += ', with risers';
             if (stOpt.color) stDesc += ', ' + stOpt.color;
             html += '<p style="margin: 5px 0;">' + stDesc + '</p>';
         }

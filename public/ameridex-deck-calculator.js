@@ -1072,8 +1072,6 @@
             var slSteps = parseInt((document.getElementById('stair-steps') || {}).value) || 1;
             var slTreadsPerStep = 2;
             var slTreadBoards = slSteps * slTreadsPerStep;
-            var slHasRisers = document.getElementById('stair-risers') && document.getElementById('stair-risers').checked;
-            var slRiserBoards = slHasRisers ? slSteps : 0;
             var slStairWidth = parseFloat((document.getElementById('stair-width') || {}).value) || result.coverageFt;
             var slStBoardLen = slStairWidth <= 12 ? 12 : slStairWidth <= 16 ? 16 : 20;
             var slStColor = ((document.getElementById('stair-color-swatches') || {}).dataset && document.getElementById('stair-color-swatches').dataset.selected) || color;
@@ -1081,12 +1079,6 @@
             solidItems.push({ qty: slTreadBoards, length: slStBoardLen, color: slStColor, label: 'stair treads', price: slTreadPrice });
             totalItemCount += slTreadBoards;
             estimatedTotal += slTreadPrice;
-            if (slRiserBoards > 0) {
-                var slRiserPrice = slRiserBoards * slStBoardLen * solidPricePerFt;
-                solidItems.push({ qty: slRiserBoards, length: slStBoardLen, color: slStColor, label: 'stair risers', price: slRiserPrice });
-                totalItemCount += slRiserBoards;
-                estimatedTotal += slRiserPrice;
-            }
         }
 
         function fmtMoney(n) { return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
@@ -1154,10 +1146,7 @@
             var steps = parseInt((document.getElementById('stair-steps') || {}).value) || 1;
             var treadsPerStep = 2;
             var treadBoards = steps * treadsPerStep;
-            var hasRisers = document.getElementById('stair-risers') && document.getElementById('stair-risers').checked;
-            var riserBoards = hasRisers ? steps : 0;
             var stairDesc = 'Stairs: <strong>' + treadBoards + '</strong> tread board' + (treadBoards !== 1 ? 's' : '');
-            if (riserBoards > 0) stairDesc += ' + <strong>' + riserBoards + '</strong> riser board' + (riserBoards !== 1 ? 's' : '');
             additionalItems.push(stairDesc);
         }
 
@@ -1533,7 +1522,6 @@
             enabled: true,
             steps: parseInt((document.getElementById('stair-steps') || {}).value) || 1,
             treadsPerStep: 2,
-            risers: !!(document.getElementById('stair-risers') && document.getElementById('stair-risers').checked),
             color: (document.getElementById('stair-color-swatches') || {}).dataset && document.getElementById('stair-color-swatches').dataset.selected || null,
             stairWidth: parseFloat((document.getElementById('stair-width') || {}).value) || null
         } : null;
@@ -1558,21 +1546,6 @@
             });
             itemsAdded.push(treadBoards + ' solid edge boards (stair treads)');
 
-            if (stOpt.risers) {
-                var riserBoards = steps;
-                window.currentQuote.lineItems.push({
-                    type: 'solid',
-                    color: stColor,
-                    length: stBoardLen,
-                    customLength: null,
-                    qty: riserBoards,
-                    customDesc: '',
-                    customUnitPrice: 0,
-                    _source: 'calculator',
-                    _sourceNote: 'Stair risers: ' + steps + ' riser(s)'
-                });
-                itemsAdded.push(riserBoards + ' solid edge boards (stair risers)');
-            }
         }
 
         // 7. Save cut plan data with quote (polygon only)
@@ -2329,19 +2302,12 @@
                 var stSt = parseInt((document.getElementById('stair-steps') || {}).value) || 1;
                 var stTr = 2;
                 var stTB = stSt * stTr;
-                var stHR = document.getElementById('stair-risers') && document.getElementById('stair-risers').checked;
-                var stRB = stHR ? stSt : 0;
                 var stW = parseFloat((document.getElementById('stair-width') || {}).value) || currentCalcResult.coverageFt;
                 var stBL = stW <= 12 ? 12 : stW <= 16 ? 16 : 20;
                 var stCol = ((document.getElementById('stair-color-swatches') || {}).dataset && document.getElementById('stair-color-swatches').dataset.selected) || color;
                 var stTP = stTB * stBL * solidPricePerFt;
                 estimatedTotal += stTP;
                 phtml += '<tr><td>' + stTB + 'x Solid Edge, ' + stBL + '\', ' + stCol + ' (stair treads)</td><td style="text-align:right">' + pm(stTP) + '</td></tr>';
-                if (stRB > 0) {
-                    var stRP = stRB * stBL * solidPricePerFt;
-                    estimatedTotal += stRP;
-                    phtml += '<tr><td>' + stRB + 'x Solid Edge, ' + stBL + '\', ' + stCol + ' (stair risers)</td><td style="text-align:right">' + pm(stRP) + '</td></tr>';
-                }
             }
         }
         phtml += '<tr style="background:#f3f4f6;font-weight:bold"><td style="color:#1e40af">ESTIMATED TOTAL</td><td style="text-align:right;color:#1e40af;font-size:1.1rem">' + pm(estimatedTotal) + '</td></tr>';
