@@ -1070,7 +1070,7 @@
         var stCheck = document.getElementById('stairs');
         if (stCheck && stCheck.checked) {
             var slSteps = parseInt((document.getElementById('stair-steps') || {}).value) || 1;
-            var slTreadsPerStep = parseInt((document.getElementById('stair-treads') || {}).value) || 1;
+            var slTreadsPerStep = 2;
             var slTreadBoards = slSteps * slTreadsPerStep;
             var slHasRisers = document.getElementById('stair-risers') && document.getElementById('stair-risers').checked;
             var slRiserBoards = slHasRisers ? slSteps : 0;
@@ -1152,7 +1152,7 @@
         var stCheck = document.getElementById('stairs');
         if (stCheck && stCheck.checked) {
             var steps = parseInt((document.getElementById('stair-steps') || {}).value) || 1;
-            var treadsPerStep = parseInt((document.getElementById('stair-treads') || {}).value) || 1;
+            var treadsPerStep = 2;
             var treadBoards = steps * treadsPerStep;
             var hasRisers = document.getElementById('stair-risers') && document.getElementById('stair-risers').checked;
             var riserBoards = hasRisers ? steps : 0;
@@ -1532,7 +1532,7 @@
         var stOpt = stCheckbox && stCheckbox.checked ? {
             enabled: true,
             steps: parseInt((document.getElementById('stair-steps') || {}).value) || 1,
-            treadsPerStep: parseInt((document.getElementById('stair-treads') || {}).value) || 1,
+            treadsPerStep: 2,
             risers: !!(document.getElementById('stair-risers') && document.getElementById('stair-risers').checked),
             color: (document.getElementById('stair-color-swatches') || {}).dataset && document.getElementById('stair-color-swatches').dataset.selected || null,
             stairWidth: parseFloat((document.getElementById('stair-width') || {}).value) || null
@@ -1542,7 +1542,7 @@
             var stBoardLen = stairWidth <= 12 ? 12 : stairWidth <= 16 ? 16 : 20;
             var stColor = stOpt.color || color;
             var steps = stOpt.steps || 1;
-            var treadsPerStep = stOpt.treadsPerStep || 1;
+            var treadsPerStep = 2;
             var treadBoards = steps * treadsPerStep;
 
             window.currentQuote.lineItems.push({
@@ -2327,7 +2327,7 @@
             }
             if (stChk && stChk.checked) {
                 var stSt = parseInt((document.getElementById('stair-steps') || {}).value) || 1;
-                var stTr = parseInt((document.getElementById('stair-treads') || {}).value) || 1;
+                var stTr = 2;
                 var stTB = stSt * stTr;
                 var stHR = document.getElementById('stair-risers') && document.getElementById('stair-risers').checked;
                 var stRB = stHR ? stSt : 0;

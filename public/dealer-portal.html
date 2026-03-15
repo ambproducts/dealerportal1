@@ -1050,7 +1050,7 @@
                             </div>
                             <div class="config-row">
                                 <span class="config-label">Treads/step:</span>
-                                <input type="number" id="stair-treads" min="1" max="5" value="1" style="width:70px;">
+                                <span id="stair-treads-display" style="font-weight:600; color:#1e40af;">2</span>
                             </div>
                             <div class="config-row">
                                 <span class="config-label">Stair width (ft):</span>
@@ -1433,7 +1433,7 @@ var currentQuote = {
     lineItems: [],
     options: {
         pictureFrame: { enabled: false, type: 'single', color: null },
-        stairs: { enabled: false, steps: 1, treadsPerStep: 1, risers: false, color: null }
+        stairs: { enabled: false, steps: 1, treadsPerStep: 2, risers: false, color: null }
     },
     specialInstructions: '',
     internalNotes: '',
@@ -2371,7 +2371,7 @@ function saveCurrentQuote() {
     currentQuote.options.stairs = {
         enabled: document.getElementById('stairs').checked,
         steps: parseInt(document.getElementById('stair-steps').value) || 1,
-        treadsPerStep: parseInt(document.getElementById('stair-treads').value) || 1,
+        treadsPerStep: 2,
         risers: document.getElementById('stair-risers').checked,
         color: document.getElementById('stair-color-swatches').dataset.selected || null,
         stairWidth: parseFloat(document.getElementById('stair-width').value) || null
@@ -2404,9 +2404,9 @@ function normalizeOptions(opts) {
     }
     // Backward compat: boolean stairs -> object
     if (typeof opts.stairs === 'boolean') {
-        opts.stairs = { enabled: opts.stairs, steps: 1, treadsPerStep: 1, risers: false, color: null, stairWidth: null };
+        opts.stairs = { enabled: opts.stairs, steps: 1, treadsPerStep: 2, risers: false, color: null, stairWidth: null };
     } else if (!opts.stairs) {
-        opts.stairs = { enabled: false, steps: 1, treadsPerStep: 1, risers: false, color: null, stairWidth: null };
+        opts.stairs = { enabled: false, steps: 1, treadsPerStep: 2, risers: false, color: null, stairWidth: null };
     } else {
         if (opts.stairs.stairWidth === undefined) opts.stairs.stairWidth = null;
     }
@@ -2431,7 +2431,6 @@ function restoreOptionPanels() {
     var st = currentQuote.options.stairs;
     document.getElementById('stairs').checked = st.enabled;
     document.getElementById('stair-steps').value = st.steps || 1;
-    document.getElementById('stair-treads').value = st.treadsPerStep || 1;
     document.getElementById('stair-width').value = st.stairWidth || '';
     document.getElementById('stair-risers').checked = st.risers || false;
     setMiniSwatchSelection('stair-color-swatches', st.color);
@@ -2477,7 +2476,7 @@ function resetFormOnly() {
         options: {
             pictureFrame: { enabled: false, type: 'single', color: null },
             breakerBoard: { enabled: false, position: 'center', customOffset: null, color: null },
-            stairs: { enabled: false, steps: 1, treadsPerStep: 1, risers: false, color: null, stairWidth: null }
+            stairs: { enabled: false, steps: 1, treadsPerStep: 2, risers: false, color: null, stairWidth: null }
         },
         specialInstructions: '',
         internalNotes: '',
@@ -2510,7 +2509,6 @@ function resetFormOnly() {
     document.getElementById('stairs').checked = false;
     document.getElementById('stairs-config').classList.remove('visible');
     document.getElementById('stair-steps').value = '1';
-    document.getElementById('stair-treads').value = '1';
     document.getElementById('stair-width').value = '';
     document.getElementById('stair-risers').checked = false;
     setMiniSwatchSelection('stair-color-swatches', null);
@@ -2643,7 +2641,7 @@ function generatePrintHTML(type) {
             html += '<p style="margin: 5px 0;">' + bbDesc + '</p>';
         }
         if (hasStairs) {
-            var stDesc = '✓ Stairs — ' + (stOpt.steps || 1) + ' step(s), ' + (stOpt.treadsPerStep || 1) + ' tread(s)/step';
+            var stDesc = '✓ Stairs — ' + (stOpt.steps || 1) + ' step(s), 2 tread(s)/step';
             if (stOpt.stairWidth) stDesc += ', ' + fmtFtIn(stOpt.stairWidth) + ' wide';
             if (stOpt.risers) stDesc += ', with risers';
             if (stOpt.color) stDesc += ', ' + stOpt.color;
