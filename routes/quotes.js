@@ -1072,9 +1072,7 @@ router.post('/:id/items/:itemIndex/reject-override', requireRole('admin', 'gm'),
 // =============================================================
 router.post('/:id/submit', async (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
-    const idx = quotes.findIndex(q =>
-        matchesParam(q, req.params.id) && q.dealerCode === req.user.dealerCode && !q.deleted
-    );
+    const idx = findQuoteIndexByParam(quotes, req.params.id, req.user);
     if (idx === -1) return res.status(404).json({ error: 'Quote not found' });
 
     if (quotes[idx].status !== 'draft' && quotes[idx].status !== 'revision') {
@@ -1166,10 +1164,14 @@ router.post('/:id/duplicate', (req, res) => {
         dup.dealerCode = req.user.dealerCode;
     }
 
-    dup.lineItems.forEach(item => {
+    // Re-price line items using the duplicate's owner dealer (may differ from original)
+    const dealers = readJSON(DEALERS_FILE);
+    const dupDealer = dealers.find(d =>
+        d.dealerCode.toUpperCase() === dup.dealerCode.toUpperCase() && d.isActive
+    ) || req.dealer;
+    dup.lineItems = dup.lineItems.map(item => {
         item.priceOverride = null;
-        item.price = item.tierPrice;
-        item.total = calcItemTotal(item);
+        return buildLineItem(item, dupDealer);
     });
     dup.hasPendingOverrides = false;
     recalcQuoteTotal(dup);
@@ -1205,7 +1207,8 @@ router.get('/:id/pdf', async (req, res) => {
             if (ownerDealer) dealer = ownerDealer;
         }
         const customers = readJSON(CUSTOMERS_FILE);
-        const customer  = customers.find(c => c.id === quote.customer.customerId) || quote.customer;
+        const custId    = quote.customer ? quote.customer.customerId : null;
+        const customer  = (custId && customers.find(c => c.id === custId)) || quote.customer || {};
         const pdfBuffer = await generateQuotePDF(quote, dealer, customer);
         const filename  = `${quote.quoteNumber}.pdf`;
 
