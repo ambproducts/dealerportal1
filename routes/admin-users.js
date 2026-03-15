@@ -190,20 +190,40 @@ router.post('/', (req, res) => {
 
 // -----------------------------------------------------------
 // PUT /api/admin/users/:id - Update user details
-// Body: { displayName?, role?, email?, phone?, dealerCode?, status? }
+// Body: { displayName?, role?, email?, phone?, dealerCode?, status?, username?, password? }
 // -----------------------------------------------------------
 router.put('/:id', (req, res) => {
     const users = readJSON(USERS_FILE);
     const idx = users.findIndex(u => u.id === req.params.id && !u.isDeleted);
     if (idx === -1) return res.status(404).json({ error: 'User not found' });
 
-    const { displayName, role, email, phone, dealerCode, status } = req.body;
+    const { displayName, role, email, phone, dealerCode, status, username, password } = req.body;
 
     if (displayName !== undefined) users[idx].displayName = sanitizeInput(displayName);
     if (email !== undefined) users[idx].email = sanitizeInput(email);
     if (phone !== undefined) users[idx].phone = phone;
     if (dealerCode !== undefined) users[idx].dealerCode = dealerCode.toUpperCase();
     if (status !== undefined) users[idx].status = status;
+
+    if (username !== undefined) {
+        const cleanUsername = sanitizeInput(username).trim().toLowerCase();
+        if (cleanUsername.length < 3) {
+            return res.status(400).json({ error: 'Username must be at least 3 characters' });
+        }
+        // Check uniqueness (exclude current user)
+        const duplicate = users.find(u => u.username === cleanUsername && u.id !== req.params.id && !u.isDeleted);
+        if (duplicate) {
+            return res.status(400).json({ error: 'Username already taken' });
+        }
+        users[idx].username = cleanUsername;
+    }
+
+    if (password !== undefined && password !== '') {
+        if (password.length < 8) {
+            return res.status(400).json({ error: 'Password must be at least 8 characters' });
+        }
+        users[idx].passwordHash = hashPassword(password);
+    }
 
     if (role !== undefined) {
         const validRoles = ['admin', 'gm', 'frontdesk', 'dealer', 'rep'];

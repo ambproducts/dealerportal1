@@ -1604,16 +1604,101 @@
     function editAdminUser(id) {
         var user = _allUsers.find(function (u) { return u.id === id; });
         if (!user) return;
-        var newDisplay = prompt('Display Name:', user.displayName || '');
-        if (newDisplay === null) return;
-        var newRole = prompt('Role (admin, gm, frontdesk, dealer, rep):', user.role || 'frontdesk');
-        if (newRole === null) return;
-        var newEmail = prompt('Email:', user.email || '');
-        if (newEmail === null) return;
 
-        _api('PUT', '/api/admin/users/' + id, { displayName: newDisplay, role: newRole, email: newEmail })
-            .then(function () { showAlert('admin-user-alert', 'User updated!', 'success'); loadAdminUsers(); })
-            .catch(function (err) { showAlert('admin-user-alert', 'Update failed: ' + esc(err.message), 'error'); });
+        // Build dealer code options from the create-user dropdown
+        var dealerOpts = '';
+        var createSelect = document.getElementById('admin-new-user-dealer');
+        if (createSelect) {
+            for (var i = 0; i < createSelect.options.length; i++) {
+                var code = createSelect.options[i].value;
+                dealerOpts += '<option value="' + esc(code) + '"' + (code === user.dealerCode ? ' selected' : '') + '>' + esc(code) + '</option>';
+            }
+        }
+
+        var roleOptions = [
+            { value: 'frontdesk', label: 'Frontdesk (Sales Rep)' },
+            { value: 'gm', label: 'GM (General Manager)' },
+            { value: 'dealer', label: 'Dealer (Legacy)' },
+            { value: 'rep', label: 'Internal Rep' },
+            { value: 'admin', label: 'Admin' }
+        ];
+        var roleOpts = '';
+        roleOptions.forEach(function (r) {
+            roleOpts += '<option value="' + r.value + '"' + (r.value === user.role ? ' selected' : '') + '>' + r.label + '</option>';
+        });
+
+        // Create modal overlay
+        var overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
+        overlay.innerHTML =
+            '<div style="background:#fff;border-radius:12px;padding:1.5rem;max-width:480px;width:90%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">' +
+                '<h3 style="margin:0 0 1rem;color:#1e40af;">Edit User: ' + esc(user.username) + '</h3>' +
+                '<div style="display:grid;gap:0.75rem;">' +
+                    '<div><label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.25rem;">Dealer Code</label>' +
+                        '<select id="edit-user-dealer" style="width:100%;padding:0.4rem;border:1px solid #d1d5db;border-radius:6px;text-transform:uppercase;">' + dealerOpts + '</select></div>' +
+                    '<div><label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.25rem;">Role</label>' +
+                        '<select id="edit-user-role" style="width:100%;padding:0.4rem;border:1px solid #d1d5db;border-radius:6px;">' + roleOpts + '</select></div>' +
+                    '<div><label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.25rem;">Username</label>' +
+                        '<input type="text" id="edit-user-username" value="' + esc(user.username || '') + '" style="width:100%;padding:0.4rem;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;"></div>' +
+                    '<div><label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.25rem;">Display Name</label>' +
+                        '<input type="text" id="edit-user-display" value="' + esc(user.displayName || '') + '" style="width:100%;padding:0.4rem;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;"></div>' +
+                    '<div><label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.25rem;">Password <span style="font-weight:400;color:#6b7280;">(leave blank to keep existing)</span></label>' +
+                        '<input type="password" id="edit-user-pw" placeholder="New password (min 8 chars)" style="width:100%;padding:0.4rem;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;"></div>' +
+                    '<div><label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.25rem;">Email <span style="font-weight:400;color:#6b7280;">(optional)</span></label>' +
+                        '<input type="email" id="edit-user-email" value="' + esc(user.email || '') + '" style="width:100%;padding:0.4rem;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;"></div>' +
+                    '<div><label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.25rem;">Phone <span style="font-weight:400;color:#6b7280;">(optional)</span></label>' +
+                        '<input type="tel" id="edit-user-phone" value="' + esc(user.phone || '') + '" style="width:100%;padding:0.4rem;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;"></div>' +
+                '</div>' +
+                '<div style="display:flex;gap:0.75rem;justify-content:flex-end;margin-top:1.25rem;">' +
+                    '<button id="edit-user-cancel" style="padding:0.5rem 1rem;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;">Cancel</button>' +
+                    '<button id="edit-user-save" style="padding:0.5rem 1rem;border:none;border-radius:6px;background:#2563eb;color:#fff;cursor:pointer;font-weight:600;">Save Changes</button>' +
+                '</div>' +
+            '</div>';
+
+        document.body.appendChild(overlay);
+
+        // Close on overlay click (outside modal)
+        overlay.addEventListener('click', function (e) {
+            if (e.target === overlay) document.body.removeChild(overlay);
+        });
+
+        document.getElementById('edit-user-cancel').addEventListener('click', function () {
+            document.body.removeChild(overlay);
+        });
+
+        document.getElementById('edit-user-save').addEventListener('click', function () {
+            var pw = document.getElementById('edit-user-pw').value;
+            var username = document.getElementById('edit-user-username').value.trim().toLowerCase();
+
+            if (!username || username.length < 3) {
+                showAlert('admin-user-alert', 'Username must be at least 3 characters', 'error');
+                return;
+            }
+            if (pw && pw.length < 8) {
+                showAlert('admin-user-alert', 'Password must be at least 8 characters', 'error');
+                return;
+            }
+
+            var payload = {
+                dealerCode: document.getElementById('edit-user-dealer').value,
+                role: document.getElementById('edit-user-role').value,
+                username: username,
+                displayName: document.getElementById('edit-user-display').value.trim(),
+                email: document.getElementById('edit-user-email').value.trim(),
+                phone: document.getElementById('edit-user-phone').value.trim()
+            };
+            if (pw) payload.password = pw;
+
+            _api('PUT', '/api/admin/users/' + id, payload)
+                .then(function () {
+                    document.body.removeChild(overlay);
+                    showAlert('admin-user-alert', 'User updated!', 'success');
+                    loadAdminUsers();
+                })
+                .catch(function (err) {
+                    showAlert('admin-user-alert', 'Update failed: ' + esc(err.message), 'error');
+                });
+        });
     }
 
     function resetAdminUserPassword(id) {
