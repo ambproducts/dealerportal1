@@ -344,8 +344,8 @@
         var loginBtn  = document.getElementById('login-btn');
         var username  = userInput ? userInput.value.trim() : '';
         var password  = pwInput  ? pwInput.value : '';
-        var isSalesrepMode = document.getElementById('salesrep-login-toggle') &&
-                             document.getElementById('salesrep-login-toggle').classList.contains('active');
+        var salesrepToggle = document.getElementById('salesrep-login-toggle');
+        var isSalesrepMode = (salesrepToggle && salesrepToggle.classList.contains('active')) || !code;
 
         hideLoginError();
         if (!isSalesrepMode) {
