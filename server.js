@@ -24,6 +24,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Helmet — security headers (CSP disabled until inline scripts are audited)
 app.use(helmet({
     contentSecurityPolicy: false
+    frameguard: false
 }));
 
 // CORS — reflect request origin (same-origin SPA)
