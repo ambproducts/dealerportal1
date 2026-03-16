@@ -1,8 +1,29 @@
 // ============================================================
-// AmeriDex Dealer Portal - API Integration Patch v2.23
-// Date: 2026-03-05
+// AmeriDex Dealer Portal - API Integration Patch v2.24
+// Date: 2026-03-15
 // ============================================================
 // REQUIRES: ameridex-patches.js (v1.0+) loaded first
+//
+// v2.24 Changes (2026-03-15):
+//   - CRITICAL FIX: Race condition in loadQuoteFromUrlParam().
+//     The _quoteFromUrlHandled guard existed in v2.23 but was
+//     checked SYNCHRONOUSLY inside the 'ameridex-login' handler.
+//     portal-nav sets _quoteFromUrlHandled only AFTER its own
+//     'ameridex-quoteeditor-ready' listener fires, which is a
+//     separate async event dispatched by quote-editor AFTER
+//     'ameridex-login'. So when api.js's onLogin() ran, the flag
+//     was always undefined, and api.js proceeded to call doLoad()
+//     in parallel with portal-nav's pending load.
+//   - FIX: onLogin() now defers the _quoteFromUrlHandled check
+//     by 250ms using setTimeout. This gives portal-nav's
+//     'ameridex-quoteeditor-ready' path enough time to set the
+//     flag before api.js decides whether to run doLoad().
+//   - FIX: If portal-nav has already set the flag within 250ms,
+//     api.js skips doLoad() entirely. If NOT set by then (e.g.
+//     quote-editor is slow or absent), api.js runs doLoad() as
+//     the authoritative fallback — preserving the existing
+//     ameridex-quote-restored locking pathway.
+//   - No other behavior changed.
 //
 // v2.23 Changes (2026-03-05):
 //   - FIX: applyTierPricing() now calls window.backupPrices()
@@ -392,13 +413,6 @@
 
     // ----------------------------------------------------------
     // 5. TIER PRICING (v2.23)
-    //
-    // v2.23 FIX: After updating PRODUCTS and PRODUCT_CONFIG from
-    // the server, we now:
-    //   a) Call window.backupPrices() so ameridex-pricing-fix.js
-    //      has the correct server prices as its backup, not the
-    //      stale hardcoded values from dealer-portal.html.
-    //   b) Dispatch 'ameridex-prices-loaded' event.
     // ----------------------------------------------------------
     function isValidPrice(val) {
         if (val === undefined || val === null) return false;
@@ -427,15 +441,11 @@
                 window._currentTier = data.tier;
                 console.log('[Pricing] Tier:', data.tier.label, '(x' + data.tier.multiplier + ')');
 
-                // v2.23 FIX: Re-snapshot prices AFTER server data is applied.
-                // This prevents healUndefinedPrices() from reverting to stale
-                // hardcoded values.
                 if (typeof window.backupPrices === 'function') {
                     window.backupPrices();
                     console.log('[Pricing v2.23] backupPrices() refreshed with server prices.');
                 }
 
-                // Notify other scripts that fresh prices are available
                 dispatchPricesLoadedEvent();
 
                 if (window.currentQuote.lineItems.length > 0) { render(); updateTotalAndFasteners(); }
@@ -708,18 +718,6 @@
 
     // ----------------------------------------------------------
     // 11. SUBMIT FORMAL REQUEST  (v2.21)
-    //
-    // The server now handles all Formspree notification via
-    // POST /api/quotes/:id/submit -> notifySubmissionViaFormspree().
-    //
-    // The old _origSendFormalRequest fallback used to fire a
-    // client-side Formspree POST from the browser, which exposed
-    // the form ID in JS and could fire even when the quote was
-    // not yet saved to the server. That path is removed.
-    //
-    // Fallback behavior (server unreachable or no _serverId):
-    //   Show a clear user-facing error. No silent email attempt.
-    //   The user should try again once connectivity is restored.
     // ----------------------------------------------------------
     window.sendFormalRequest = function () {
         var quoteId = saveCurrentQuote();
@@ -1004,30 +1002,27 @@
 
 
     // ----------------------------------------------------------
-    // 18. LOAD QUOTE FROM URL PARAM (v2.22)
+    // 18. LOAD QUOTE FROM URL PARAM (v2.24)
     //
-    // CRITICAL FIX: Always wait for 'ameridex-login' before
-    // fetching. Previously, when _authToken existed in
-    // sessionStorage, doLoad() fired immediately. But
-    // tryResumeSession() is async and had not yet finished
-    // hydrating _currentUser, _currentDealer, or the server-side
-    // dealer middleware. This caused 401/404 errors and stale
-    // state when opening a quote from the Quotes & Customers
-    // page (which navigates to ?quoteId=Q260228-OOD9).
+    // THE RACE CONDITION (fixed here):
+    //   api.js fires 'ameridex-login' -> onLogin() runs synchronously
+    //   At that instant, window._quoteFromUrlHandled is still undefined
+    //   because portal-nav has not yet received 'ameridex-quoteeditor-ready'
+    //   (dispatched by quote-editor AFTER 'ameridex-login').
+    //   So the old synchronous guard never worked — api.js always ran doLoad().
     //
-    // Flow now:
-    //   1. loadQuoteFromUrlParam() always registers a one-shot
-    //      listener on 'ameridex-login'.
-    //   2. tryResumeSession() dispatches 'ameridex-login' AFTER
-    //      auth is verified, tier pricing is loaded, and
-    //      loadServerQuotes() has finished.
-    //   3. handleServerLogin() dispatches 'ameridex-login' after
-    //      the same full-hydration sequence.
-    //   4. Either way, doLoad() runs only when the session is
-    //      fully ready.
-    //   5. A 10-second safety timeout cleans up the listener
-    //      if login never fires (e.g. expired token + user
-    //      does not re-login).
+    // THE FIX:
+    //   onLogin() defers the _quoteFromUrlHandled check by 250ms.
+    //   By then, quote-editor has had time to:
+    //     1. Patch loadQuote.
+    //     2. Dispatch 'ameridex-quoteeditor-ready'.
+    //   And portal-nav has had time to:
+    //     1. Receive 'ameridex-quoteeditor-ready'.
+    //     2. Call loadQuote(idx) and set _quoteFromUrlHandled = true.
+    //   If the flag IS set within 250ms, api.js skips doLoad().
+    //   If NOT (quote-editor absent, very slow machine), api.js runs
+    //   doLoad() as the authoritative fallback — which dispatches
+    //   'ameridex-quote-restored' so quote-editor can still lock the form.
     // ----------------------------------------------------------
     function loadQuoteFromUrlParam() {
         var urlParams = new URLSearchParams(window.location.search);
@@ -1053,12 +1048,9 @@
                 window.currentQuote.deliveryDate        = sq.deliveryDate        || '';
 
                 restoreQuoteToDOM(window.currentQuote);
-                console.log('[v2.23] Loaded from URL param:', window.currentQuote.quoteId || serverId, '| status:', window.currentQuote.status);
+                console.log('[v2.24] Loaded from URL param (fallback):', window.currentQuote.quoteId || serverId, '| status:', window.currentQuote.status);
 
-                // Notify quote-editor to lock the form — restoreQuoteToDOM
-                // bypasses the loadQuote wrapper chain, so lockForm/showBanner
-                // never fire. Dispatch a custom event so quote-editor can pick
-                // it up and lock the form after this render completes.
+                // Dispatch locking event so quote-editor can apply lockForm/showBanner
                 setTimeout(function () {
                     try {
                         window.dispatchEvent(new CustomEvent('ameridex-quote-restored', {
@@ -1069,7 +1061,7 @@
 
                 try { window.history.replaceState(null, '', window.location.pathname); } catch (e) {}
             } catch (err) {
-                console.error('[v2.23] applyQuoteToDOM threw:', err);
+                console.error('[v2.24] applyQuoteToDOM threw:', err);
             }
         }
 
@@ -1077,45 +1069,48 @@
             api('GET', '/api/quotes/' + serverId)
                 .then(applyQuoteToDOM)
                 .catch(function (err) {
-                    console.warn('[v2.23] Server fetch failed for', serverId, err.message);
+                    console.warn('[v2.24] Server fetch failed for', serverId, err.message);
                     try {
                         var found = (window.savedQuotes || []).find(function (q) {
                             return String(q._serverId) === String(serverId) || String(q.quoteId) === String(serverId);
                         });
                         if (found) applyQuoteToDOM(found);
-                        else console.error('[v2.23] Quote not found:', serverId);
+                        else console.error('[v2.24] Quote not found:', serverId);
                     } catch (fallbackErr) {
-                        console.error('[v2.23] Fallback lookup threw:', fallbackErr);
+                        console.error('[v2.24] Fallback lookup threw:', fallbackErr);
                     }
                 });
         }
 
-        // v2.23: ALWAYS wait for the login event, even if _authToken
-        // already exists. tryResumeSession() is async; the token in
-        // sessionStorage does NOT mean the session is hydrated yet.
         var loginTimeout;
         function onLogin() {
             window.removeEventListener('ameridex-login', onLogin);
             clearTimeout(loginTimeout);
 
-            // v2.23: If portal-nav already handled this quoteId via the
-            // full loadQuote wrapper chain (which includes lockForm/showBanner),
-            // skip the duplicate load that would rebuild DOM without locking.
-            if (window._quoteFromUrlHandled) {
-                console.log('[v2.23] Skipping loadQuoteFromUrlParam — already handled by portal-nav.');
-                return;
-            }
-
-            console.log('[v2.23] ameridex-login received, loading quote from URL param:', serverId);
-            doLoad();
+            // v2.24 FIX: Defer the _quoteFromUrlHandled check by 250ms.
+            // portal-nav sets this flag AFTER receiving 'ameridex-quoteeditor-ready',
+            // which quote-editor dispatches AFTER 'ameridex-login'. Checking it
+            // synchronously here always finds it undefined. The 250ms window
+            // gives quote-editor and portal-nav enough time to complete their
+            // own async load chain before we decide to run doLoad().
+            setTimeout(function () {
+                if (window._quoteFromUrlHandled) {
+                    console.log('[v2.24] Skipping loadQuoteFromUrlParam — portal-nav already handled:', serverId);
+                    return;
+                }
+                // portal-nav did NOT handle it (quote-editor missing, script error,
+                // or very slow device). Run doLoad() as authoritative fallback.
+                console.log('[v2.24] portal-nav did not handle quote, running fallback doLoad for:', serverId);
+                doLoad();
+            }, 250);
         }
+
         window.addEventListener('ameridex-login', onLogin);
 
         // Safety: clean up listener after 10s if login never fires
-        // (e.g. expired token and user doesn't re-login)
         loginTimeout = setTimeout(function () {
             window.removeEventListener('ameridex-login', onLogin);
-            console.warn('[v2.23] Timed out waiting for ameridex-login. Quote URL param "' + serverId + '" abandoned.');
+            console.warn('[v2.24] Timed out waiting for ameridex-login. Quote URL param "' + serverId + '" abandoned.');
         }, 10000);
     }
 
@@ -1129,5 +1124,5 @@
     if (_authToken) tryResumeSession();
     loadQuoteFromUrlParam();
 
-    console.log('[AmeriDex API] v2.23 loaded.');
+    console.log('[AmeriDex API] v2.24 loaded.');
 })();
