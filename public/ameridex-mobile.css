@@ -883,6 +883,7 @@ header.app-header {
     white-space: nowrap;
     padding: 0.5rem 0.9rem;
     font-size: 0.78rem;
+    min-height: 44px;
   }
 
   .color-grid  { grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); }
@@ -893,7 +894,28 @@ header.app-header {
 
   /* Filter bar stays horizontal but wraps */
   .filter-bar  { flex-wrap: wrap; gap: 0.5rem; }
-
   .filter-bar .search-input { min-width: 180px; flex: 1; }
+
+  /* Touch targets */
+  .btn         { min-height: 44px; }
+  .btn-sm      { min-height: 44px; }
+  .btn-xs      { min-height: 44px; padding: 0.4rem 0.7rem; }
+
+  /* Cards */
+  .card { padding: 1.5rem 1.25rem; }
+  .card-header { flex-wrap: wrap; }
+
+  /* Tables need scroll wrapper on tablet too */
+  .data-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  /* Form fields — iOS zoom prevention */
+  input, select, textarea { font-size: 16px !important; }
+
+  /* Deck diagram */
+  .deck-diagram-container { max-width: 100%; overflow: hidden; }
+
+  /* Modals */
+  .modal-content { max-width: 85%; }
+  .review-modal-content { width: min(600px, 90vw); }
 
 }
