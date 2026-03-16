@@ -18,7 +18,7 @@
 
 const express = require('express');
 const router = express.Router();
-const { readJSON, PRODUCTS_FILE, getDealerPrice } = require('../lib/helpers');
+const { readJSON, PRODUCTS_FILE, getDealerPrice, getRepPrice } = require('../lib/helpers');
 const { requireAuth } = require('../middleware/auth');
 
 router.get('/', requireAuth, (req, res) => {
@@ -29,27 +29,30 @@ router.get('/', requireAuth, (req, res) => {
         .filter(p => p.isActive !== false)
         .sort((a, b) => (a.sortOrder || 99) - (b.sortOrder || 99));
 
+    // Salesrep in direct mode: use rep pricing
+    const isSalesrepDirect = req.user.role === 'salesrep' && !dealer;
+
     const products = {};
     activeProducts.forEach(p => {
-        const dealerPrice = getDealerPrice(dealer, p.id);
+        const price = isSalesrepDirect
+            ? getRepPrice(req.user, p.id)
+            : getDealerPrice(dealer, p.id);
         products[p.id] = {
             id: p.id,
             name: p.name,
             category: p.category,
             basePrice: p.basePrice,
-            price: Math.round(dealerPrice * 100) / 100,
+            price: Math.round(price * 100) / 100,
             unit: p.unit
         };
     });
 
     // Keep backward-compatible response shape.
-    // tier object is retained so frontend code that reads
-    // data.tier doesn't break; multiplier 1.0 is neutral.
     res.json({
         products: products,
         tier: {
-            slug: 'per-dealer',
-            label: 'Per-Dealer Pricing',
+            slug: isSalesrepDirect ? 'per-rep' : 'per-dealer',
+            label: isSalesrepDirect ? 'Per-Rep Pricing' : 'Per-Dealer Pricing',
             multiplier: 1.0
         }
     });

@@ -114,6 +114,10 @@ app.use('/api/admin/users', adminUserRoutes);
 const adminCustomerRoutes = require('./routes/admin-customers');
 app.use('/api/admin/customers', adminCustomerRoutes);
 
+// Admin - Rep Pricing (salesrep direct-sale pricing)
+const adminRepPricingRoutes = require('./routes/admin-rep-pricing');
+app.use('/api/admin/rep-pricing', adminRepPricingRoutes);
+
 // ----------------------------------------------------------
 // SPA fallback
 // ----------------------------------------------------------

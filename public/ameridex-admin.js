@@ -1,6 +1,6 @@
 // ============================================================
-// AmeriDex Dealer Portal - Admin Panel v2.2
-// Date: 2026-03-05
+// AmeriDex Dealer Portal - Admin Panel v2.3
+// Date: 2026-03-16
 // ============================================================
 // REQUIRES: ameridex-api.js (v2.1+) loaded first
 //
@@ -8,6 +8,17 @@
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
 //   <script src="ameridex-admin.js"></script>
+//
+// v2.3 Changes (2026-03-16):
+//   - ADD: Sales Rep (Territory) role in create/edit user role dropdowns
+//   - ADD: Assigned Dealers multi-select checkbox UI for salesrep users
+//   - ADD: Salesrep filter option in role filter dropdown
+//   - ADD: Salesrep count in Users tab stats
+//   - ADD: Rep Pricing modal (Pricing button) for salesrep users
+//        Uses GET/PUT /api/admin/rep-pricing/:userId endpoints
+//   - ADD: .badge-salesrep CSS for purple salesrep badges
+//   - FIX: Create/edit user hides dealer code field for salesrep,
+//          shows assigned dealers checkboxes instead
 //
 // v2.2 Changes (2026-03-05):
 //   - FIX: saveEditProduct() now checks for result.cascade from
@@ -138,6 +149,7 @@
         '.badge-admin { background:#fef3c7; color:#92400e; }' +
         '.badge-dealer { background:#dbeafe; color:#1d4ed8; }' +
         '.badge-rep { background:#f3e8ff; color:#7c3aed; }' +
+        '.badge-salesrep { background:#fdf4ff; color:#a21caf; }' +
         '.badge-gm { background:#dbeafe; color:#1d4ed8; }' +
         '.badge-frontdesk { background:#f3f4f6; color:#374151; }' +
         '.badge-draft { background:#f3f4f6; color:#374151; }' +
@@ -444,10 +456,17 @@
                                     '<select id="admin-new-user-role">' +
                                         '<option value="frontdesk">Frontdesk (Sales Rep)</option>' +
                                         '<option value="gm">GM (General Manager)</option>' +
+                                        '<option value="salesrep">Sales Rep (Territory)</option>' +
                                         '<option value="dealer">Dealer (Legacy)</option>' +
                                         '<option value="rep">Internal Rep</option>' +
                                         '<option value="admin">Admin</option>' +
                                     '</select>' +
+                                '</div>' +
+                            '</div>' +
+                            '<div class="admin-form-row" id="admin-new-user-assigned-dealers-row" style="display:none;">' +
+                                '<div class="admin-form-field" style="grid-column:1/-1;">' +
+                                    '<label>Assigned Dealers <span style="font-weight:400;color:#6b7280;">(select territories)</span></label>' +
+                                    '<div id="admin-new-user-assigned-dealers" style="display:flex;flex-wrap:wrap;gap:0.5rem;padding:0.5rem;border:1px solid #e5e7eb;border-radius:8px;min-height:40px;"></div>' +
                                 '</div>' +
                             '</div>' +
                             '<div class="admin-form-row">' +
@@ -494,6 +513,7 @@
                                 '<option value="admin">Admin</option>' +
                                 '<option value="gm">GM</option>' +
                                 '<option value="frontdesk">Frontdesk</option>' +
+                                '<option value="salesrep">Sales Rep</option>' +
                                 '<option value="dealer">Dealer</option>' +
                                 '<option value="rep">Rep</option>' +
                             '</select>' +
@@ -1464,6 +1484,7 @@
         var active = _allUsers.filter(function (u) { return u.status === 'active'; }).length;
         var gms = _allUsers.filter(function (u) { return u.role === 'gm'; }).length;
         var frontdesk = _allUsers.filter(function (u) { return u.role === 'frontdesk'; }).length;
+        var salesreps = _allUsers.filter(function (u) { return u.role === 'salesrep'; }).length;
         var dealerCodes = [];
         _allUsers.forEach(function (u) {
             if (u.dealerCode && dealerCodes.indexOf(u.dealerCode) === -1) dealerCodes.push(u.dealerCode);
@@ -1474,6 +1495,7 @@
             '<div class="admin-stat"><div class="admin-stat-value">' + active + '</div><div class="admin-stat-label">Active</div></div>' +
             '<div class="admin-stat"><div class="admin-stat-value">' + gms + '</div><div class="admin-stat-label">GMs</div></div>' +
             '<div class="admin-stat"><div class="admin-stat-value">' + frontdesk + '</div><div class="admin-stat-label">Frontdesk</div></div>' +
+            '<div class="admin-stat"><div class="admin-stat-value">' + salesreps + '</div><div class="admin-stat-label">Sales Reps</div></div>' +
             '<div class="admin-stat"><div class="admin-stat-value">' + dealerCodes.length + '</div><div class="admin-stat-label">Dealers</div></div>';
     }
 
@@ -1530,15 +1552,26 @@
                 if (u.lastLogin) { try { dateStr = new Date(u.lastLogin).toLocaleDateString(); } catch(e) {} }
                 else { dateStr = 'Never'; }
 
+                var roleLabel = esc(u.role);
+                if (u.role === 'salesrep' && u.assignedDealers && u.assignedDealers.length > 0) {
+                    roleLabel += ' <span style="font-size:0.68rem;color:#6b7280;">(' + u.assignedDealers.length + ' dealer' + (u.assignedDealers.length !== 1 ? 's' : '') + ')</span>';
+                }
+
+                var repPricingBtn = '';
+                if (u.role === 'salesrep') {
+                    repPricingBtn = '<button class="admin-btn admin-btn-ghost admin-btn-sm" data-action="rep-pricing" data-id="' + u.id + '" style="color:#a21caf;">Pricing</button>';
+                }
+
                 html += '<tr>' +
                     '<td><strong>' + esc(u.username) + '</strong></td>' +
                     '<td>' + esc(u.displayName || u.username) + '</td>' +
-                    '<td><span class="admin-badge ' + roleBadge + '">' + esc(u.role) + '</span></td>' +
+                    '<td><span class="admin-badge ' + roleBadge + '">' + roleLabel + '</span></td>' +
                     '<td><span class="admin-badge ' + statusBadge + '">' + esc(u.status || 'unknown') + '</span></td>' +
                     '<td style="font-size:0.82rem;color:#6b7280;">' + esc(u.email || '-') + '</td>' +
                     '<td style="font-size:0.82rem;color:#6b7280;">' + dateStr + '</td>' +
                     '<td class="admin-actions">' +
                         '<button class="admin-btn admin-btn-ghost admin-btn-sm" data-action="edit-user" data-id="' + u.id + '">Edit</button>' +
+                        repPricingBtn +
                         '<button class="admin-btn admin-btn-ghost admin-btn-sm" data-action="reset-user-pw" data-id="' + u.id + '">Reset PW</button>' +
                         '<button class="admin-btn ' + (u.status === 'active' ? 'admin-btn-danger' : 'admin-btn-success') + ' admin-btn-sm" ' +
                             'data-action="toggle-user" data-id="' + u.id + '">' + (u.status === 'active' ? 'Disable' : 'Enable') + '</button>' +
@@ -1555,6 +1588,7 @@
                 var action = btn.getAttribute('data-action');
                 var id = btn.getAttribute('data-id');
                 if (action === 'edit-user') editAdminUser(id);
+                if (action === 'rep-pricing') openRepPricing(id);
                 if (action === 'reset-user-pw') resetAdminUserPassword(id);
                 if (action === 'toggle-user') toggleAdminUser(id);
             });
@@ -1566,20 +1600,63 @@
     document.getElementById('admin-user-status-filter').addEventListener('change', renderAdminUsersTable);
     document.getElementById('admin-user-search').addEventListener('input', renderAdminUsersTable);
 
+    // Salesrep role toggle: show/hide dealer code & assigned dealers
+    document.getElementById('admin-new-user-role').addEventListener('change', function () {
+        var isSalesrep = this.value === 'salesrep';
+        var dealerRow = document.getElementById('admin-new-user-dealer').closest('.admin-form-row');
+        var assignedRow = document.getElementById('admin-new-user-assigned-dealers-row');
+        if (dealerRow) dealerRow.style.display = isSalesrep ? 'none' : '';
+        if (assignedRow) assignedRow.style.display = isSalesrep ? '' : 'none';
+        if (isSalesrep) populateAssignedDealerCheckboxes('admin-new-user-assigned-dealers', []);
+    });
+
+    function populateAssignedDealerCheckboxes(containerId, selected) {
+        var container = document.getElementById(containerId);
+        if (!container) return;
+        var createSelect = document.getElementById('admin-new-user-dealer');
+        var codes = [];
+        if (createSelect) {
+            for (var i = 0; i < createSelect.options.length; i++) {
+                var c = createSelect.options[i].value;
+                if (c && c !== 'SALESREP') codes.push(c);
+            }
+        }
+        var html = '';
+        codes.forEach(function (code) {
+            var checked = selected.indexOf(code) !== -1 ? ' checked' : '';
+            html += '<label style="display:inline-flex;align-items:center;gap:0.25rem;padding:0.25rem 0.5rem;background:#f3f4f6;border-radius:6px;font-size:0.82rem;cursor:pointer;">' +
+                '<input type="checkbox" value="' + esc(code) + '"' + checked + ' style="margin:0;">' +
+                '<span>' + esc(code) + '</span></label>';
+        });
+        if (codes.length === 0) html = '<span style="color:#6b7280;font-size:0.82rem;">No dealers available</span>';
+        container.innerHTML = html;
+    }
+
+    function getCheckedDealers(containerId) {
+        var container = document.getElementById(containerId);
+        if (!container) return [];
+        var checked = [];
+        container.querySelectorAll('input[type="checkbox"]:checked').forEach(function (cb) {
+            checked.push(cb.value);
+        });
+        return checked;
+    }
+
     document.getElementById('admin-create-user-btn').addEventListener('click', function () {
-        var dealerCode = document.getElementById('admin-new-user-dealer').value;
         var role = document.getElementById('admin-new-user-role').value;
+        var isSalesrep = role === 'salesrep';
+        var dealerCode = isSalesrep ? '' : document.getElementById('admin-new-user-dealer').value;
         var username = document.getElementById('admin-new-user-username').value.trim().toLowerCase();
         var displayName = document.getElementById('admin-new-user-display').value.trim();
         var pw = document.getElementById('admin-new-user-pw').value;
         var email = document.getElementById('admin-new-user-email').value.trim();
         var phone = document.getElementById('admin-new-user-phone').value.trim();
 
-        if (!dealerCode) { showAlert('admin-user-alert', 'Please select a dealer code', 'error'); return; }
+        if (!isSalesrep && !dealerCode) { showAlert('admin-user-alert', 'Please select a dealer code', 'error'); return; }
         if (!username || username.length < 3) { showAlert('admin-user-alert', 'Username must be at least 3 characters', 'error'); return; }
         if (!pw || pw.length < 8) { showAlert('admin-user-alert', 'Password must be at least 8 characters', 'error'); return; }
 
-        _api('POST', '/api/admin/users', {
+        var payload = {
             dealerCode: dealerCode,
             role: role,
             username: username,
@@ -1587,14 +1664,24 @@
             password: pw,
             email: email,
             phone: phone
-        })
+        };
+
+        if (isSalesrep) {
+            payload.assignedDealers = getCheckedDealers('admin-new-user-assigned-dealers');
+        }
+
+        _api('POST', '/api/admin/users', payload)
             .then(function (newUser) {
-                showAlert('admin-user-alert', 'User "' + esc(newUser.username) + '" created for ' + esc(newUser.dealerCode) + '!', 'success');
+                showAlert('admin-user-alert', 'User "' + esc(newUser.username) + '" created' + (isSalesrep ? ' as Sales Rep' : ' for ' + esc(newUser.dealerCode)) + '!', 'success');
                 document.getElementById('admin-new-user-username').value = '';
                 document.getElementById('admin-new-user-display').value = '';
                 document.getElementById('admin-new-user-pw').value = '';
                 document.getElementById('admin-new-user-email').value = '';
                 document.getElementById('admin-new-user-phone').value = '';
+                document.getElementById('admin-new-user-role').value = 'frontdesk';
+                document.getElementById('admin-new-user-assigned-dealers-row').style.display = 'none';
+                var dealerRow = document.getElementById('admin-new-user-dealer').closest('.admin-form-row');
+                if (dealerRow) dealerRow.style.display = '';
                 document.getElementById('admin-add-user-details').removeAttribute('open');
                 loadAdminUsers();
             })
@@ -1605,12 +1692,16 @@
         var user = _allUsers.find(function (u) { return u.id === id; });
         if (!user) return;
 
+        var isSalesrep = user.role === 'salesrep';
+
         // Build dealer code options from the create-user dropdown
         var dealerOpts = '';
+        var allCodes = [];
         var createSelect = document.getElementById('admin-new-user-dealer');
         if (createSelect) {
             for (var i = 0; i < createSelect.options.length; i++) {
                 var code = createSelect.options[i].value;
+                if (code) allCodes.push(code);
                 dealerOpts += '<option value="' + esc(code) + '"' + (code === user.dealerCode ? ' selected' : '') + '>' + esc(code) + '</option>';
             }
         }
@@ -1618,6 +1709,7 @@
         var roleOptions = [
             { value: 'frontdesk', label: 'Frontdesk (Sales Rep)' },
             { value: 'gm', label: 'GM (General Manager)' },
+            { value: 'salesrep', label: 'Sales Rep (Territory)' },
             { value: 'dealer', label: 'Dealer (Legacy)' },
             { value: 'rep', label: 'Internal Rep' },
             { value: 'admin', label: 'Admin' }
@@ -1627,6 +1719,17 @@
             roleOpts += '<option value="' + r.value + '"' + (r.value === user.role ? ' selected' : '') + '>' + r.label + '</option>';
         });
 
+        // Build assigned dealers checkboxes
+        var currentAssigned = (user.assignedDealers || []);
+        var assignedHtml = '';
+        allCodes.forEach(function (c) {
+            if (c === 'SALESREP') return;
+            var checked = currentAssigned.indexOf(c) !== -1 ? ' checked' : '';
+            assignedHtml += '<label style="display:inline-flex;align-items:center;gap:0.25rem;padding:0.25rem 0.5rem;background:#f3f4f6;border-radius:6px;font-size:0.82rem;cursor:pointer;">' +
+                '<input type="checkbox" class="edit-user-assigned-cb" value="' + esc(c) + '"' + checked + ' style="margin:0;">' +
+                '<span>' + esc(c) + '</span></label>';
+        });
+
         // Create modal overlay
         var overlay = document.createElement('div');
         overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
@@ -1634,10 +1737,14 @@
             '<div style="background:#fff;border-radius:12px;padding:1.5rem;max-width:480px;width:90%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">' +
                 '<h3 style="margin:0 0 1rem;color:#1e40af;">Edit User: ' + esc(user.username) + '</h3>' +
                 '<div style="display:grid;gap:0.75rem;">' +
-                    '<div><label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.25rem;">Dealer Code</label>' +
+                    '<div id="edit-user-dealer-row"' + (isSalesrep ? ' style="display:none;"' : '') + '><label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.25rem;">Dealer Code</label>' +
                         '<select id="edit-user-dealer" style="width:100%;padding:0.4rem;border:1px solid #d1d5db;border-radius:6px;text-transform:uppercase;">' + dealerOpts + '</select></div>' +
                     '<div><label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.25rem;">Role</label>' +
                         '<select id="edit-user-role" style="width:100%;padding:0.4rem;border:1px solid #d1d5db;border-radius:6px;">' + roleOpts + '</select></div>' +
+                    '<div id="edit-user-assigned-row"' + (isSalesrep ? '' : ' style="display:none;"') + '>' +
+                        '<label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.25rem;">Assigned Dealers</label>' +
+                        '<div id="edit-user-assigned-dealers" style="display:flex;flex-wrap:wrap;gap:0.5rem;padding:0.5rem;border:1px solid #e5e7eb;border-radius:8px;min-height:40px;">' + assignedHtml + '</div>' +
+                    '</div>' +
                     '<div><label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.25rem;">Username</label>' +
                         '<input type="text" id="edit-user-username" value="' + esc(user.username || '') + '" style="width:100%;padding:0.4rem;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;"></div>' +
                     '<div><label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.25rem;">Display Name</label>' +
@@ -1657,6 +1764,13 @@
 
         document.body.appendChild(overlay);
 
+        // Toggle dealer code / assigned dealers when role changes
+        document.getElementById('edit-user-role').addEventListener('change', function () {
+            var sr = this.value === 'salesrep';
+            document.getElementById('edit-user-dealer-row').style.display = sr ? 'none' : '';
+            document.getElementById('edit-user-assigned-row').style.display = sr ? '' : 'none';
+        });
+
         // Close on overlay click (outside modal)
         overlay.addEventListener('click', function (e) {
             if (e.target === overlay) document.body.removeChild(overlay);
@@ -1669,6 +1783,8 @@
         document.getElementById('edit-user-save').addEventListener('click', function () {
             var pw = document.getElementById('edit-user-pw').value;
             var username = document.getElementById('edit-user-username').value.trim().toLowerCase();
+            var editRole = document.getElementById('edit-user-role').value;
+            var editIsSalesrep = editRole === 'salesrep';
 
             if (!username || username.length < 3) {
                 showAlert('admin-user-alert', 'Username must be at least 3 characters', 'error');
@@ -1680,13 +1796,23 @@
             }
 
             var payload = {
-                dealerCode: document.getElementById('edit-user-dealer').value,
-                role: document.getElementById('edit-user-role').value,
+                role: editRole,
                 username: username,
                 displayName: document.getElementById('edit-user-display').value.trim(),
                 email: document.getElementById('edit-user-email').value.trim(),
                 phone: document.getElementById('edit-user-phone').value.trim()
             };
+
+            if (editIsSalesrep) {
+                var checked = [];
+                overlay.querySelectorAll('.edit-user-assigned-cb:checked').forEach(function (cb) {
+                    checked.push(cb.value);
+                });
+                payload.assignedDealers = checked;
+            } else {
+                payload.dealerCode = document.getElementById('edit-user-dealer').value;
+            }
+
             if (pw) payload.password = pw;
 
             _api('PUT', '/api/admin/users/' + id, payload)
@@ -1725,5 +1851,123 @@
     }
 
 
-    console.log('[AmeriDex Admin] v2.2 loaded.');
+    // ----------------------------------------------------------
+    // REP PRICING MODAL
+    // ----------------------------------------------------------
+    function openRepPricing(userId) {
+        var user = _allUsers.find(function (u) { return u.id === userId; });
+        if (!user || user.role !== 'salesrep') return;
+
+        var overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
+        overlay.innerHTML =
+            '<div style="background:#fff;border-radius:12px;padding:1.5rem;max-width:640px;width:90%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">' +
+                '<h3 style="margin:0 0 0.25rem;color:#a21caf;">Rep Pricing: ' + esc(user.displayName || user.username) + '</h3>' +
+                '<p style="margin:0 0 1rem;font-size:0.82rem;color:#6b7280;">Set custom pricing for direct sales. Leave at base price for no override.</p>' +
+                '<div id="rep-pricing-body" style="min-height:100px;"><div class="admin-loading">Loading products...</div></div>' +
+                '<div id="rep-pricing-alert" style="margin-top:0.5rem;"></div>' +
+                '<div style="display:flex;gap:0.75rem;justify-content:flex-end;margin-top:1.25rem;">' +
+                    '<button id="rep-pricing-cancel" style="padding:0.5rem 1rem;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;">Cancel</button>' +
+                    '<button id="rep-pricing-reset" style="padding:0.5rem 1rem;border:1px solid #d1d5db;border-radius:6px;background:#fef3c7;cursor:pointer;font-weight:600;color:#92400e;">Reset All to Base</button>' +
+                    '<button id="rep-pricing-save" style="padding:0.5rem 1rem;border:none;border-radius:6px;background:#a21caf;color:#fff;cursor:pointer;font-weight:600;">Save Pricing</button>' +
+                '</div>' +
+            '</div>';
+
+        document.body.appendChild(overlay);
+
+        overlay.addEventListener('click', function (e) {
+            if (e.target === overlay) document.body.removeChild(overlay);
+        });
+        document.getElementById('rep-pricing-cancel').addEventListener('click', function () {
+            document.body.removeChild(overlay);
+        });
+
+        // Load pricing data
+        _api('GET', '/api/admin/rep-pricing/' + userId)
+            .then(function (data) {
+                var body = document.getElementById('rep-pricing-body');
+                if (!data.products || data.products.length === 0) {
+                    body.innerHTML = '<div class="admin-empty">No products available</div>';
+                    return;
+                }
+                var html = '<table class="admin-table"><thead><tr>' +
+                    '<th>Product</th><th>Category</th><th>Base Price</th><th>Rep Price</th><th>Custom?</th>' +
+                    '</tr></thead><tbody>';
+                data.products.forEach(function (p) {
+                    var customClass = p.hasCustomPrice ? 'style="background:#fdf4ff;"' : '';
+                    html += '<tr ' + customClass + '>' +
+                        '<td><strong>' + esc(p.productName) + '</strong></td>' +
+                        '<td><span class="admin-badge badge-' + (p.category || 'other').toLowerCase() + '">' + esc(p.category || '-') + '</span></td>' +
+                        '<td style="color:#6b7280;">$' + Number(p.basePrice).toFixed(2) + '</td>' +
+                        '<td><input type="number" class="rep-price-input" data-product="' + esc(p.productId) + '" ' +
+                            'data-base="' + p.basePrice + '" ' +
+                            'value="' + Number(p.repPrice).toFixed(2) + '" ' +
+                            'step="0.01" min="0" ' +
+                            'style="width:90px;padding:0.3rem 0.5rem;border:1px solid #d1d5db;border-radius:6px;font-size:0.85rem;text-align:right;"></td>' +
+                        '<td>' + (p.hasCustomPrice ? '<span style="color:#a21caf;font-weight:600;font-size:0.78rem;">CUSTOM</span>' : '<span style="color:#9ca3af;font-size:0.78rem;">base</span>') + '</td>' +
+                        '</tr>';
+                });
+                html += '</tbody></table>';
+                body.innerHTML = html;
+
+                // Highlight changes from base
+                body.querySelectorAll('.rep-price-input').forEach(function (inp) {
+                    inp.addEventListener('input', function () {
+                        var base = parseFloat(inp.getAttribute('data-base'));
+                        var val = parseFloat(inp.value);
+                        if (!isNaN(val) && Math.abs(val - base) > 0.001) {
+                            inp.style.borderColor = '#a21caf';
+                            inp.style.background = '#fdf4ff';
+                        } else {
+                            inp.style.borderColor = '#d1d5db';
+                            inp.style.background = '';
+                        }
+                    });
+                });
+            })
+            .catch(function (err) {
+                document.getElementById('rep-pricing-body').innerHTML = '<div class="admin-error">Failed to load pricing: ' + esc(err.message) + '</div>';
+            });
+
+        // Reset all to base price
+        document.getElementById('rep-pricing-reset').addEventListener('click', function () {
+            overlay.querySelectorAll('.rep-price-input').forEach(function (inp) {
+                inp.value = Number(inp.getAttribute('data-base')).toFixed(2);
+                inp.style.borderColor = '#d1d5db';
+                inp.style.background = '';
+            });
+        });
+
+        // Save pricing
+        document.getElementById('rep-pricing-save').addEventListener('click', function () {
+            var inputs = overlay.querySelectorAll('.rep-price-input');
+            var pricing = {};
+            var hasError = false;
+            inputs.forEach(function (inp) {
+                var val = parseFloat(inp.value);
+                if (isNaN(val) || val < 0) {
+                    hasError = true;
+                    inp.style.borderColor = '#dc2626';
+                } else {
+                    pricing[inp.getAttribute('data-product')] = Math.round(val * 100) / 100;
+                }
+            });
+            if (hasError) {
+                showAlert('rep-pricing-alert', 'Please fix invalid prices (highlighted in red)', 'error');
+                return;
+            }
+
+            _api('PUT', '/api/admin/rep-pricing/' + userId, { pricing: pricing })
+                .then(function (result) {
+                    document.body.removeChild(overlay);
+                    showAlert('admin-user-alert', 'Pricing updated for ' + esc(user.displayName || user.username) + ' (' + (result.productCount || Object.keys(pricing).length) + ' products)', 'success');
+                })
+                .catch(function (err) {
+                    showAlert('rep-pricing-alert', 'Save failed: ' + esc(err.message), 'error');
+                });
+        });
+    }
+
+
+    console.log('[AmeriDex Admin] v2.3 loaded – salesrep support added.');
 })();

@@ -19,7 +19,7 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 
 const SALT_ROUNDS = 12;
-const VALID_ROLES = ['admin', 'gm', 'frontdesk'];
+const VALID_ROLES = ['admin', 'gm', 'frontdesk', 'salesrep'];
 const VALID_STATUSES = ['pending_approval', 'active', 'disabled'];
 
 const userSchema = new mongoose.Schema({
@@ -61,6 +61,14 @@ const userSchema = new mongoose.Schema({
         required: [true, 'Display name is required'],
         trim: true,
         maxlength: [50, 'Display name cannot exceed 50 characters']
+    },
+    assignedDealers: {
+        type: [String],
+        default: []
+    },
+    repPricing: {
+        type: mongoose.Schema.Types.Mixed,
+        default: {}
     },
     email: {
         type: String,
@@ -199,13 +207,16 @@ userSchema.methods.toSafeObject = function () {
 
 // Return the minimal object for JWT payload
 userSchema.methods.toTokenPayload = function () {
-    return {
+    const payload = {
         id: this._id.toString(),
         username: this.username,
-        dealerCode: this.dealerCode,
         role: this.role,
         displayName: this.displayName
     };
+    if (this.role !== 'salesrep') {
+        payload.dealerCode = this.dealerCode;
+    }
+    return payload;
 };
 
 // -------------------------------------------------------

@@ -1,5 +1,5 @@
 // ============================================================
-// AmeriDex Dealer Portal - Script Loader v2.5
+// AmeriDex Dealer Portal - Script Loader v2.6
 // File: script-loader.js
 // Date: 2026-03-16
 // ============================================================
@@ -134,7 +134,8 @@ if (typeof window.showQuotesView !== 'function') {
         'ameridex-quote-editor.js',         // 11
         'ameridex-customer-sync.js',        // 12
         'ameridex-roles.js',                // 13
-        'ameridex-admin.js',                // 14
+        'ameridex-salesrep.js',             // 14  (salesrep dealer switcher)
+        'ameridex-admin.js',                // 15
         'ameridex-admin-customers.js',      // 15
         'ameridex-admin-delete.js',         // 16
         'ameridex-admin-user-delete.js',    // 17

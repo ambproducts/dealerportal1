@@ -1,7 +1,13 @@
 // ============================================================
-// AmeriDex Dealer Portal - Role-Based UI v3.2.1
-// Date: 2026-03-04
+// AmeriDex Dealer Portal - Role-Based UI v3.3
+// Date: 2026-03-16
 // ============================================================
+// v3.3 Changes (2026-03-16):
+//   - FEAT: Sales rep role support.
+//     - Added .team-badge-salesrep style (amber/gold).
+//     - Pending actions polling now includes salesrep role.
+//     - My Team button remains GM-only (salesrep excluded).
+//
 // v3.2.1 Changes (2026-03-04):
 //   - FIX: Cleanup pending actions bubble and tray on logout.
 //     Stop polling, hide bubble/tray, clear count.
@@ -91,6 +97,7 @@
         '.team-table tr:hover td { background:#f9fafb; }' +
         '.team-badge { display:inline-block; padding:0.15rem 0.55rem; border-radius:999px; font-size:0.72rem; font-weight:600; text-transform:uppercase; }' +
         '.team-badge-gm { background:#dbeafe; color:#1d4ed8; }' +
+        '.team-badge-salesrep { background:#fef3c7; color:#92400e; }' +
         '.team-badge-frontdesk { background:#f3f4f6; color:#374151; }' +
         '.team-badge-active { background:#dcfce7; color:#16a34a; }' +
         '.team-badge-disabled { background:#fee2e2; color:#dc2626; }' +
@@ -431,7 +438,7 @@
 
     function startPendingActionsPolling() {
         var dealer = window.getCurrentDealer ? window.getCurrentDealer() : null;
-        if (!dealer || (dealer.role !== 'gm' && dealer.role !== 'admin')) return;
+        if (!dealer || (dealer.role !== 'gm' && dealer.role !== 'admin' && dealer.role !== 'salesrep')) return;
 
         if (_pollInterval) clearInterval(_pollInterval);
 
@@ -672,5 +679,5 @@
         startPendingActionsPolling();
     }
 
-    console.log('[AmeriDex Roles] v3.2.1 loaded (Pending Actions bubble + tray with logout cleanup).');
+    console.log('[AmeriDex Roles] v3.3 loaded (salesrep support + Pending Actions bubble + tray).');
 })();

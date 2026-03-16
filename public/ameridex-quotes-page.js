@@ -178,6 +178,11 @@
         } else if (dealerCode) {
             headers['X-Dealer-Code'] = dealerCode;
         }
+        // Salesrep: include dealer context header
+        if (userRole === 'salesrep' && window.getActiveDealerCode) {
+            var ctx = window.getActiveDealerCode();
+            if (ctx && ctx !== 'DIRECT') headers['X-Dealer-Context'] = ctx;
+        }
 
         return fetch(API_BASE + path, { method: 'GET', headers: headers })
             .then(function (res) {
@@ -196,6 +201,11 @@
             headers['Authorization'] = 'Bearer ' + authToken;
         } else if (dealerCode) {
             headers['X-Dealer-Code'] = dealerCode;
+        }
+        // Salesrep: include dealer context header
+        if (userRole === 'salesrep' && window.getActiveDealerCode) {
+            var ctx = window.getActiveDealerCode();
+            if (ctx && ctx !== 'DIRECT') headers['X-Dealer-Context'] = ctx;
         }
 
         return fetch(API_BASE + path, {
@@ -464,6 +474,8 @@
     // Only when admin is viewing cross-dealer (global or specific).
     // ============================================================
     function showQuotesDealerColumn() {
+        // Salesrep always sees dealer column (they work across multiple dealers)
+        if (userRole === 'salesrep') return true;
         return userRole === 'admin' && dealerScope.mode !== 'local';
     }
 
@@ -673,8 +685,10 @@
             // Dealer (conditional, admin global/specific only)
             if (showDealerCol) {
                 var qDealer = q.dealerCode || '';
+                var isDirect = qDealer === 'DIRECT';
                 var isMyDealer = qDealer === dealerCode;
-                var dealerTagClass = isMyDealer ? 'dealer-tag dealer-tag-mine' : 'dealer-tag';
+                var dealerTagClass = isDirect ? 'dealer-tag dealer-tag-direct' : (isMyDealer ? 'dealer-tag dealer-tag-mine' : 'dealer-tag');
+                if (isDirect) qDealer = 'Direct Sale';
                 html += '<td><span class="' + dealerTagClass + '">' + escapeHTML(qDealer) + '</span></td>';
             }
 
@@ -688,7 +702,7 @@
             // Frontdesk: "Request Delete" button (sends to GM for approval)
             if (canDirectDelete) {
                 html += ' <button class="btn btn-danger btn-xs" data-delete="' + escapeHTML(q.id) + '" data-quote-num="' + escapeHTML(quoteNum) + '">Delete</button>';
-            } else if (isFrontdesk) {
+            } else if (isFrontdesk || userRole === 'salesrep') {
                 html += ' <button class="btn btn-outline btn-xs" data-request-delete="' + escapeHTML(q.id) + '" data-quote-num="' + escapeHTML(quoteNum) + '" style="color:#dc2626;">Request Delete</button>';
             }
             html += '</td>';

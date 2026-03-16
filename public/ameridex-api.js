@@ -1,6 +1,6 @@
 // ============================================================
-// AmeriDex Dealer Portal - API Integration Patch v2.25
-// Date: 2026-03-15
+// AmeriDex Dealer Portal - API Integration Patch v2.26
+// Date: 2026-03-16
 // ============================================================
 // REQUIRES: ameridex-patches.js (v1.0+) loaded first
 //
@@ -51,6 +51,8 @@
     var _currentUser  = null;
     var _currentDealer = null;
     var _serverOnline = true;
+    var _salesrepDealers = [];   // assigned dealers for salesrep users
+    var _activeDealerCode = localStorage.getItem('ameridex-dealer-context') || null;
 
 
     // ----------------------------------------------------------
@@ -62,6 +64,9 @@
             headers: { 'Content-Type': 'application/json' }
         };
         if (_authToken) opts.headers['Authorization'] = 'Bearer ' + _authToken;
+        if (_activeDealerCode && _currentUser && _currentUser.role === 'salesrep') {
+            opts.headers['X-Dealer-Context'] = _activeDealerCode;
+        }
         if (body && method !== 'GET') opts.body = JSON.stringify(body);
 
         var skipAuthRedirect = (options && options.skipAuthRedirect) || false;
@@ -109,6 +114,45 @@
     window.getAuthToken     = function () { return _authToken; };
     window.getCurrentDealer = function () { return _currentDealer; };
     window.getCurrentUser   = function () { return _currentUser; };
+    window.getSalesrepDealers  = function () { return _salesrepDealers; };
+    window.getActiveDealerCode = function () { return _activeDealerCode; };
+    window.setActiveDealerCode = function (code) {
+        _activeDealerCode = code || null;
+        if (code) {
+            localStorage.setItem('ameridex-dealer-context', code);
+        } else {
+            localStorage.removeItem('ameridex-dealer-context');
+        }
+    };
+    window.switchDealerContext = function (code) {
+        if (!_currentUser || _currentUser.role !== 'salesrep') return;
+        _activeDealerCode = code;
+        localStorage.setItem('ameridex-dealer-context', code);
+        if (code === 'DIRECT') {
+            _currentDealer = { dealerCode: 'DIRECT', dealerName: 'Direct Sale', role: 'salesrep' };
+        } else {
+            var matched = _salesrepDealers.find(function (d) {
+                return (typeof d === 'string' ? d : d.dealerCode) === code;
+            });
+            if (matched && typeof matched === 'object') {
+                _currentDealer = matched;
+                _currentDealer.role = 'salesrep';
+            } else {
+                _currentDealer = { dealerCode: code, dealerName: '', role: 'salesrep' };
+            }
+        }
+        window.dealerSettings.dealerCode = code;
+        window.dealerSettings.dealerName = _currentDealer.dealerName || '';
+        saveDealerSettings();
+        updateHeaderForDealer();
+        // Reload pricing and quotes for new context
+        applyTierPricing();
+        loadServerQuotes().then(function () {
+            renderSavedQuotes();
+            try { window.dispatchEvent(new Event('ameridex-dealer-switched')); } catch (e) {}
+            console.log('[SalesRep] Switched dealer context to:', code);
+        });
+    };
 
 
     // ----------------------------------------------------------
@@ -293,22 +337,31 @@
     }
 
     function handleServerLogin() {
-        var code      = document.getElementById('dealer-code-input').value.trim().toUpperCase();
+        var codeInput = document.getElementById('dealer-code-input');
+        var code      = codeInput ? codeInput.value.trim().toUpperCase() : '';
         var userInput = document.getElementById('dealer-username-input');
         var pwInput   = document.getElementById('dealer-password-input');
         var loginBtn  = document.getElementById('login-btn');
         var username  = userInput ? userInput.value.trim() : '';
         var password  = pwInput  ? pwInput.value : '';
+        var isSalesrepMode = document.getElementById('salesrep-login-toggle') &&
+                             document.getElementById('salesrep-login-toggle').classList.contains('active');
 
         hideLoginError();
-        if (!code || code.length !== 6) { showLoginError('Dealer code must be 6 characters'); return; }
+        if (!isSalesrepMode) {
+            if (!code || code.length !== 6) { showLoginError('Dealer code must be 6 characters'); return; }
+        }
         if (!username) { showLoginError('Username is required'); if (userInput) userInput.focus(); return; }
         if (!password) { showLoginError('Password is required'); if (pwInput) pwInput.focus(); return; }
 
         loginBtn.textContent = 'Signing in...';
         loginBtn.disabled = true;
 
-        api('POST', '/api/auth/login', { dealerCode: code, username: username, password: password }, { skipAuthRedirect: true })
+        var loginPayload = isSalesrepMode
+            ? { username: username, password: password }
+            : { dealerCode: code, username: username, password: password };
+
+        api('POST', '/api/auth/login', loginPayload, { skipAuthRedirect: true })
             .then(function (data) {
                 _authToken = data.token;
                 var rememberMe = document.getElementById('remember-me');
@@ -319,40 +372,97 @@
                     sessionStorage.setItem('ameridex-token', data.token);
                     localStorage.removeItem('ameridex-token');
                 }
-                _currentUser   = data.user;
-                _currentDealer = data.dealer;
-                _currentDealer.role = data.user.role;
+                _currentUser = data.user;
 
-                window.dealerSettings.dealerCode    = data.dealer.dealerCode;
-                window.dealerSettings.dealerName    = data.dealer.dealerName    || '';
-                window.dealerSettings.dealerContact = data.dealer.contactPerson || '';
-                window.dealerSettings.dealerPhone   = data.dealer.phone         || '';
-                window.dealerSettings.lastLogin     = new Date().toISOString();
-                window.dealerSettings.role          = data.user.role;
-                saveDealerSettings();
+                if (data.user.role === 'salesrep') {
+                    // Salesrep login: no single dealer, store assigned dealers
+                    _salesrepDealers = data.dealers || [];
+                    // Set initial dealer context to first assigned dealer or DIRECT
+                    var storedContext = localStorage.getItem('ameridex-dealer-context');
+                    if (storedContext && (_salesrepDealers.some(function (d) {
+                        return (typeof d === 'string' ? d : d.dealerCode) === storedContext;
+                    }) || storedContext === 'DIRECT')) {
+                        _activeDealerCode = storedContext;
+                    } else if (_salesrepDealers.length > 0) {
+                        var firstDealer = _salesrepDealers[0];
+                        _activeDealerCode = typeof firstDealer === 'string' ? firstDealer : firstDealer.dealerCode;
+                        localStorage.setItem('ameridex-dealer-context', _activeDealerCode);
+                    } else {
+                        _activeDealerCode = 'DIRECT';
+                        localStorage.setItem('ameridex-dealer-context', 'DIRECT');
+                    }
+                    // Build a synthetic _currentDealer for compatibility
+                    if (_activeDealerCode === 'DIRECT') {
+                        _currentDealer = { dealerCode: 'DIRECT', dealerName: 'Direct Sale', role: 'salesrep' };
+                    } else {
+                        var matchedDealer = _salesrepDealers.find(function (d) {
+                            return (typeof d === 'string' ? d : d.dealerCode) === _activeDealerCode;
+                        });
+                        if (matchedDealer && typeof matchedDealer === 'object') {
+                            _currentDealer = matchedDealer;
+                            _currentDealer.role = 'salesrep';
+                        } else {
+                            _currentDealer = { dealerCode: _activeDealerCode, dealerName: '', role: 'salesrep' };
+                        }
+                    }
 
-                applyTierPricing();
-                loadServerQuotes().then(function () {
-                    showMainApp();
-                    updateHeaderForDealer();
-                    renderSavedQuotes();
-                    loginBtn.textContent = 'Enter Portal';
-                    loginBtn.disabled = false;
-                    if (pwInput) pwInput.value = '';
-                    console.log('[Auth] Logged in as', data.user.username, '(' + data.user.role + ') | Dealer:', data.dealer.dealerCode);
-                    dispatchLoginEvent();
-                });
+                    window.dealerSettings.dealerCode    = _activeDealerCode;
+                    window.dealerSettings.dealerName    = _currentDealer.dealerName || '';
+                    window.dealerSettings.dealerContact = _currentDealer.contactPerson || '';
+                    window.dealerSettings.dealerPhone   = _currentDealer.phone || '';
+                    window.dealerSettings.lastLogin     = new Date().toISOString();
+                    window.dealerSettings.role          = 'salesrep';
+                    saveDealerSettings();
+
+                    applyTierPricing();
+                    loadServerQuotes().then(function () {
+                        showMainApp();
+                        updateHeaderForDealer();
+                        renderSavedQuotes();
+                        loginBtn.textContent = 'Enter Portal';
+                        loginBtn.disabled = false;
+                        if (pwInput) pwInput.value = '';
+                        console.log('[Auth] Logged in as salesrep', data.user.username, '| Dealers:', _salesrepDealers.length, '| Context:', _activeDealerCode);
+                        dispatchLoginEvent();
+                    });
+                } else {
+                    // Normal dealer login
+                    _currentDealer = data.dealer;
+                    _currentDealer.role = data.user.role;
+
+                    window.dealerSettings.dealerCode    = data.dealer.dealerCode;
+                    window.dealerSettings.dealerName    = data.dealer.dealerName    || '';
+                    window.dealerSettings.dealerContact = data.dealer.contactPerson || '';
+                    window.dealerSettings.dealerPhone   = data.dealer.phone         || '';
+                    window.dealerSettings.lastLogin     = new Date().toISOString();
+                    window.dealerSettings.role          = data.user.role;
+                    saveDealerSettings();
+
+                    applyTierPricing();
+                    loadServerQuotes().then(function () {
+                        showMainApp();
+                        updateHeaderForDealer();
+                        renderSavedQuotes();
+                        loginBtn.textContent = 'Enter Portal';
+                        loginBtn.disabled = false;
+                        if (pwInput) pwInput.value = '';
+                        console.log('[Auth] Logged in as', data.user.username, '(' + data.user.role + ') | Dealer:', data.dealer.dealerCode);
+                        dispatchLoginEvent();
+                    });
+                }
             })
             .catch(function (err) {
                 loginBtn.textContent = 'Enter Portal';
                 loginBtn.disabled = false;
                 if (!_serverOnline) {
-                    if (validateDealerCode(code)) {
+                    if (!isSalesrepMode && validateDealerCode(code)) {
                         showLoginError('Server unavailable. Logging in offline mode (limited features).');
                         window.dealerSettings.dealerCode = code;
                         window.dealerSettings.lastLogin  = new Date().toISOString();
                         saveDealerSettings();
                         setTimeout(function () { showMainApp(); renderSavedQuotes(); }, 1500);
+                    } else if (isSalesrepMode) {
+                        showLoginError('Server unavailable. Sales rep login requires server connection.');
                     } else { showLoginError('Invalid dealer code format'); }
                 } else {
                     showLoginError(err.message || 'Invalid credentials');
@@ -363,9 +473,20 @@
 
     function updateHeaderForDealer() {
         if (!_currentDealer) return;
-        var display = _currentDealer.dealerName
-            ? _currentDealer.dealerCode + ' | ' + _currentDealer.dealerName
-            : 'Dealer ' + _currentDealer.dealerCode;
+        var display;
+        if (_currentUser && _currentUser.role === 'salesrep') {
+            if (_activeDealerCode === 'DIRECT') {
+                display = 'Direct Sale';
+            } else {
+                display = _currentDealer.dealerName
+                    ? _activeDealerCode + ' | ' + _currentDealer.dealerName
+                    : 'Dealer ' + _activeDealerCode;
+            }
+        } else {
+            display = _currentDealer.dealerName
+                ? _currentDealer.dealerCode + ' | ' + _currentDealer.dealerName
+                : 'Dealer ' + _currentDealer.dealerCode;
+        }
         document.getElementById('header-dealer-code').textContent = display;
 
         var badge = document.getElementById('header-tier-badge');
@@ -676,8 +797,10 @@
         }
         if (_authToken) api('POST', '/api/auth/logout', null, { skipAuthRedirect: true }).catch(function () {});
         _authToken = null; _currentUser = null; _currentDealer = null;
+        _salesrepDealers = []; _activeDealerCode = null;
         sessionStorage.removeItem('ameridex-token');
         localStorage.removeItem('ameridex-token');
+        localStorage.removeItem('ameridex-dealer-context');
         clearTimeout(window.idleTimer); clearTimeout(window.warningTimer); clearInterval(window.countdownInterval);
         window.dealerSettings.dealerCode = ''; window.dealerSettings.role = '';
         saveDealerSettings();
@@ -688,9 +811,20 @@
         var adminBtn  = document.getElementById('admin-btn');        if (adminBtn)  adminBtn.style.display  = 'none';
         var tierBadge = document.getElementById('header-tier-badge'); if (tierBadge) tierBadge.style.display = 'none';
         document.querySelectorAll('.role-injected').forEach(function (el) { el.remove(); });
+        // Reset salesrep login toggle if present
+        var salesrepToggle = document.getElementById('salesrep-login-toggle');
+        if (salesrepToggle && salesrepToggle.classList.contains('active')) {
+            salesrepToggle.classList.remove('active');
+            salesrepToggle.textContent = 'Sales Rep Login';
+            var dealerField = document.getElementById('dealer-code-input');
+            if (dealerField) dealerField.closest('.field').style.display = '';
+            var subtitle = document.querySelector('.login-card .subtitle');
+            if (subtitle) subtitle.textContent = 'Enter your dealer code, username, and password to continue';
+        }
         document.getElementById('main-app').classList.add('app-hidden');
         document.getElementById('login-screen').style.display = 'flex';
-        document.getElementById('dealer-code-input').focus();
+        var codeInput = document.getElementById('dealer-code-input');
+        if (codeInput && codeInput.closest('.field').style.display !== 'none') codeInput.focus();
     };
 
 
@@ -951,14 +1085,50 @@
         if (!_authToken) return;
         api('GET', '/api/auth/me', null, { skipAuthRedirect: true })
             .then(function (data) {
-                _currentUser   = data.user;
-                _currentDealer = data.dealer;
-                _currentDealer.role = data.user.role;
-                window.dealerSettings.dealerCode    = data.dealer.dealerCode;
-                window.dealerSettings.dealerName    = data.dealer.dealerName    || '';
-                window.dealerSettings.dealerContact = data.dealer.contactPerson || '';
-                window.dealerSettings.dealerPhone   = data.dealer.phone         || '';
-                window.dealerSettings.role          = data.user.role;
+                _currentUser = data.user;
+
+                if (data.user.role === 'salesrep') {
+                    _salesrepDealers = data.dealers || [];
+                    var storedContext = localStorage.getItem('ameridex-dealer-context');
+                    if (storedContext && (_salesrepDealers.some(function (d) {
+                        return (typeof d === 'string' ? d : d.dealerCode) === storedContext;
+                    }) || storedContext === 'DIRECT')) {
+                        _activeDealerCode = storedContext;
+                    } else if (_salesrepDealers.length > 0) {
+                        var firstDealer = _salesrepDealers[0];
+                        _activeDealerCode = typeof firstDealer === 'string' ? firstDealer : firstDealer.dealerCode;
+                        localStorage.setItem('ameridex-dealer-context', _activeDealerCode);
+                    } else {
+                        _activeDealerCode = 'DIRECT';
+                        localStorage.setItem('ameridex-dealer-context', 'DIRECT');
+                    }
+                    if (_activeDealerCode === 'DIRECT') {
+                        _currentDealer = { dealerCode: 'DIRECT', dealerName: 'Direct Sale', role: 'salesrep' };
+                    } else {
+                        var matchedDealer = _salesrepDealers.find(function (d) {
+                            return (typeof d === 'string' ? d : d.dealerCode) === _activeDealerCode;
+                        });
+                        if (matchedDealer && typeof matchedDealer === 'object') {
+                            _currentDealer = matchedDealer;
+                            _currentDealer.role = 'salesrep';
+                        } else {
+                            _currentDealer = { dealerCode: _activeDealerCode, dealerName: '', role: 'salesrep' };
+                        }
+                    }
+                    window.dealerSettings.dealerCode    = _activeDealerCode;
+                    window.dealerSettings.dealerName    = _currentDealer.dealerName || '';
+                    window.dealerSettings.dealerContact = '';
+                    window.dealerSettings.dealerPhone   = '';
+                    window.dealerSettings.role          = 'salesrep';
+                } else {
+                    _currentDealer = data.dealer;
+                    _currentDealer.role = data.user.role;
+                    window.dealerSettings.dealerCode    = data.dealer.dealerCode;
+                    window.dealerSettings.dealerName    = data.dealer.dealerName    || '';
+                    window.dealerSettings.dealerContact = data.dealer.contactPerson || '';
+                    window.dealerSettings.dealerPhone   = data.dealer.phone         || '';
+                    window.dealerSettings.role          = data.user.role;
+                }
                 saveDealerSettings();
                 return applyTierPricing().then(function () { return loadServerQuotes(); });
             })
@@ -1117,13 +1287,56 @@
 
 
     // ----------------------------------------------------------
+    // SALESREP LOGIN TOGGLE
+    // ----------------------------------------------------------
+    function injectSalesrepLoginToggle() {
+        var loginCard = document.querySelector('.login-card');
+        if (!loginCard || document.getElementById('salesrep-login-toggle')) return;
+        var loginBtn = document.getElementById('login-btn');
+        if (!loginBtn) return;
+
+        var toggle = document.createElement('a');
+        toggle.id = 'salesrep-login-toggle';
+        toggle.href = '#';
+        toggle.textContent = 'Sales Rep Login';
+        toggle.style.cssText = 'display:block;text-align:center;margin-top:0.75rem;font-size:0.85rem;' +
+            'color:var(--primary, #2563eb);cursor:pointer;text-decoration:none;font-weight:500;';
+
+        toggle.addEventListener('click', function (e) {
+            e.preventDefault();
+            var dealerField = document.getElementById('dealer-code-input');
+            var fieldWrapper = dealerField ? dealerField.closest('.field') : null;
+            var subtitle = loginCard.querySelector('.subtitle');
+
+            if (toggle.classList.contains('active')) {
+                // Switch back to dealer login
+                toggle.classList.remove('active');
+                toggle.textContent = 'Sales Rep Login';
+                if (fieldWrapper) fieldWrapper.style.display = '';
+                if (subtitle) subtitle.textContent = 'Enter your dealer code, username, and password to continue';
+            } else {
+                // Switch to salesrep login
+                toggle.classList.add('active');
+                toggle.textContent = 'Dealer Login';
+                if (fieldWrapper) fieldWrapper.style.display = 'none';
+                if (subtitle) subtitle.textContent = 'Enter your sales rep credentials to continue';
+                if (dealerField) dealerField.value = '';
+            }
+        });
+
+        loginBtn.parentNode.insertBefore(toggle, loginBtn.nextSibling);
+    }
+
+
+    // ----------------------------------------------------------
     // INIT
     // ----------------------------------------------------------
     injectLoginFields();
+    injectSalesrepLoginToggle();
     injectHeaderElements();
     injectChangePassword();
     if (_authToken) tryResumeSession();
     loadQuoteFromUrlParam();
 
-    console.log('[AmeriDex API] v2.25 loaded.');
+    console.log('[AmeriDex API] v2.26 loaded.');
 })();
