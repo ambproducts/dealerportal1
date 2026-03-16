@@ -3204,5 +3204,18 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 </script>
 <script src="script-loader.js"></script>
+<script>
+  // Auto-resize iframe when embedded in Wix
+  function sendHeight() {
+    const height = document.body.scrollHeight;
+    window.parent.postMessage({ iframeHeight: height }, '*');
+  }
+  window.addEventListener('load', sendHeight);
+  window.addEventListener('resize', sendHeight);
+
+  // Watch for DOM changes (page transitions inside portal)
+  const observer = new MutationObserver(sendHeight);
+  observer.observe(document.body, { childList: true, subtree: true });
+</script>
 </body>
 </html>
