@@ -1,75 +1,45 @@
 // ============================================================
-// AmeriDex Dealer Portal - API Integration Patch v2.24
+// AmeriDex Dealer Portal - API Integration Patch v2.25
 // Date: 2026-03-15
 // ============================================================
 // REQUIRES: ameridex-patches.js (v1.0+) loaded first
 //
-// v2.24 Changes (2026-03-15):
-//   - CRITICAL FIX: Race condition in loadQuoteFromUrlParam().
-//     The _quoteFromUrlHandled guard existed in v2.23 but was
-//     checked SYNCHRONOUSLY inside the 'ameridex-login' handler.
-//     portal-nav sets _quoteFromUrlHandled only AFTER its own
-//     'ameridex-quoteeditor-ready' listener fires, which is a
-//     separate async event dispatched by quote-editor AFTER
-//     'ameridex-login'. So when api.js's onLogin() ran, the flag
-//     was always undefined, and api.js proceeded to call doLoad()
-//     in parallel with portal-nav's pending load.
-//   - FIX: onLogin() now defers the _quoteFromUrlHandled check
-//     by 250ms using setTimeout. This gives portal-nav's
-//     'ameridex-quoteeditor-ready' path enough time to set the
-//     flag before api.js decides whether to run doLoad().
-//   - FIX: If portal-nav has already set the flag within 250ms,
-//     api.js skips doLoad() entirely. If NOT set by then (e.g.
-//     quote-editor is slow or absent), api.js runs doLoad() as
-//     the authoritative fallback — preserving the existing
-//     ameridex-quote-restored locking pathway.
+// v2.25 Changes (2026-03-15):
+//   - CRITICAL FIX: api.js doLoad() fallback was firing at the
+//     250ms mark even when quote-editor had not yet loaded.
+//     window._quoteEditorReady was still undefined at 250ms
+//     because quote-editor loads AFTER api.js in the script
+//     order. This caused doLoad() to call the raw unpatched
+//     window.loadQuote (via restoreQuoteToDOM -> render),
+//     rendering the form without quote-editor's locking wrapper.
+//     When quote-editor subsequently loaded and ran bootstrapCheck(),
+//     it found a pre-rendered quote and tried to lock it,
+//     causing the portal to spin indefinitely.
+//
+//   - FIX: The 250ms deferred check in onLogin() now also gates
+//     on window._quoteEditorReady. If the editor is not ready
+//     at 250ms, api.js skips doLoad() entirely and trusts
+//     portal-nav's 'ameridex-quoteeditor-ready' primary path
+//     to handle the load once the editor is ready.
+//
+//   - INVARIANT enforced across all load paths:
+//     doLoad() / loadQuote() is NEVER called unless
+//     window._quoteEditorReady === true.
+//
 //   - No other behavior changed.
 //
+// v2.24 Changes (2026-03-15):
+//   - FIX: Deferred _quoteFromUrlHandled check by 250ms in onLogin().
+//
 // v2.23 Changes (2026-03-05):
-//   - FIX: applyTierPricing() now calls window.backupPrices()
-//     after updating PRODUCTS and PRODUCT_CONFIG from the server.
-//     This prevents ameridex-pricing-fix.js healUndefinedPrices()
-//     from reverting server prices back to stale hardcoded values.
-//   - ADD: Dispatches 'ameridex-prices-loaded' event after tier
-//     pricing is applied so other scripts can react.
+//   - FIX: backupPrices() refreshed after tier pricing applied.
+//   - ADD: ameridex-prices-loaded event dispatched.
 //
 // v2.22 Changes (2026-03-02):
-//   - FIX: loadQuoteFromUrlParam() now ALWAYS waits for the
-//     'ameridex-login' event before fetching. Previously, if
-//     _authToken existed in sessionStorage, doLoad() fired
-//     immediately, racing with tryResumeSession() which had
-//     not yet finished hydrating _currentUser, _currentDealer,
-//     or the dealer middleware. This caused 401/404 errors and
-//     stale state when opening a quote via URL.
-//   - Added 10-second safety timeout for the login listener.
+//   - FIX: loadQuoteFromUrlParam() waits for ameridex-login.
+//   - ADD: 10-second safety timeout.
 //
-// v2.21 Changes (2026-03-02):
-//   - CLEANUP: Removed client-side Formspree fallback from
-//     sendFormalRequest (section 11).
-//     The server now handles all Formspree notification via
-//     POST /api/quotes/:id/submit -> notifySubmissionViaFormspree().
-//     The fallback path now shows a clear user-facing error
-//     instead of silently attempting a browser-side email.
-//     No Formspree form ID is ever present in the browser.
-//
-// v2.20 Changes (2026-03-02):
-//   - FEAT: window.requestQuoteRevision() added.
-//
-// v2.19 Changes (2026-03-02):
-//   - FIX: mapServerCustomerToFrontend() now includes address,
-//     city, and state fields.
-//   - FIX: restoreQuoteToDOM() now populates cust-address,
-//     cust-city, cust-state and is exposed on window.
-//
-// v2.18 Changes (2026-03-01):
-//   - CRITICAL FIX: saveCurrentQuote() no longer creates
-//     duplicate quotes when _serverId exists but findIndex=-1.
-//   - FIX: loadServerQuotes() re-links currentQuote after
-//     rebuilding savedQuotes from server.
-//   - FIX: syncQuoteToServer() blocks POST for server-format
-//     quoteIds.
-//
-// v2.17 - v2.1: See previous changelogs.
+// v2.21 - v2.1: See previous changelogs.
 // ============================================================
 
 (function () {
@@ -169,7 +139,6 @@
 
     // ----------------------------------------------------------
     // SHARED HELPER: Restore quote to DOM (v2.19)
-    // Includes address/city/state. Exposed on window.
     // ----------------------------------------------------------
     function restoreQuoteToDOM(quoteObj) {
         var c = quoteObj.customer || {};
@@ -324,7 +293,7 @@
     }
 
     function handleServerLogin() {
-        var code     = document.getElementById('dealer-code-input').value.trim().toUpperCase();
+        var code      = document.getElementById('dealer-code-input').value.trim().toUpperCase();
         var userInput = document.getElementById('dealer-username-input');
         var pwInput   = document.getElementById('dealer-password-input');
         var loginBtn  = document.getElementById('login-btn');
@@ -403,7 +372,7 @@
         if (badge && _currentDealer.pricingTier) {
             badge.textContent = _currentDealer.pricingTier;
             badge.style.display = 'inline-block';
-            if (_currentDealer.pricingTier === 'vip') { badge.style.background = 'rgba(250,204,21,0.3)'; badge.style.color = '#fef9c3'; }
+            if (_currentDealer.pricingTier === 'vip')       { badge.style.background = 'rgba(250,204,21,0.3)';  badge.style.color = '#fef9c3'; }
             else if (_currentDealer.pricingTier === 'preferred') { badge.style.background = 'rgba(34,197,94,0.25)'; badge.style.color = '#dcfce7'; }
         }
         var adminBtn = document.getElementById('admin-btn');
@@ -487,10 +456,10 @@
             else if (prod && prod.isFt) length = 16;
             else length = null;
         }
-        var customLength = li.customLength ? (parseFloat(li.customLength) || null) : null;
-        var color = li.color || li.color1 || '';
+        var customLength    = li.customLength ? (parseFloat(li.customLength) || null) : null;
+        var color           = li.color || li.color1 || '';
         if (!color && prod && prod.hasColor) color = window.selectedColor1 || 'Driftwood';
-        var customDesc = li.customDesc || li.productName || '';
+        var customDesc      = li.customDesc || li.productName || '';
         var customUnitPrice = parseFloat(li.customUnitPrice) || 0;
         if (type === 'custom' && customUnitPrice === 0 && li.basePrice)
             customUnitPrice = parseFloat(li.basePrice) || 0;
@@ -568,31 +537,35 @@
         if (!_authToken) return Promise.resolve(null);
 
         var mappedLineItems = quote.lineItems.map(function (li) {
-            var prod = (typeof PRODUCTS !== 'undefined' && PRODUCTS[li.type]) ? PRODUCTS[li.type] : null;
-            var dealerPrice = (typeof getItemPrice     === 'function') ? getItemPrice(li)     : 0;
-            var subtotal    = (typeof getItemSubtotal  === 'function') ? getItemSubtotal(li)  : 0;
+            var prod        = (typeof PRODUCTS !== 'undefined' && PRODUCTS[li.type]) ? PRODUCTS[li.type] : null;
+            var dealerPrice = (typeof getItemPrice    === 'function') ? getItemPrice(li)    : 0;
+            var subtotal    = (typeof getItemSubtotal === 'function') ? getItemSubtotal(li) : 0;
             var catalogBase = (li.type === 'custom' || !prod)
                 ? (parseFloat(li.customUnitPrice) || dealerPrice)
                 : ((prod && prod.basePrice !== undefined) ? parseFloat(prod.basePrice) : dealerPrice);
             return {
-                productId: li.productId || li.type || '',
-                productName: li.productName || (prod ? prod.name : '') || li.type || 'Custom Item',
-                basePrice: Math.round(catalogBase   * 100) / 100,
-                price:     Math.round(dealerPrice   * 100) / 100,
-                quantity:  parseInt(li.qty, 10) || parseInt(li.quantity, 10) || 1,
-                length: li.length || null, customLength: li.customLength || null,
-                total: subtotal,
-                unitPrice: li.unitPrice || null, customUnitPrice: li.customUnitPrice || null,
-                priceOverride: li.priceOverride || null,
-                type: li.type || '', color: li.color || li.color1 || '', color2: li.color2 || ''
+                productId:      li.productId || li.type || '',
+                productName:    li.productName || (prod ? prod.name : '') || li.type || 'Custom Item',
+                basePrice:      Math.round(catalogBase  * 100) / 100,
+                price:          Math.round(dealerPrice  * 100) / 100,
+                quantity:       parseInt(li.qty, 10) || parseInt(li.quantity, 10) || 1,
+                length:         li.length || null,
+                customLength:   li.customLength || null,
+                total:          subtotal,
+                unitPrice:      li.unitPrice      || null,
+                customUnitPrice: li.customUnitPrice || null,
+                priceOverride:  li.priceOverride  || null,
+                type:           li.type  || '',
+                color:          li.color || li.color1 || '',
+                color2:         li.color2 || ''
             };
         });
 
         var payload = {
-            quoteNumber: quote.quoteId,
-            customer: quote.customer,
-            lineItems: mappedLineItems,
-            options: quote.options,
+            quoteNumber:         quote.quoteId,
+            customer:            quote.customer,
+            lineItems:           mappedLineItems,
+            options:             quote.options,
             specialInstructions: quote.specialInstructions,
             internalNotes:       quote.internalNotes,
             shippingAddress:     quote.shippingAddress,
@@ -604,16 +577,32 @@
 
         if (quote._serverId) {
             return api('PUT', '/api/quotes/' + quote._serverId, payload)
-                .then(function (u) { quote._serverId = u.id; quote.status = u.status; if (typeof window.showToast === 'function') { window.showToast('Quote synced to server', 'success'); } return u; })
-                .catch(function (err) { console.warn('[Sync] Update failed:', err.message); if (typeof window.showToast === 'function') { window.showToast('Sync failed — changes saved locally', 'warning'); } return null; });
+                .then(function (u) {
+                    quote._serverId = u.id; quote.status = u.status;
+                    if (typeof window.showToast === 'function') window.showToast('Quote synced to server', 'success');
+                    return u;
+                })
+                .catch(function (err) {
+                    console.warn('[Sync] Update failed:', err.message);
+                    if (typeof window.showToast === 'function') window.showToast('Sync failed — changes saved locally', 'warning');
+                    return null;
+                });
         } else {
             if (isServerQuoteNumber(quote.quoteId)) {
                 console.error('[Sync v2.18] BLOCKED POST for server-originated quote', quote.quoteId);
                 return Promise.resolve(null);
             }
             return api('POST', '/api/quotes', payload)
-                .then(function (c) { quote._serverId = c.id; quote.status = c.status; if (typeof window.showToast === 'function') { window.showToast('Quote synced to server', 'success'); } return c; })
-                .catch(function (err) { console.warn('[Sync] Create failed:', err.message); if (typeof window.showToast === 'function') { window.showToast('Sync failed — changes saved locally', 'warning'); } return null; });
+                .then(function (c) {
+                    quote._serverId = c.id; quote.status = c.status;
+                    if (typeof window.showToast === 'function') window.showToast('Quote synced to server', 'success');
+                    return c;
+                })
+                .catch(function (err) {
+                    console.warn('[Sync] Create failed:', err.message);
+                    if (typeof window.showToast === 'function') window.showToast('Sync failed — changes saved locally', 'warning');
+                    return null;
+                });
         }
     }
 
@@ -696,7 +685,7 @@
         ['dealer-code-input','dealer-username-input','dealer-password-input'].forEach(function (id) {
             var el = document.getElementById(id); if (el) el.value = '';
         });
-        var adminBtn = document.getElementById('admin-btn'); if (adminBtn) adminBtn.style.display = 'none';
+        var adminBtn  = document.getElementById('admin-btn');        if (adminBtn)  adminBtn.style.display  = 'none';
         var tierBadge = document.getElementById('header-tier-badge'); if (tierBadge) tierBadge.style.display = 'none';
         document.querySelectorAll('.role-injected').forEach(function (el) { el.remove(); });
         document.getElementById('main-app').classList.add('app-hidden');
@@ -717,21 +706,21 @@
 
 
     // ----------------------------------------------------------
-    // 11. SUBMIT FORMAL REQUEST  (v2.21)
+    // 11. SUBMIT FORMAL REQUEST (v2.21)
     // ----------------------------------------------------------
     window.sendFormalRequest = function () {
         var quoteId = saveCurrentQuote();
-        var quote = window.savedQuotes.find(function (q) { return q.quoteId === quoteId; });
+        var quote   = window.savedQuotes.find(function (q) { return q.quoteId === quoteId; });
 
         if (quote && quote._serverId && _authToken) {
             api('POST', '/api/quotes/' + quote._serverId + '/submit')
-                .then(function (updatedQuote) {
+                .then(function () {
                     quote.status = 'submitted';
                     saveToStorage();
                     document.getElementById('reviewModal').classList.remove('active');
                     document.getElementById('success-order-number').textContent = quoteId;
                     document.getElementById('success-confirmation').classList.add('visible');
-                    console.log('[Submit v2.22] Quote', quoteId, 'submitted to server. Formspree handled server-side.');
+                    console.log('[Submit v2.22] Quote', quoteId, 'submitted. Formspree handled server-side.');
                 })
                 .catch(function (err) {
                     var msg = err.message || 'Submission failed. Please try again.';
@@ -783,8 +772,8 @@
         if (newPw && newPw.value) {
             pwError.style.display = 'none'; pwSuccess.style.display = 'none';
             if (!currentPw || !currentPw.value) { pwError.textContent = 'Current password is required'; pwError.style.display = 'block'; return; }
-            if (newPw.value.length < 8) { pwError.textContent = 'Password must be at least 8 characters'; pwError.style.display = 'block'; return; }
-            if (newPw.value !== confirmPw.value) { pwError.textContent = 'Passwords do not match'; pwError.style.display = 'block'; return; }
+            if (newPw.value.length < 8)          { pwError.textContent = 'Password must be at least 8 characters'; pwError.style.display = 'block'; return; }
+            if (newPw.value !== confirmPw.value)  { pwError.textContent = 'Passwords do not match'; pwError.style.display = 'block'; return; }
             if (_authToken) {
                 api('POST', '/api/auth/change-password', { currentPassword: currentPw.value, newPassword: newPw.value })
                     .then(function () {
@@ -1002,27 +991,36 @@
 
 
     // ----------------------------------------------------------
-    // 18. LOAD QUOTE FROM URL PARAM (v2.24)
+    // 18. LOAD QUOTE FROM URL PARAM (v2.25)
     //
-    // THE RACE CONDITION (fixed here):
-    //   api.js fires 'ameridex-login' -> onLogin() runs synchronously
-    //   At that instant, window._quoteFromUrlHandled is still undefined
-    //   because portal-nav has not yet received 'ameridex-quoteeditor-ready'
-    //   (dispatched by quote-editor AFTER 'ameridex-login').
-    //   So the old synchronous guard never worked — api.js always ran doLoad().
+    // THE INVARIANT (enforced here and in portal-nav v1.5):
+    //   doLoad() / loadQuote() must NEVER be called unless
+    //   window._quoteEditorReady === true. Calling raw loadQuote
+    //   before quote-editor installs its locking wrapper renders
+    //   the form without locks. bootstrapCheck() then tries to
+    //   lock an already-rendered form and freezes the portal.
     //
-    // THE FIX:
-    //   onLogin() defers the _quoteFromUrlHandled check by 250ms.
-    //   By then, quote-editor has had time to:
-    //     1. Patch loadQuote.
-    //     2. Dispatch 'ameridex-quoteeditor-ready'.
-    //   And portal-nav has had time to:
-    //     1. Receive 'ameridex-quoteeditor-ready'.
-    //     2. Call loadQuote(idx) and set _quoteFromUrlHandled = true.
-    //   If the flag IS set within 250ms, api.js skips doLoad().
-    //   If NOT (quote-editor absent, very slow machine), api.js runs
-    //   doLoad() as the authoritative fallback — which dispatches
-    //   'ameridex-quote-restored' so quote-editor can still lock the form.
+    // LOAD ORDER (normal page):
+    //   ameridex-api.js loads -> loadQuoteFromUrlParam() registers
+    //     the 'ameridex-login' listener and returns.
+    //   ... other scripts load ...
+    //   ameridex-quote-editor.js loads -> patchLoadQuote() runs:
+    //     sets window._quoteEditorReady = true
+    //     dispatches 'ameridex-quoteeditor-ready'
+    //   portal-nav's primary listener receives 'ameridex-quoteeditor-ready'
+    //     calls tryLoadQuoteFromParam() -> loadQuote(idx) (patched)
+    //     sets window._quoteFromUrlHandled = true
+    //   api.js 'ameridex-login' listener fires, schedules 250ms check
+    //   250ms elapses:
+    //     window._quoteEditorReady === true  (editor loaded)
+    //     window._quoteFromUrlHandled === true (portal-nav handled it)
+    //     -> api.js skips doLoad()
+    //
+    // FALLBACK (quote-editor absent or failed to load):
+    //   250ms elapses:
+    //     window._quoteEditorReady === undefined  (editor never loaded)
+    //     -> api.js skips doLoad() (no point calling raw loadQuote)
+    //     -> 6-second safety timeout in portal-nav cleans the URL
     // ----------------------------------------------------------
     function loadQuoteFromUrlParam() {
         var urlParams = new URLSearchParams(window.location.search);
@@ -1048,9 +1046,8 @@
                 window.currentQuote.deliveryDate        = sq.deliveryDate        || '';
 
                 restoreQuoteToDOM(window.currentQuote);
-                console.log('[v2.24] Loaded from URL param (fallback):', window.currentQuote.quoteId || serverId, '| status:', window.currentQuote.status);
+                console.log('[v2.25] Loaded from URL param (fallback):', window.currentQuote.quoteId || serverId, '| status:', window.currentQuote.status);
 
-                // Dispatch locking event so quote-editor can apply lockForm/showBanner
                 setTimeout(function () {
                     try {
                         window.dispatchEvent(new CustomEvent('ameridex-quote-restored', {
@@ -1061,7 +1058,7 @@
 
                 try { window.history.replaceState(null, '', window.location.pathname); } catch (e) {}
             } catch (err) {
-                console.error('[v2.24] applyQuoteToDOM threw:', err);
+                console.error('[v2.25] applyQuoteToDOM threw:', err);
             }
         }
 
@@ -1069,15 +1066,15 @@
             api('GET', '/api/quotes/' + serverId)
                 .then(applyQuoteToDOM)
                 .catch(function (err) {
-                    console.warn('[v2.24] Server fetch failed for', serverId, err.message);
+                    console.warn('[v2.25] Server fetch failed for', serverId, err.message);
                     try {
                         var found = (window.savedQuotes || []).find(function (q) {
                             return String(q._serverId) === String(serverId) || String(q.quoteId) === String(serverId);
                         });
                         if (found) applyQuoteToDOM(found);
-                        else console.error('[v2.24] Quote not found:', serverId);
+                        else console.error('[v2.25] Quote not found:', serverId);
                     } catch (fallbackErr) {
-                        console.error('[v2.24] Fallback lookup threw:', fallbackErr);
+                        console.error('[v2.25] Fallback lookup threw:', fallbackErr);
                     }
                 });
         }
@@ -1087,30 +1084,34 @@
             window.removeEventListener('ameridex-login', onLogin);
             clearTimeout(loginTimeout);
 
-            // v2.24 FIX: Defer the _quoteFromUrlHandled check by 250ms.
-            // portal-nav sets this flag AFTER receiving 'ameridex-quoteeditor-ready',
-            // which quote-editor dispatches AFTER 'ameridex-login'. Checking it
-            // synchronously here always finds it undefined. The 250ms window
-            // gives quote-editor and portal-nav enough time to complete their
-            // own async load chain before we decide to run doLoad().
+            // v2.25 FIX: Gate on window._quoteEditorReady in addition to
+            // window._quoteFromUrlHandled. If the editor has not yet loaded
+            // at 250ms, calling doLoad() would invoke raw unpatched loadQuote
+            // and freeze the portal. Skip doLoad() entirely — portal-nav's
+            // primary 'ameridex-quoteeditor-ready' path will handle it once
+            // the editor loads and sets window._quoteEditorReady = true.
             setTimeout(function () {
                 if (window._quoteFromUrlHandled) {
-                    console.log('[v2.24] Skipping loadQuoteFromUrlParam — portal-nav already handled:', serverId);
+                    console.log('[v2.25] Skipping loadQuoteFromUrlParam — portal-nav already handled:', serverId);
                     return;
                 }
-                // portal-nav did NOT handle it (quote-editor missing, script error,
-                // or very slow device). Run doLoad() as authoritative fallback.
-                console.log('[v2.24] portal-nav did not handle quote, running fallback doLoad for:', serverId);
+                if (!window._quoteEditorReady) {
+                    console.log('[v2.25] Skipping doLoad — quote-editor not ready yet. Primary path will handle it.');
+                    return;
+                }
+                // Editor is ready but portal-nav did not handle it.
+                // This is a genuine fallback scenario (script error, missing quote
+                // in savedQuotes, etc). Run doLoad() as authoritative fallback.
+                console.log('[v2.25] portal-nav did not handle quote, running fallback doLoad for:', serverId);
                 doLoad();
             }, 250);
         }
 
         window.addEventListener('ameridex-login', onLogin);
 
-        // Safety: clean up listener after 10s if login never fires
         loginTimeout = setTimeout(function () {
             window.removeEventListener('ameridex-login', onLogin);
-            console.warn('[v2.24] Timed out waiting for ameridex-login. Quote URL param "' + serverId + '" abandoned.');
+            console.warn('[v2.25] Timed out waiting for ameridex-login. Quote URL param "' + serverId + '" abandoned.');
         }, 10000);
     }
 
@@ -1124,5 +1125,5 @@
     if (_authToken) tryResumeSession();
     loadQuoteFromUrlParam();
 
-    console.log('[AmeriDex API] v2.24 loaded.');
+    console.log('[AmeriDex API] v2.25 loaded.');
 })();
