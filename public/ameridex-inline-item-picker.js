@@ -59,6 +59,12 @@
 (function () {
     'use strict';
 
+    if (window.__inlineItemPickerLoaded) {
+        console.log('[InlineItemPicker] Already loaded — skipping duplicate.');
+        return;
+    }
+    window.__inlineItemPickerLoaded = true;
+
     // ----------------------------------------------------------
     // 1. CSS
     // ----------------------------------------------------------

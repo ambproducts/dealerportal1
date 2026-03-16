@@ -44,6 +44,12 @@
 (function () {
     'use strict';
 
+    if (window.__pricingFixLoaded) {
+        console.log('[PricingFix] Already loaded — skipping duplicate.');
+        return;
+    }
+    window.__pricingFixLoaded = true;
+
     // ----------------------------------------------------------
     // 0. FIX formatCurrency() - ROOT CAUSE OF $undefined BUG
     // ----------------------------------------------------------

@@ -60,6 +60,12 @@
 (function () {
     'use strict';
 
+    if (window.__overridesLoaded) {
+        console.log('[Overrides] Already loaded — skipping duplicate.');
+        return;
+    }
+    window.__overridesLoaded = true;
+
     // ----------------------------------------------------------
     // DEFENSIVE: escapeHTML fallback
     // ----------------------------------------------------------
