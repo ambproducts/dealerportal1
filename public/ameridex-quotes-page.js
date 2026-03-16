@@ -966,7 +966,8 @@
                     // Reset table scroll to top on page change
                     var tableWrap = document.querySelector('#view-' + activeTab + ' .data-table-wrap');
                     if (tableWrap) tableWrap.scrollTop = 0;
-                    window.scrollTo({ top: 200, behavior: 'smooth' });
+                    var viewEl = document.getElementById('view-' + activeTab);
+                    if (viewEl) { viewEl.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
                 }
             });
         });
