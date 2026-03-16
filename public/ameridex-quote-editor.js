@@ -1,7 +1,15 @@
 // ============================================================
-// AmeriDex Dealer Portal - Quote Editor v1.5
+// AmeriDex Dealer Portal - Quote Editor v1.6
 // Date: 2026-03-15
 // ============================================================
+// v1.6 CHANGES (2026-03-15):
+//   FIX: patchLoadQuote() now sets window._quoteEditorReady = true
+//   immediately before dispatching 'ameridex-quoteeditor-ready'.
+//   portal-nav v1.4's 800ms fallback guard reads this flag to
+//   decide whether it is safe to call loadQuote. Without it the
+//   flag was always undefined, so the guard always skipped the
+//   fallback regardless of whether the editor was actually ready.
+//
 // v1.5 CHANGES (2026-03-15):
 //   FIX: Race condition between portal-nav.js and quote-editor.js.
 //     portal-nav was calling window.loadQuote at the 200ms mark,
@@ -11,9 +19,9 @@
 //
 //   FIX: patchLoadQuote() now dispatches a custom window event
 //     'ameridex-quoteeditor-ready' immediately after it installs
-//     the patched loadQuote. portal-nav.js (v1.3) listens for
-//     this event instead of relying on a blind 200ms setTimeout,
-//     guaranteeing the patch is in place before loadQuote fires.
+//     the patched loadQuote. portal-nav.js listens for this event
+//     instead of relying on a blind setTimeout, guaranteeing the
+//     patch is in place before loadQuote fires.
 //
 // v1.4 CHANGES retained:
 //   FEAT: Listen for ameridex-quote-restored event (api.js bypass path).
@@ -73,7 +81,6 @@
 
     // ----------------------------------------------------------
     // HELPER: Write address fields from customer obj to DOM
-    // v1.2: Only fills if field is currently empty (safety net)
     // ----------------------------------------------------------
     function populateAddressFields(customer) {
         var c = customer || {};
@@ -107,7 +114,7 @@
             if (cityEl)  cust.city    = cityEl.value.trim();
             if (stateEl) cust.state   = stateEl.value.trim();
         };
-        console.log('[QuoteEditor v1.5] syncQuoteFromDOM patched.');
+        console.log('[QuoteEditor v1.6] syncQuoteFromDOM patched.');
     }
 
 
@@ -117,7 +124,6 @@
     var _editMode    = false;
     var _quoteLoaded = false;
 
-    // approve-revision-btn excluded from form lock/unlock sweep
     var FORM_SELECTOR = [
         '#order-form input',
         '#order-form select',
@@ -169,7 +175,6 @@
         var q      = window.currentQuote;
         var status = (q && q.status) || 'draft';
 
-        // Edit / Done Editing button
         if (_editMode) {
             editBtn.textContent      = 'Done Editing';
             editBtn.style.background = '#10b981';
@@ -188,14 +193,12 @@
             }
         }
 
-        // Request Revision button: gm/admin on submitted/reviewed/approved
         if (revBtn) {
             var showRevBtn = isElevated() &&
                 (status === 'submitted' || status === 'approved' || status === 'reviewed');
             revBtn.style.display = showRevBtn ? 'inline-block' : 'none';
         }
 
-        // Approve & Re-Submit button: gm/admin on revision only
         if (approveBtn) {
             var showApproveBtn = isElevated() && status === 'revision';
             approveBtn.style.display = showApproveBtn ? 'inline-block' : 'none';
@@ -255,7 +258,6 @@
             '  pointer-events:none !important;',
             '  user-select:none !important;',
             '}',
-            // Request Revision modal
             '#qe-revision-modal {',
             '  display:none; position:fixed; inset:0; z-index:9999;',
             '  background:rgba(0,0,0,0.65); align-items:center; justify-content:center;',
@@ -290,7 +292,6 @@
             '  border-radius:6px; color:#fff; font-size:0.85rem; font-weight:700; cursor:pointer;',
             '}',
             '#qe-revision-submit:disabled { opacity:.5; cursor:not-allowed; }',
-            // Approve Revision confirmation modal
             '#qe-approve-revision-modal {',
             '  display:none; position:fixed; inset:0; z-index:9999;',
             '  background:rgba(0,0,0,0.65); align-items:center; justify-content:center;',
@@ -338,7 +339,6 @@
         if (target) target.insertBefore(banner, target.firstChild);
         else document.body.insertBefore(banner, document.body.firstChild);
 
-        // Edit / Done Editing
         document.getElementById('edit-quote-btn').addEventListener('click', function () {
             if (_editMode) {
                 if (typeof window.syncQuoteFromDOM === 'function') window.syncQuoteFromDOM();
@@ -350,7 +350,6 @@
             }
         });
 
-        // New Quote
         document.getElementById('new-quote-btn').addEventListener('click', function () {
             if (_editMode) {
                 if (!confirm('Leave edit mode? Changes will be saved first.')) return;
@@ -362,12 +361,10 @@
             hideBanner();
         });
 
-        // Request Revision
         document.getElementById('revision-btn').addEventListener('click', function () {
             openRevisionModal();
         });
 
-        // Approve & Re-Submit
         document.getElementById('approve-revision-btn').addEventListener('click', function () {
             openApproveRevisionModal();
         });
@@ -419,7 +416,7 @@
 
 
     // ----------------------------------------------------------
-    // REQUEST REVISION MODAL (unchanged from v1.2)
+    // REQUEST REVISION MODAL
     // ----------------------------------------------------------
     function injectRevisionModal() {
         if (document.getElementById('qe-revision-modal')) return;
@@ -500,7 +497,7 @@
             updateBannerButtons();
             setStatusText('Revision requested', 'saved');
             setTimeout(function () { setStatusText(''); }, 3000);
-            console.log('[QuoteEditor v1.5] Revision requested for', q.quoteId);
+            console.log('[QuoteEditor v1.6] Revision requested for', q.quoteId);
         })
         .catch(function (err) {
             submitBtn.disabled    = false;
@@ -512,7 +509,7 @@
 
 
     // ----------------------------------------------------------
-    // APPROVE REVISION MODAL (v1.3+)
+    // APPROVE REVISION MODAL
     // ----------------------------------------------------------
     function injectApproveRevisionModal() {
         if (document.getElementById('qe-approve-revision-modal')) return;
@@ -587,7 +584,7 @@
             updateBannerButtons();
             setStatusText('Re-submitted to AmeriDex', 'saved');
             setTimeout(function () { setStatusText(''); }, 4000);
-            console.log('[QuoteEditor v1.5] Revision approved and re-submitted:', q.quoteId || q._serverId);
+            console.log('[QuoteEditor v1.6] Revision approved and re-submitted:', q.quoteId || q._serverId);
         })
         .catch(function (err) {
             confirmBtn.disabled    = false;
@@ -623,10 +620,10 @@
             setTimeout(function () {
                 if (_editMode) setStatusText('Edit mode active');
             }, 2500);
-            console.log('[QuoteEditor v1.5] Saved:', window.currentQuote && window.currentQuote.quoteId);
+            console.log('[QuoteEditor v1.6] Saved:', window.currentQuote && window.currentQuote.quoteId);
         } catch (e) {
             setStatusText('Save failed', '');
-            console.error('[QuoteEditor v1.5] Save error:', e);
+            console.error('[QuoteEditor v1.6] Save error:', e);
         }
     }
 
@@ -635,14 +632,17 @@
         if (!form) { setTimeout(attachAutosaveListeners, 400); return; }
         form.addEventListener('input',  function () { if (_editMode) doSave(false); });
         form.addEventListener('change', function () { if (_editMode) doSave(false); });
-        console.log('[QuoteEditor v1.5] Autosave listeners attached.');
+        console.log('[QuoteEditor v1.6] Autosave listeners attached.');
     }
 
 
     // ----------------------------------------------------------
     // PATCH window.loadQuote
-    // v1.5: After installing the patch, dispatch 'ameridex-quoteeditor-ready'
-    //       so portal-nav.js knows it is safe to call loadQuote.
+    //
+    // v1.6 FIX: Set window._quoteEditorReady = true BEFORE
+    // dispatching 'ameridex-quoteeditor-ready'. portal-nav v1.4
+    // reads this flag in its 800ms fallback guard. Without this
+    // the flag was always undefined, rendering the guard useless.
     // ----------------------------------------------------------
     function patchLoadQuote() {
         var _origLoad = window.loadQuote;
@@ -661,17 +661,18 @@
                 _editMode    = false;
                 lockForm();
                 showBanner(id);
-                console.log('[QuoteEditor v1.5] Quote locked read-only:', id, '| status:', q && q.status);
+                console.log('[QuoteEditor v1.6] Quote locked read-only:', id, '| status:', q && q.status);
             }, 0);
         };
 
-        console.log('[QuoteEditor v1.5] loadQuote patched.');
+        console.log('[QuoteEditor v1.6] loadQuote patched.');
 
-        // v1.5: Signal portal-nav that the patched loadQuote is now in place.
-        // portal-nav v1.3 listens for this event before calling loadQuote,
-        // preventing the race condition that caused the form to render unlocked.
+        // v1.6: Set the global flag BEFORE dispatching the event so
+        // portal-nav's 800ms guard can read it reliably.
+        window._quoteEditorReady = true;
+
         window.dispatchEvent(new CustomEvent('ameridex-quoteeditor-ready'));
-        console.log('[QuoteEditor v1.5] Dispatched ameridex-quoteeditor-ready.');
+        console.log('[QuoteEditor v1.6] Dispatched ameridex-quoteeditor-ready.');
     }
 
 
@@ -690,7 +691,7 @@
             _editMode    = false;
             lockForm();
             showBanner(id);
-            console.log('[QuoteEditor v1.5] Bootstrap: locked pre-loaded quote', id);
+            console.log('[QuoteEditor v1.6] Bootstrap: locked pre-loaded quote', id);
         }
     }
 
@@ -708,11 +709,10 @@
             bootstrapCheck();
         });
 
-        // v1.4: Listen for direct restoreQuoteToDOM calls (from api.js
-        // loadQuoteFromUrlParam) that bypass the loadQuote wrapper chain.
+        // Listen for direct restoreQuoteToDOM calls (api.js bypass path)
         window.addEventListener('ameridex-quote-restored', function (e) {
             var qid = (e.detail && e.detail.quoteId) || '';
-            console.log('[QuoteEditor v1.5] ameridex-quote-restored received, locking form for:', qid);
+            console.log('[QuoteEditor v1.6] ameridex-quote-restored received, locking form for:', qid);
             var q  = window.currentQuote;
             var id = qid || (q && (q.quoteId || q.quoteNumber || q._serverId)) || 'Draft';
             populateAddressFields(q && q.customer);
@@ -724,7 +724,7 @@
 
         setTimeout(bootstrapCheck, 300);
 
-        console.log('[QuoteEditor v1.5] Initialized.');
+        console.log('[QuoteEditor v1.6] Initialized.');
     }
 
     if (document.readyState === 'loading') {
