@@ -206,8 +206,13 @@
 
         if (idx >= 0 && typeof window.loadQuote === 'function') {
           _quoteLoadDone = true;
-          console.log('[portal-nav v1.1] Loading quote at savedQuotes[' + idx + '] for param: ' + quoteId);
-          window.loadQuote(idx);
+          window._quoteFromUrlHandled = true;
+          console.log('[portal-nav v1.2] Loading quote at savedQuotes[' + idx + '] for param: ' + quoteId);
+          try {
+            window.loadQuote(idx);
+          } catch (err) {
+            console.error('[portal-nav v1.2] loadQuote threw:', err);
+          }
           cleanUrlParams();
           var custSection = document.getElementById('customer');
           if (custSection) {

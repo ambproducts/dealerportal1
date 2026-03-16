@@ -1035,49 +1035,78 @@
         if (!serverId) return;
 
         function applyQuoteToDOM(sq) {
-            var frontendLineItems = (sq.lineItems || []).map(function (li) {
-                return mapServerLineItemToFrontend(li) || li;
-            }).filter(Boolean);
-            var mappedCustomer = mapServerCustomerToFrontend(sq.customer);
+            try {
+                var frontendLineItems = (sq.lineItems || []).map(function (li) {
+                    return mapServerLineItemToFrontend(li) || li;
+                }).filter(Boolean);
+                var mappedCustomer = mapServerCustomerToFrontend(sq.customer);
 
-            window.currentQuote.quoteId             = sq.quoteNumber || sq.quoteId || null;
-            window.currentQuote._serverId           = sq.id || sq._serverId || null;
-            window.currentQuote.status              = sq.status || 'draft';
-            window.currentQuote.customer            = mappedCustomer;
-            window.currentQuote.lineItems           = frontendLineItems;
-            window.currentQuote.options             = sq.options || { pictureFrame: false, stairs: false };
-            window.currentQuote.specialInstructions = sq.specialInstructions || '';
-            window.currentQuote.internalNotes       = sq.internalNotes       || '';
-            window.currentQuote.shippingAddress     = sq.shippingAddress     || '';
-            window.currentQuote.deliveryDate        = sq.deliveryDate        || '';
+                window.currentQuote.quoteId             = sq.quoteNumber || sq.quoteId || null;
+                window.currentQuote._serverId           = sq.id || sq._serverId || null;
+                window.currentQuote.status              = sq.status || 'draft';
+                window.currentQuote.customer            = mappedCustomer;
+                window.currentQuote.lineItems           = frontendLineItems;
+                window.currentQuote.options             = sq.options || { pictureFrame: false, stairs: false };
+                window.currentQuote.specialInstructions = sq.specialInstructions || '';
+                window.currentQuote.internalNotes       = sq.internalNotes       || '';
+                window.currentQuote.shippingAddress     = sq.shippingAddress     || '';
+                window.currentQuote.deliveryDate        = sq.deliveryDate        || '';
 
-            restoreQuoteToDOM(window.currentQuote);
-            console.log('[v2.22] Loaded from URL param:', window.currentQuote.quoteId || serverId, '| status:', window.currentQuote.status);
+                restoreQuoteToDOM(window.currentQuote);
+                console.log('[v2.23] Loaded from URL param:', window.currentQuote.quoteId || serverId, '| status:', window.currentQuote.status);
 
-            try { window.history.replaceState(null, '', window.location.pathname); } catch (e) {}
+                // Notify quote-editor to lock the form — restoreQuoteToDOM
+                // bypasses the loadQuote wrapper chain, so lockForm/showBanner
+                // never fire. Dispatch a custom event so quote-editor can pick
+                // it up and lock the form after this render completes.
+                setTimeout(function () {
+                    try {
+                        window.dispatchEvent(new CustomEvent('ameridex-quote-restored', {
+                            detail: { quoteId: window.currentQuote.quoteId || serverId }
+                        }));
+                    } catch (e) { /* IE fallback: ignore */ }
+                }, 0);
+
+                try { window.history.replaceState(null, '', window.location.pathname); } catch (e) {}
+            } catch (err) {
+                console.error('[v2.23] applyQuoteToDOM threw:', err);
+            }
         }
 
         function doLoad() {
             api('GET', '/api/quotes/' + serverId)
                 .then(applyQuoteToDOM)
                 .catch(function (err) {
-                    console.warn('[v2.22] Server fetch failed for', serverId, err.message);
-                    var found = window.savedQuotes.find(function (q) {
-                        return String(q._serverId) === String(serverId) || String(q.quoteId) === String(serverId);
-                    });
-                    if (found) applyQuoteToDOM(found);
-                    else console.error('[v2.22] Quote not found:', serverId);
+                    console.warn('[v2.23] Server fetch failed for', serverId, err.message);
+                    try {
+                        var found = (window.savedQuotes || []).find(function (q) {
+                            return String(q._serverId) === String(serverId) || String(q.quoteId) === String(serverId);
+                        });
+                        if (found) applyQuoteToDOM(found);
+                        else console.error('[v2.23] Quote not found:', serverId);
+                    } catch (fallbackErr) {
+                        console.error('[v2.23] Fallback lookup threw:', fallbackErr);
+                    }
                 });
         }
 
-        // v2.22: ALWAYS wait for the login event, even if _authToken
+        // v2.23: ALWAYS wait for the login event, even if _authToken
         // already exists. tryResumeSession() is async; the token in
         // sessionStorage does NOT mean the session is hydrated yet.
         var loginTimeout;
         function onLogin() {
             window.removeEventListener('ameridex-login', onLogin);
             clearTimeout(loginTimeout);
-            console.log('[v2.22] ameridex-login received, loading quote from URL param:', serverId);
+
+            // v2.23: If portal-nav already handled this quoteId via the
+            // full loadQuote wrapper chain (which includes lockForm/showBanner),
+            // skip the duplicate load that would rebuild DOM without locking.
+            if (window._quoteFromUrlHandled) {
+                console.log('[v2.23] Skipping loadQuoteFromUrlParam — already handled by portal-nav.');
+                return;
+            }
+
+            console.log('[v2.23] ameridex-login received, loading quote from URL param:', serverId);
             doLoad();
         }
         window.addEventListener('ameridex-login', onLogin);
@@ -1086,7 +1115,7 @@
         // (e.g. expired token and user doesn't re-login)
         loginTimeout = setTimeout(function () {
             window.removeEventListener('ameridex-login', onLogin);
-            console.warn('[v2.22] Timed out waiting for ameridex-login. Quote URL param "' + serverId + '" abandoned.');
+            console.warn('[v2.23] Timed out waiting for ameridex-login. Quote URL param "' + serverId + '" abandoned.');
         }, 10000);
     }
 

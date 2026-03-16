@@ -697,9 +697,24 @@
             bootstrapCheck();
         });
 
+        // v1.4: Listen for direct restoreQuoteToDOM calls (from api.js
+        // loadQuoteFromUrlParam) that bypass the loadQuote wrapper chain.
+        // Without this, the form renders unlocked after the second render.
+        window.addEventListener('ameridex-quote-restored', function (e) {
+            var qid = (e.detail && e.detail.quoteId) || '';
+            console.log('[QuoteEditor v1.4] ameridex-quote-restored received, locking form for:', qid);
+            var q  = window.currentQuote;
+            var id = qid || (q && (q.quoteId || q.quoteNumber || q._serverId)) || 'Draft';
+            populateAddressFields(q && q.customer);
+            _quoteLoaded = true;
+            _editMode    = false;
+            lockForm();
+            showBanner(id);
+        });
+
         setTimeout(bootstrapCheck, 300);
 
-        console.log('[QuoteEditor v1.3] Initialized.');
+        console.log('[QuoteEditor v1.4] Initialized.');
     }
 
     if (document.readyState === 'loading') {
