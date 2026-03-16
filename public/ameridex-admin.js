@@ -226,14 +226,38 @@
         '.admin-inline-edit .admin-form { margin-bottom:0; }' +
         '.admin-inline-edit .admin-form-field input, .admin-inline-edit .admin-form-field select { ' +
             'background:#fff; }' +
-        '@media (max-width:768px) { ' +
-            '#admin-panel { max-width:100%; margin:0; border-radius:10px; } ' +
-            '.admin-tab { flex:none; } ' +
-            '.admin-form-row { grid-template-columns:1fr; } ' +
-            '.admin-tier-products { grid-template-columns:1fr; } ' +
+        '@media (max-width:767px) { ' +
+            '#admin-modal { padding:0.5rem !important; } ' +
+            '#admin-panel { max-width:100% !important; margin:0; border-radius:10px; max-height:95vh !important; } ' +
+            '.admin-header { padding:1rem !important; } ' +
+            '.admin-header h2 { font-size:1.05rem !important; } ' +
+            '.admin-body { padding:0.75rem !important; } ' +
+            '.admin-tab { flex:none; min-height:44px; } ' +
+            '.admin-form-row { grid-template-columns:1fr !important; } ' +
+            '.admin-tier-products { grid-template-columns:1fr !important; } ' +
             '.admin-toolbar { flex-direction:column; align-items:stretch; } ' +
-            '.admin-table { font-size:0.8rem; } ' +
-            '.admin-table th, .admin-table td { padding:0.5rem; } ' +
+            '.admin-search { width:100% !important; font-size:16px !important; } ' +
+            '.admin-table { font-size:0.78rem !important; } ' +
+            '.admin-table th, .admin-table td { padding:0.4rem 0.35rem !important; } ' +
+            '.admin-actions { flex-wrap:wrap; } ' +
+            '.admin-btn { min-height:44px !important; min-width:44px !important; padding:0.5rem 0.75rem !important; } ' +
+            '.admin-btn-sm { min-height:44px !important; min-width:44px !important; } ' +
+            '.admin-stat-row { grid-template-columns:repeat(2,1fr) !important; gap:0.5rem !important; } ' +
+            '.admin-quote-detail { padding:0.75rem !important; } ' +
+            '.admin-detail-row { flex-direction:column; gap:0.15rem; } ' +
+            '.admin-form-field input, .admin-form-field select { font-size:16px !important; } ' +
+            '.admin-status-select { font-size:16px !important; min-height:44px; } ' +
+            '.admin-form-inline { flex-direction:column; } ' +
+            '.rep-price-input { width:100% !important; font-size:16px !important; min-height:44px; } ' +
+        '} ' +
+        '@media (min-width:768px) and (max-width:1024px) { ' +
+            '#admin-panel { max-width:95vw !important; } ' +
+            '.admin-body { padding:1rem !important; } ' +
+            '.admin-btn { min-height:44px !important; } ' +
+            '.admin-btn-sm { min-height:44px !important; } ' +
+            '.admin-table { font-size:0.84rem; } ' +
+            '.admin-stat-row { grid-template-columns:repeat(3,1fr) !important; } ' +
+            '.admin-form-field input, .admin-form-field select { font-size:16px !important; } ' +
         '}';
     document.head.appendChild(style);
 
@@ -674,7 +698,7 @@
             return;
         }
 
-        var html = '<table class="admin-table"><thead><tr>' +
+        var html = '<div class="admin-table-wrap" style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table class="admin-table"><thead><tr>' +
             '<th>Code</th><th>Name</th><th>Contact</th><th>Role</th><th>Tier</th><th>Status</th><th>Actions</th>' +
             '</tr></thead><tbody>';
 
@@ -694,7 +718,7 @@
                 '</td></tr>';
         });
 
-        html += '</tbody></table>';
+        html += '</tbody></table></div>';
         container.innerHTML = html;
 
         container.querySelectorAll('[data-action]').forEach(function (btn) {
@@ -842,7 +866,7 @@
 
         if (filtered.length === 0) { container.innerHTML = '<div class="admin-empty">No quotes match your filters</div>'; return; }
 
-        var html = '<table class="admin-table"><thead><tr><th>Quote #</th><th>Dealer</th><th>Customer</th><th>Items</th><th>Total</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead><tbody>';
+        var html = '<div class="admin-table-wrap" style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table class="admin-table"><thead><tr><th>Quote #</th><th>Dealer</th><th>Customer</th><th>Items</th><th>Total</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead><tbody>';
         filtered.forEach(function (q) {
             var dateStr = ''; try { dateStr = new Date(q.updatedAt || q.createdAt).toLocaleDateString(); } catch(e) {}
             var custName = (q.customer && q.customer.name) || 'N/A';
@@ -866,7 +890,7 @@
                     '<button class="admin-btn admin-btn-danger admin-btn-sm" data-action="delete-quote" data-id="' + q.id + '">Del</button>' +
                 '</td></tr>';
         });
-        html += '</tbody></table>';
+        html += '</tbody></table></div>';
         container.innerHTML = html;
 
         container.querySelectorAll('.admin-status-select').forEach(function (sel) {
@@ -993,7 +1017,7 @@
 
         if (filtered.length === 0) { container.innerHTML = '<div class="admin-empty">No products found</div>'; return; }
 
-        var html = '<table class="admin-table"><thead><tr>' +
+        var html = '<div class="admin-table-wrap" style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table class="admin-table"><thead><tr>' +
             '<th>Product</th><th>ID</th><th>Category</th><th>Base Price</th><th>Unit</th><th>Tier Exempt</th><th>Status</th><th>Actions</th>' +
             '</tr></thead><tbody>';
 
@@ -1016,7 +1040,7 @@
                 '<tr id="prod-edit-row-' + esc(p.id) + '" style="display:none;"><td colspan="8" style="padding:0;border-bottom:none;"></td></tr>';
         });
 
-        html += '</tbody></table>';
+        html += '</tbody></table></div>';
         container.innerHTML = html;
 
         container.querySelectorAll('[data-action]').forEach(function (btn) {
@@ -1541,7 +1565,7 @@
             html += '<span class="admin-badge badge-dealer" style="font-size:0.68rem;">' + users.length + ' user' + (users.length !== 1 ? 's' : '') + '</span>';
             html += '</div>';
 
-            html += '<table class="admin-table"><thead><tr>' +
+            html += '<div class="admin-table-wrap" style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table class="admin-table"><thead><tr>' +
                 '<th>Username</th><th>Display Name</th><th>Role</th><th>Status</th><th>Email</th><th>Last Login</th><th>Actions</th>' +
                 '</tr></thead><tbody>';
 
@@ -1578,7 +1602,7 @@
                     '</td></tr>';
             });
 
-            html += '</tbody></table></div>';
+            html += '</tbody></table></div></div>';
         });
 
         container.innerHTML = html;
@@ -1890,7 +1914,7 @@
                     body.innerHTML = '<div class="admin-empty">No products available</div>';
                     return;
                 }
-                var html = '<table class="admin-table"><thead><tr>' +
+                var html = '<div class="admin-table-wrap" style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table class="admin-table"><thead><tr>' +
                     '<th>Product</th><th>Category</th><th>Base Price</th><th>Rep Price</th><th>Custom?</th>' +
                     '</tr></thead><tbody>';
                 data.products.forEach(function (p) {
@@ -1907,7 +1931,7 @@
                         '<td>' + (p.hasCustomPrice ? '<span style="color:#a21caf;font-weight:600;font-size:0.78rem;">CUSTOM</span>' : '<span style="color:#9ca3af;font-size:0.78rem;">base</span>') + '</td>' +
                         '</tr>';
                 });
-                html += '</tbody></table>';
+                html += '</tbody></table></div>';
                 body.innerHTML = html;
 
                 // Highlight changes from base
