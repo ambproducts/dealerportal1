@@ -118,3 +118,52 @@ header.app-header img { max-width: 160px; height: auto; }
 .btn-xs { padding: 0.3rem 0.65rem; font-size: 0.75rem; }
 .btn-success { background-color: var(--success); color: #ffffff; }
 .btn-success:hover { background-color: #15803d; }
+
+/* ── Mobile (< 768px) ─────────────────────────────────────── */
+@media (max-width: 767px) {
+    .page-shell { padding: 1rem 0.75rem 2rem; }
+
+    header.app-header {
+        padding: 1rem 1rem;
+        flex-direction: column;
+        text-align: center;
+        border-radius: 0 0 10px 10px;
+    }
+    .header-brand { flex-direction: column; gap: 0.5rem; }
+    header.app-header img { max-width: 120px; }
+    .header-titles h1 { font-size: 1.15rem; }
+    .header-actions { flex-wrap: wrap; justify-content: center; gap: 0.4rem; }
+    .header-dealer-info { width: 100%; text-align: center; margin-right: 0; margin-bottom: 0.25rem; }
+    .header-btn {
+        padding: 0.6rem 1rem;
+        font-size: 0.78rem;
+        min-height: 44px;
+        min-width: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .card { padding: 1.25rem 1rem; border-radius: 10px; }
+    .card-header { flex-direction: column; align-items: flex-start; }
+
+    .btn { min-height: 44px; min-width: 44px; }
+    .btn-sm { padding: 0.6rem 1rem; min-height: 44px; }
+    .btn-xs { padding: 0.45rem 0.75rem; font-size: 0.78rem; min-height: 44px; }
+
+    /* iOS zoom prevention */
+    input, select, textarea { font-size: 16px !important; }
+}
+
+/* ── Tablet (768px – 1024px) ──────────────────────────────── */
+@media (min-width: 768px) and (max-width: 1024px) {
+    .page-shell { padding: 1.25rem 1rem 2rem; }
+
+    header.app-header { padding: 1.25rem 1.25rem; }
+    header.app-header img { max-width: 140px; }
+
+    .header-btn { min-height: 44px; }
+    .btn { min-height: 44px; }
+    .btn-sm { min-height: 44px; }
+    .btn-xs { min-height: 44px; padding: 0.4rem 0.7rem; }
+}
