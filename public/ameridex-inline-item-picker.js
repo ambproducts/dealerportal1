@@ -696,12 +696,20 @@
     function syncPickerLockState() {
         var locked = isFormLocked();
         document.querySelectorAll('.aip-picker').forEach(function (p) {
-            p.classList.toggle('aip-disabled', locked);
+            var hasDisabled = p.classList.contains('aip-disabled');
+            if (hasDisabled !== locked) {
+                p.classList.toggle('aip-disabled', locked);
+            }
             var trigger = p.querySelector('.aip-trigger');
-            if (trigger) trigger.disabled = locked;
+            if (trigger && trigger.disabled !== locked) {
+                trigger.disabled = locked;
+            }
             if (locked) closePicker(p);
         });
     }
+
+    // Expose globally so quote-editor lockForm/unlockForm can call it directly
+    window.syncPickerLockState = syncPickerLockState;
 
     function observeLockChanges() {
         var form = document.getElementById('order-form');
@@ -709,7 +717,23 @@
             setTimeout(observeLockChanges, 400);
             return;
         }
+        var callCount = 0;
+        var resetTimer = null;
         var observer = new MutationObserver(function (mutations) {
+            // Skip entirely while lockForm/unlockForm is running batch mutations
+            if (window._lockFormInProgress) return;
+
+            callCount++;
+            // Safety: disconnect if observer fires more than 10 times in rapid succession
+            if (callCount > 10) {
+                console.warn('[InlineItemPicker] Lock observer exceeded 10 rapid fires, disconnecting.');
+                observer.disconnect();
+                return;
+            }
+            // Reset counter after 200ms of quiet
+            clearTimeout(resetTimer);
+            resetTimer = setTimeout(function () { callCount = 0; }, 200);
+
             var relevant = mutations.some(function (m) {
                 return m.attributeName === 'data-qe-locked' ||
                        m.attributeName === 'disabled';

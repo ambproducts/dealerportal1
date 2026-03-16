@@ -220,7 +220,10 @@
             allEls.forEach(function (el) {
                 var text = el.textContent || '';
                 if (BAD_PRICE_REGEX.test(text)) {
-                    el.textContent = 'Price: ' + priceText;
+                    var desired = 'Price: ' + priceText;
+                    if (el.textContent !== desired) {
+                        el.textContent = desired;
+                    }
                     el.style.color = '#2563eb';
                 }
             });
@@ -233,7 +236,10 @@
             if (BAD_PRICE_REGEX.test(subText) || subText === '$' || subText.trim() === '') {
                 var sub = (typeof getItemSubtotal === 'function') ? getItemSubtotal(item) : 0;
                 var subNum = parseFloat(sub) || 0;
-                subCell.textContent = '$' + subNum.toFixed(2);
+                var desiredSub = '$' + subNum.toFixed(2);
+                if (subCell.textContent !== desiredSub) {
+                    subCell.textContent = desiredSub;
+                }
             }
         }
     }
@@ -257,11 +263,11 @@
             allEls.forEach(function (el) {
                 var text = el.textContent || '';
                 if (BAD_PRICE_REGEX.test(text)) {
-                    // Try to figure out which item this belongs to by context
-                    // For mobile, just scan all items and fix any matching text
                     el.style.color = '#2563eb';
-                    // Replace the bad text generically
-                    el.textContent = text.replace(/\$undefined|\.?undefined/gi, '$0.00').replace(/\$NaN|\.?NaN/gi, '$0.00').replace(/\$null|\.?null/gi, '$0.00');
+                    var fixed = text.replace(/\$undefined|\.?undefined/gi, '$0.00').replace(/\$NaN|\.?NaN/gi, '$0.00').replace(/\$null|\.?null/gi, '$0.00');
+                    if (el.textContent !== fixed) {
+                        el.textContent = fixed;
+                    }
                 }
             });
         }
@@ -275,7 +281,10 @@
                 currentQuote.lineItems.forEach(function (li) {
                     total += (typeof getItemSubtotal === 'function') ? getItemSubtotal(li) : 0;
                 });
-                grandEl.textContent = '$' + (parseFloat(total) || 0).toFixed(2);
+                var desiredTotal = '$' + (parseFloat(total) || 0).toFixed(2);
+                if (grandEl.textContent !== desiredTotal) {
+                    grandEl.textContent = desiredTotal;
+                }
             }
         }
     }
@@ -284,16 +293,23 @@
     // ----------------------------------------------------------
     // 4. Patch renderDesktop() to heal + scan
     // ----------------------------------------------------------
+    var _isRendering = false;
+
     var _prevRenderDesktop = window.renderDesktop;
     window.renderDesktop = function () {
-        healUndefinedPrices();
+        _isRendering = true;
+        try {
+            healUndefinedPrices();
 
-        if (typeof _prevRenderDesktop === 'function') {
-            _prevRenderDesktop();
+            if (typeof _prevRenderDesktop === 'function') {
+                _prevRenderDesktop();
+            }
+
+            // Post-render scan
+            scanAndFixAllPrices();
+        } finally {
+            _isRendering = false;
         }
-
-        // Post-render scan
-        scanAndFixAllPrices();
     };
 
 
@@ -302,13 +318,18 @@
     // ----------------------------------------------------------
     var _prevRenderMobile = window.renderMobile;
     window.renderMobile = function () {
-        healUndefinedPrices();
+        _isRendering = true;
+        try {
+            healUndefinedPrices();
 
-        if (typeof _prevRenderMobile === 'function') {
-            _prevRenderMobile();
+            if (typeof _prevRenderMobile === 'function') {
+                _prevRenderMobile();
+            }
+
+            scanAndFixAllPrices();
+        } finally {
+            _isRendering = false;
         }
-
-        scanAndFixAllPrices();
     };
 
 
@@ -365,14 +386,19 @@
             clearInterval(_checkInterval);
             backupPrices();
             if (typeof currentQuote !== 'undefined' && currentQuote.lineItems && currentQuote.lineItems.length > 0) {
-                if (typeof render === 'function') {
-                    render();
-                }
-                if (typeof updateTotalAndFasteners === 'function') {
-                    updateTotalAndFasteners();
+                // Skip render if form is locked — the locked state is authoritative
+                if (document.querySelector('[data-qe-locked]')) {
+                    console.log('[PricingFix] Skipping render — form is locked.');
+                } else {
+                    if (typeof render === 'function') {
+                        render();
+                    }
+                    if (typeof updateTotalAndFasteners === 'function') {
+                        updateTotalAndFasteners();
+                    }
                 }
             }
-            console.log('[PricingFix] Tier pricing loaded, prices backed up and re-rendered.');
+            console.log('[PricingFix] Tier pricing loaded, prices backed up.');
         }
     }, 500);
 
@@ -389,6 +415,7 @@
     // ----------------------------------------------------------
     var _scanDebounce = null;
     function debouncedScan() {
+        if (_isRendering) return; // Already scanning synchronously in render wrapper
         if (_scanDebounce) clearTimeout(_scanDebounce);
         _scanDebounce = setTimeout(function () {
             scanAndFixAllPrices();

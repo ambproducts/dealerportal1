@@ -139,22 +139,37 @@
 
     function lockForm() {
         _editMode = false;
+        window._lockFormInProgress = true;
+        var count = 0;
         document.querySelectorAll(FORM_SELECTOR).forEach(function (el) {
             if (ALWAYS_ENABLED_IDS.indexOf(el.id) === -1) {
                 el.disabled = true;
                 el.setAttribute('data-qe-locked', '1');
+                count++;
             }
         });
+        window._lockFormInProgress = false;
+        // Single sync call instead of hundreds of observer callbacks
+        if (typeof window.syncPickerLockState === 'function') {
+            window.syncPickerLockState();
+        }
+        console.log('[QuoteEditor v1.6] lockForm() locked', count, 'elements.');
         setStatusText('');
         updateBannerButtons();
     }
 
     function unlockForm() {
         _editMode = true;
+        window._lockFormInProgress = true;
         document.querySelectorAll('[data-qe-locked]').forEach(function (el) {
             el.disabled = false;
             el.removeAttribute('data-qe-locked');
         });
+        window._lockFormInProgress = false;
+        // Single sync call instead of hundreds of observer callbacks
+        if (typeof window.syncPickerLockState === 'function') {
+            window.syncPickerLockState();
+        }
         updateBannerButtons();
         setStatusText('Edit mode active');
     }
