@@ -1,7 +1,12 @@
 // ============================================================
-// AmeriDex Dealer Portal - Quote Editor v1.6
-// Date: 2026-03-15
+// AmeriDex Dealer Portal - Quote Editor v1.7
+// Date: 2026-03-16
 // ============================================================
+// v1.7 CHANGES (2026-03-16):
+//   FEAT: "Done Editing" on an existing quote now shows a Save-As
+//   dialog letting the user choose between "Update Existing Quote"
+//   and "Save as New Quote". New quotes save without the dialog.
+//
 // v1.6 CHANGES (2026-03-15):
 //   FIX: patchLoadQuote() now sets window._quoteEditorReady = true
 //   immediately before dispatching 'ameridex-quoteeditor-ready'.
@@ -114,7 +119,7 @@
             if (cityEl)  cust.city    = cityEl.value.trim();
             if (stateEl) cust.state   = stateEl.value.trim();
         };
-        console.log('[QuoteEditor v1.6] syncQuoteFromDOM patched.');
+        console.log('[QuoteEditor v1.7] syncQuoteFromDOM patched.');
     }
 
 
@@ -153,7 +158,7 @@
         if (typeof window.syncPickerLockState === 'function') {
             window.syncPickerLockState();
         }
-        console.log('[QuoteEditor v1.6] lockForm() locked', count, 'elements.');
+        console.log('[QuoteEditor v1.7] lockForm() locked', count, 'elements.');
         setStatusText('');
         updateBannerButtons();
     }
@@ -329,7 +334,34 @@
             '  padding:8px 20px; background:#059669; border:none;',
             '  border-radius:6px; color:#fff; font-size:0.85rem; font-weight:700; cursor:pointer;',
             '}',
-            '#qe-approve-revision-confirm:disabled { opacity:.5; cursor:not-allowed; }'
+            '#qe-approve-revision-confirm:disabled { opacity:.5; cursor:not-allowed; }',
+            '#qe-saveas-modal {',
+            '  display:none; position:fixed; inset:0; z-index:9999;',
+            '  background:rgba(0,0,0,0.65); align-items:center; justify-content:center;',
+            '}',
+            '#qe-saveas-modal.active { display:flex; }',
+            '#qe-saveas-card {',
+            '  background:#1e2540; border:1px solid #2d3250; border-radius:12px;',
+            '  padding:28px 32px; max-width:480px; width:90%;',
+            '  box-shadow:0 8px 40px rgba(0,0,0,0.5);',
+            '}',
+            '#qe-saveas-card h3 { margin:0 0 6px; font-size:1.1rem; color:#f1f5f9; }',
+            '#qe-saveas-card p  { margin:0 0 20px; font-size:0.85rem; color:#94a3b8; line-height:1.55; }',
+            '#qe-saveas-actions { display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap; }',
+            '#qe-saveas-cancel {',
+            '  padding:8px 18px; background:transparent; border:1px solid #4b5563;',
+            '  border-radius:6px; color:#94a3b8; font-size:0.85rem; cursor:pointer;',
+            '}',
+            '#qe-saveas-update {',
+            '  padding:8px 20px; background:#2563eb; border:none;',
+            '  border-radius:6px; color:#fff; font-size:0.85rem; font-weight:700; cursor:pointer;',
+            '}',
+            '#qe-saveas-update:hover { opacity:.85; }',
+            '#qe-saveas-new {',
+            '  padding:8px 20px; background:#10b981; border:none;',
+            '  border-radius:6px; color:#fff; font-size:0.85rem; font-weight:700; cursor:pointer;',
+            '}',
+            '#qe-saveas-new:hover { opacity:.85; }'
         ].join('\n');
         document.head.appendChild(s);
     }
@@ -356,9 +388,15 @@
 
         document.getElementById('edit-quote-btn').addEventListener('click', function () {
             if (_editMode) {
-                if (typeof window.syncQuoteFromDOM === 'function') window.syncQuoteFromDOM();
-                _performSave();
-                lockForm();
+                if (isExistingQuote()) {
+                    // Existing quote: ask user whether to update or save-as-new
+                    openSaveAsModal();
+                } else {
+                    // Brand-new quote: just save normally
+                    if (typeof window.syncQuoteFromDOM === 'function') window.syncQuoteFromDOM();
+                    _performSave();
+                    lockForm();
+                }
             } else {
                 if (!canEdit()) return;
                 unlockForm();
@@ -386,6 +424,7 @@
 
         injectRevisionModal();
         injectApproveRevisionModal();
+        injectSaveAsModal();
     }
 
     function showBanner(quoteId) {
@@ -512,7 +551,7 @@
             updateBannerButtons();
             setStatusText('Revision requested', 'saved');
             setTimeout(function () { setStatusText(''); }, 3000);
-            console.log('[QuoteEditor v1.6] Revision requested for', q.quoteId);
+            console.log('[QuoteEditor v1.7] Revision requested for', q.quoteId);
         })
         .catch(function (err) {
             submitBtn.disabled    = false;
@@ -599,7 +638,7 @@
             updateBannerButtons();
             setStatusText('Re-submitted to AmeriDex', 'saved');
             setTimeout(function () { setStatusText(''); }, 4000);
-            console.log('[QuoteEditor v1.6] Revision approved and re-submitted:', q.quoteId || q._serverId);
+            console.log('[QuoteEditor v1.7] Revision approved and re-submitted:', q.quoteId || q._serverId);
         })
         .catch(function (err) {
             confirmBtn.disabled    = false;
@@ -607,6 +646,82 @@
             errEl.textContent      = err.message || 'Failed to approve revision. Please try again.';
             errEl.style.display    = 'block';
         });
+    }
+
+
+    // ----------------------------------------------------------
+    // SAVE-AS MODAL (v1.7)
+    // ----------------------------------------------------------
+    function injectSaveAsModal() {
+        if (document.getElementById('qe-saveas-modal')) return;
+        var modal = document.createElement('div');
+        modal.id = 'qe-saveas-modal';
+        modal.innerHTML =
+            '<div id="qe-saveas-card">' +
+            '  <h3>Save Quote</h3>' +
+            '  <p>You edited an existing quote. Would you like to update the original or save a new copy?</p>' +
+            '  <div id="qe-saveas-actions">' +
+            '    <button id="qe-saveas-cancel" type="button">Cancel</button>' +
+            '    <button id="qe-saveas-new"    type="button">Save as New Quote</button>' +
+            '    <button id="qe-saveas-update"  type="button">Update Existing Quote</button>' +
+            '  </div>' +
+            '</div>';
+        document.body.appendChild(modal);
+        document.getElementById('qe-saveas-cancel').addEventListener('click', closeSaveAsModal);
+        modal.addEventListener('click', function (e) { if (e.target === modal) closeSaveAsModal(); });
+        document.getElementById('qe-saveas-update').addEventListener('click', handleSaveAsUpdate);
+        document.getElementById('qe-saveas-new').addEventListener('click', handleSaveAsNew);
+    }
+
+    function openSaveAsModal() {
+        var modal = document.getElementById('qe-saveas-modal');
+        if (!modal) return;
+        modal.classList.add('active');
+    }
+
+    function closeSaveAsModal() {
+        var modal = document.getElementById('qe-saveas-modal');
+        if (modal) modal.classList.remove('active');
+    }
+
+    /** Update the existing quote (normal save path). */
+    function handleSaveAsUpdate() {
+        closeSaveAsModal();
+        if (typeof window.syncQuoteFromDOM === 'function') window.syncQuoteFromDOM();
+        _performSave();
+        lockForm();
+    }
+
+    /** Save as a brand-new quote: strip server identity so the next
+     *  save issues a POST instead of a PUT. */
+    function handleSaveAsNew() {
+        closeSaveAsModal();
+        if (typeof window.syncQuoteFromDOM === 'function') window.syncQuoteFromDOM();
+
+        var q = window.currentQuote;
+        // Strip the server identity so syncQuoteToServer will POST (create)
+        delete q._serverId;
+        // Generate a fresh quoteId / quoteNumber
+        q.quoteId = (typeof window.generateQuoteNumber === 'function')
+            ? window.generateQuoteNumber()
+            : null;  // saveCurrentQuote will generate one if null
+        q.createdAt = new Date().toISOString();
+        q.status    = 'draft';
+
+        _performSave();
+        // Update the banner label to reflect the new quote id
+        var id = (q && (q.quoteId || q.quoteNumber || q._serverId)) || 'Draft';
+        showBanner(id);
+        updateStatusBadge();
+        lockForm();
+        console.log('[QuoteEditor v1.7] Saved as NEW quote:', id);
+    }
+
+    /** Returns true when the current quote was loaded from an existing
+     *  server-side or previously-saved quote (i.e. it has a _serverId). */
+    function isExistingQuote() {
+        var q = window.currentQuote;
+        return q && q._serverId;
     }
 
 
@@ -635,10 +750,10 @@
             setTimeout(function () {
                 if (_editMode) setStatusText('Edit mode active');
             }, 2500);
-            console.log('[QuoteEditor v1.6] Saved:', window.currentQuote && window.currentQuote.quoteId);
+            console.log('[QuoteEditor v1.7] Saved:', window.currentQuote && window.currentQuote.quoteId);
         } catch (e) {
             setStatusText('Save failed', '');
-            console.error('[QuoteEditor v1.6] Save error:', e);
+            console.error('[QuoteEditor v1.7] Save error:', e);
         }
     }
 
@@ -647,7 +762,7 @@
         if (!form) { setTimeout(attachAutosaveListeners, 400); return; }
         form.addEventListener('input',  function () { if (_editMode) doSave(false); });
         form.addEventListener('change', function () { if (_editMode) doSave(false); });
-        console.log('[QuoteEditor v1.6] Autosave listeners attached.');
+        console.log('[QuoteEditor v1.7] Autosave listeners attached.');
     }
 
 
@@ -676,18 +791,18 @@
                 _editMode    = false;
                 lockForm();
                 showBanner(id);
-                console.log('[QuoteEditor v1.6] Quote locked read-only:', id, '| status:', q && q.status);
+                console.log('[QuoteEditor v1.7] Quote locked read-only:', id, '| status:', q && q.status);
             }, 0);
         };
 
-        console.log('[QuoteEditor v1.6] loadQuote patched.');
+        console.log('[QuoteEditor v1.7] loadQuote patched.');
 
         // v1.6: Set the global flag BEFORE dispatching the event so
         // portal-nav's 800ms guard can read it reliably.
         window._quoteEditorReady = true;
 
         window.dispatchEvent(new CustomEvent('ameridex-quoteeditor-ready'));
-        console.log('[QuoteEditor v1.6] Dispatched ameridex-quoteeditor-ready.');
+        console.log('[QuoteEditor v1.7] Dispatched ameridex-quoteeditor-ready.');
     }
 
 
@@ -706,7 +821,7 @@
             _editMode    = false;
             lockForm();
             showBanner(id);
-            console.log('[QuoteEditor v1.6] Bootstrap: locked pre-loaded quote', id);
+            console.log('[QuoteEditor v1.7] Bootstrap: locked pre-loaded quote', id);
         }
     }
 
@@ -727,7 +842,7 @@
         // Listen for direct restoreQuoteToDOM calls (api.js bypass path)
         window.addEventListener('ameridex-quote-restored', function (e) {
             var qid = (e.detail && e.detail.quoteId) || '';
-            console.log('[QuoteEditor v1.6] ameridex-quote-restored received, locking form for:', qid);
+            console.log('[QuoteEditor v1.7] ameridex-quote-restored received, locking form for:', qid);
             var q  = window.currentQuote;
             var id = qid || (q && (q.quoteId || q.quoteNumber || q._serverId)) || 'Draft';
             populateAddressFields(q && q.customer);
@@ -739,7 +854,7 @@
 
         setTimeout(bootstrapCheck, 300);
 
-        console.log('[QuoteEditor v1.6] Initialized.');
+        console.log('[QuoteEditor v1.7] Initialized.');
     }
 
     if (document.readyState === 'loading') {
