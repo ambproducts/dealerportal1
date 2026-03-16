@@ -1,40 +1,35 @@
 /**
  * ameridex-portal-nav.js
- * 
- * Runtime patch for dealer-portal.html (Step 3a)
- * 
- * This script is loaded via a <script> tag added to dealer-portal.html.
- * It modifies the page at runtime without editing the massive HTML file inline.
  *
- * Features:
- *   1. Injects a "My Quotes" navigation link into the header
- *   2. Trims the saved-quotes list to show only 5 most recent
- *   3. Appends a "View All Quotes" link below the trimmed list
- *   4. Reads URL parameters to support deep-linking from quotes-customers.html:
- *      - ?quoteId=XXX      -> loads that quote (matches by quoteNumber or server _id)
- *      - ?newQuote=1        -> resets form for a fresh quote
- *      - ?custName=...      -> pre-fills customer name
- *      - ?custEmail=...     -> pre-fills customer email
- *      - ?custCompany=...   -> pre-fills customer company
- *      - ?custPhone=...     -> pre-fills customer phone
- *      - ?tab=customers     -> opens the customers panel
+ * Runtime patch for dealer-portal.html
+ *
+ * v1.4 Changes (2026-03-15):
+ *   - CRITICAL FIX: 800ms fallback was calling the RAW (unpatched) window.loadQuote
+ *     because ameridex-quote-editor.js had not yet loaded and installed its locking
+ *     wrapper. This caused the form to render fully unlocked at ~800ms, then
+ *     quote-editor would load, run bootstrapCheck(), find a pre-loaded quote, try
+ *     to lock an already-rendered form, and freeze the portal.
+ *   - FIX: 800ms fallback now checks window._quoteEditorReady before calling
+ *     tryLoadQuoteFromParam(). If the editor is not ready yet, the fallback ABORTS
+ *     and defers entirely to the 'ameridex-quoteeditor-ready' event path.
+ *   - FIX: 'ameridex-quoteeditor-ready' listener now calls tryLoadQuoteFromParam()
+ *     with the guarantee that loadQuote is patched. If savedQuotes is not yet
+ *     populated at that moment (extremely rare edge case), the ameridex-login
+ *     retry path (Attempt 2) handles it.
+ *   - REMOVED: The blind 800ms fallback that could race with the editor load.
+ *     Replaced with a guarded version that only fires if window._quoteEditorReady
+ *     is already true (meaning quote-editor loaded unusually fast AND the
+ *     ameridex-quoteeditor-ready event was somehow missed).
+ *   - KEPT: ameridex-login retry (Attempt 2) and 6-second URL cleanup safety net.
  *
  * v1.3 Changes (2026-03-15):
  *   - FIX: Race condition where portal-nav called window.loadQuote BEFORE
  *     ameridex-quote-editor.js had patched it with the locking wrapper.
- *     This caused the form to render fully unlocked and then visually crash
- *     when quote-editor's bootstrapCheck() tried to lock it 300ms later.
- *   - FIX: Attempt 1 now listens for 'ameridex-quoteeditor-ready' (dispatched
- *     by quote-editor v1.5 after patchLoadQuote installs the wrapper) instead
- *     of relying on a blind 200ms setTimeout. This guarantees the patched
- *     loadQuote is in place before it is called, regardless of load speed.
- *   - FIX: 800ms fallback setTimeout kept as a safety net for edge cases where
- *     the editor-ready event was missed.
- *   - All prior retry logic (ameridex-login, 6s safety timeout) retained.
+ *   - FIX: Replaced blind 200ms setTimeout with 'ameridex-quoteeditor-ready' event.
+ *   - FIX: 800ms fallback setTimeout kept as safety net.
  *
  * v1.2 Changes (2026-02-28):
- *   - FIX: quoteId handler now searches savedQuotes by BOTH quoteId (quote number)
- *     AND _serverId (MongoDB ID) so links from quotes-customers.html work correctly.
+ *   - FIX: quoteId handler now searches savedQuotes by quoteId AND _serverId.
  *   - FIX: cleanUrlParams() moved inside success path only.
  *   - ADD: ameridex-login retry.
  *   - ADD: 6-second safety timeout cleans URL if all retries fail.
@@ -52,8 +47,6 @@
   function injectNavLink() {
     var actions = document.querySelector('.header-actions');
     if (!actions) return;
-
-    // Don't inject twice
     if (actions.querySelector('[data-nav-quotes]')) return;
 
     var link = document.createElement('a');
@@ -63,12 +56,10 @@
     link.textContent = 'My Quotes';
     link.style.textDecoration = 'none';
 
-    // Insert before the Settings button (second-to-last child)
     var settingsBtn = document.getElementById('settings-btn');
     if (settingsBtn) {
       actions.insertBefore(link, settingsBtn);
     } else {
-      // Fallback: insert before last child (logout)
       actions.insertBefore(link, actions.lastElementChild);
     }
   }
@@ -84,22 +75,15 @@
 
     var items = list.querySelectorAll('.saved-quote-item');
     if (items.length <= MAX_VISIBLE) {
-      // Remove "View All" link if list is short enough
       var existingLink = list.parentElement.querySelector('[data-view-all-quotes]');
       if (existingLink) existingLink.remove();
       return;
     }
 
-    // Hide items beyond MAX_VISIBLE
     for (var i = 0; i < items.length; i++) {
-      if (i >= MAX_VISIBLE) {
-        items[i].style.display = 'none';
-      } else {
-        items[i].style.display = '';
-      }
+      items[i].style.display = (i >= MAX_VISIBLE) ? 'none' : '';
     }
 
-    // Add or update "View All" link
     var parent = list.parentElement;
     var viewAllLink = parent.querySelector('[data-view-all-quotes]');
     if (!viewAllLink) {
@@ -120,29 +104,21 @@
         'transition: background 0.15s'
       ].join(';');
       viewAllLink.textContent = 'View All Quotes (' + items.length + ')';
+      viewAllLink.addEventListener('mouseenter', function () { viewAllLink.style.backgroundColor = '#eff6ff'; });
+      viewAllLink.addEventListener('mouseleave', function () { viewAllLink.style.backgroundColor = ''; });
 
-      viewAllLink.addEventListener('mouseenter', function () {
-        viewAllLink.style.backgroundColor = '#eff6ff';
-      });
-      viewAllLink.addEventListener('mouseleave', function () {
-        viewAllLink.style.backgroundColor = '';
-      });
-
-      // Insert after the saved-quotes-list container
       if (list.nextSibling) {
         parent.insertBefore(viewAllLink, list.nextSibling);
       } else {
         parent.appendChild(viewAllLink);
       }
     } else {
-      // Update count
       viewAllLink.textContent = 'View All Quotes (' + items.length + ')';
     }
   }
 
   // --------------------------------------------------
   // 3. Observe #saved-quotes-list for mutations
-  //    (renderSavedQuotes() replaces innerHTML each call)
   // --------------------------------------------------
   function observeSavedQuotesList() {
     var list = document.getElementById('saved-quotes-list');
@@ -151,10 +127,7 @@
     var observer = new MutationObserver(function () {
       trimSavedQuotesList();
     });
-
     observer.observe(list, { childList: true, subtree: true });
-
-    // Initial trim in case the list is already rendered
     trimSavedQuotesList();
   }
 
@@ -164,15 +137,11 @@
   function handleUrlParams() {
     var params = new URLSearchParams(window.location.search);
 
-    // ?tab=customers -> open customers panel
     if (params.get('tab') === 'customers') {
       var showCustomers = window.showCustomersView;
-      if (typeof showCustomers === 'function') {
-        setTimeout(showCustomers, 100);
-      }
+      if (typeof showCustomers === 'function') setTimeout(showCustomers, 100);
     }
 
-    // ?newQuote=1 -> reset form
     if (params.get('newQuote') === '1') {
       var resetFn = window.resetFormOnly;
       if (typeof resetFn === 'function') {
@@ -185,104 +154,95 @@
       return;
     }
 
-    // ?quoteId=XXX -> load that quote
-    // Supports both quoteNumber (e.g. Q260228-EGJI) and server _id (MongoDB ObjectId)
     var quoteId = params.get('quoteId');
     if (quoteId) {
       var _quoteLoadDone = false;
 
+      // Finds and loads the quote by quoteId/serverId/serverQuoteNumber.
+      // Returns true if the quote was found and loadQuote was called.
       function tryLoadQuoteFromParam() {
         if (_quoteLoadDone) return true;
         if (typeof window.savedQuotes === 'undefined' || !window.savedQuotes || !window.savedQuotes.length) {
           return false;
         }
 
-        // Try 1: match by quoteId (frontend quote number like Q260228-EGJI)
-        var idx = window.savedQuotes.findIndex(function (q) {
-          return q.quoteId === quoteId;
-        });
-
-        // Try 2: match by _serverId (MongoDB ObjectId)
-        if (idx < 0) {
-          idx = window.savedQuotes.findIndex(function (q) {
-            return q._serverId === quoteId;
-          });
-        }
-
-        // Try 3: match by _serverQuoteNumber (in case quoteId is the server quote number)
-        if (idx < 0) {
-          idx = window.savedQuotes.findIndex(function (q) {
-            return q._serverQuoteNumber === quoteId;
-          });
-        }
+        var idx = window.savedQuotes.findIndex(function (q) { return q.quoteId === quoteId; });
+        if (idx < 0) idx = window.savedQuotes.findIndex(function (q) { return q._serverId === quoteId; });
+        if (idx < 0) idx = window.savedQuotes.findIndex(function (q) { return q._serverQuoteNumber === quoteId; });
 
         if (idx >= 0 && typeof window.loadQuote === 'function') {
           _quoteLoadDone = true;
           window._quoteFromUrlHandled = true;
-          console.log('[portal-nav v1.3] Loading quote at savedQuotes[' + idx + '] for param: ' + quoteId);
+          console.log('[portal-nav v1.4] Loading quote at savedQuotes[' + idx + '] for param: ' + quoteId);
           try {
             window.loadQuote(idx);
           } catch (err) {
-            console.error('[portal-nav v1.3] loadQuote threw:', err);
+            console.error('[portal-nav v1.4] loadQuote threw:', err);
             if (typeof window.resetFormOnly === 'function') window.resetFormOnly();
           }
           cleanUrlParams();
           var custSection = document.getElementById('customer');
-          if (custSection) {
-            custSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          }
+          if (custSection) custSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
           return true;
         }
 
         return false;
       }
 
-      // --------------------------------------------------
-      // Attempt 1 (PRIMARY): Wait for quote-editor v1.5 to
-      // signal that loadQuote has been patched with the
-      // locking wrapper before we call it. This eliminates
-      // the race condition that caused the form crash.
-      // --------------------------------------------------
+      // -------------------------------------------------------
+      // PRIMARY PATH: Wait for quote-editor to signal its locking
+      // wrapper is installed, THEN call loadQuote.
+      // This is the only path that should normally fire.
+      // -------------------------------------------------------
       window.addEventListener('ameridex-quoteeditor-ready', function _onEditorReady() {
         window.removeEventListener('ameridex-quoteeditor-ready', _onEditorReady);
-        console.log('[portal-nav v1.3] Editor ready, attempting quote load for: ' + quoteId);
+        console.log('[portal-nav v1.4] Editor ready — attempting load for: ' + quoteId);
         if (!tryLoadQuoteFromParam()) {
-          console.log('[portal-nav v1.3] Editor ready but savedQuotes not yet populated, waiting for login...');
+          // savedQuotes not populated yet — the login retry below will handle it.
+          console.log('[portal-nav v1.4] savedQuotes not ready at editor-ready time, deferring to login retry.');
         }
       });
 
-      // --------------------------------------------------
-      // Attempt 1b (FALLBACK): 800ms timeout in case the
-      // editor-ready event was dispatched before this
-      // listener was registered (script ordering edge case).
-      // --------------------------------------------------
+      // -------------------------------------------------------
+      // FALLBACK A: 800ms timeout — ONLY fires if quote-editor
+      // already signalled ready (window._quoteEditorReady === true)
+      // but the event was missed due to script ordering.
+      // If quote-editor is NOT ready yet, this is a no-op and
+      // the primary path will handle it when the event fires.
+      // This prevents calling raw unpatched loadQuote.
+      // -------------------------------------------------------
       setTimeout(function () {
-        if (!_quoteLoadDone) {
-          console.log('[portal-nav v1.3] 800ms fallback attempt for: ' + quoteId);
-          tryLoadQuoteFromParam();
+        if (_quoteLoadDone) return;
+        if (!window._quoteEditorReady) {
+          // quote-editor hasn't loaded yet — primary path will handle it.
+          console.log('[portal-nav v1.4] 800ms: editor not ready yet, skipping fallback. Primary path will handle it.');
+          return;
         }
+        // Editor IS ready but event was missed — safe to call patched loadQuote.
+        console.log('[portal-nav v1.4] 800ms fallback (editor was ready, event missed) for: ' + quoteId);
+        tryLoadQuoteFromParam();
       }, 800);
 
-      // --------------------------------------------------
-      // Attempt 2: retry when ameridex-login fires
-      // (savedQuotes guaranteed loaded by then)
-      // --------------------------------------------------
+      // -------------------------------------------------------
+      // FALLBACK B: retry on ameridex-login
+      // Handles the edge case where savedQuotes was empty when
+      // ameridex-quoteeditor-ready fired (e.g. slow server).
+      // -------------------------------------------------------
       window.addEventListener('ameridex-login', function _onLoginNav() {
         window.removeEventListener('ameridex-login', _onLoginNav);
         setTimeout(function () {
           if (!tryLoadQuoteFromParam()) {
-            console.warn('[portal-nav v1.3] Attempt 2 (post-login) also failed for: ' + quoteId);
+            console.warn('[portal-nav v1.4] Attempt 2 (post-login) failed for: ' + quoteId);
           }
         }, 100);
       });
 
-      // --------------------------------------------------
-      // Safety net: clean URL after 6 seconds even if we
-      // could not find the quote.
-      // --------------------------------------------------
+      // -------------------------------------------------------
+      // SAFETY NET: clean URL after 6s if nothing worked.
+      // -------------------------------------------------------
       setTimeout(function () {
         if (!_quoteLoadDone) {
-          console.warn('[portal-nav v1.3] Could not load quote for param: ' + quoteId + ' after all retries. Cleaning URL.');
+          console.warn('[portal-nav v1.4] All attempts failed for: ' + quoteId + '. Cleaning URL.');
           cleanUrlParams();
         }
       }, 6000);
@@ -290,11 +250,8 @@
       return;
     }
 
-    // Pre-fill customer fields if present (without newQuote)
     if (params.get('custName') || params.get('custEmail')) {
-      setTimeout(function () {
-        prefillCustomerFromParams(params);
-      }, 150);
+      setTimeout(function () { prefillCustomerFromParams(params); }, 150);
       cleanUrlParams();
     }
   }
@@ -306,33 +263,25 @@
       'custCompany': 'cust-company',
       'custPhone': 'cust-phone'
     };
-
     var filled = false;
     Object.keys(fields).forEach(function (paramKey) {
       var val = params.get(paramKey);
       if (val) {
         var el = document.getElementById(fields[paramKey]);
-        if (el) {
-          el.value = decodeURIComponent(val);
-          filled = true;
-        }
+        if (el) { el.value = decodeURIComponent(val); filled = true; }
       }
     });
-
-    if (filled && typeof window.updateCustomerProgress === 'function') {
-      window.updateCustomerProgress();
-    }
+    if (filled && typeof window.updateCustomerProgress === 'function') window.updateCustomerProgress();
   }
 
   function cleanUrlParams() {
     if (window.history && window.history.replaceState) {
-      var clean = window.location.pathname;
-      window.history.replaceState({}, document.title, clean);
+      window.history.replaceState({}, document.title, window.location.pathname);
     }
   }
 
   // --------------------------------------------------
-  // Bootstrap: run after DOM is ready
+  // Bootstrap
   // --------------------------------------------------
   function init() {
     injectNavLink();
@@ -343,8 +292,6 @@
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
-    // DOM already ready (script loaded at end of body)
-    // Use setTimeout to ensure all inline scripts have run first
     setTimeout(init, 50);
   }
 
