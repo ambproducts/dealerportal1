@@ -23,6 +23,30 @@ function requireAuth(req, res, next) {
         return res.status(403).json({ error: 'Account temporarily locked' });
     }
 
+    // Salesrep: cross-dealer role, uses X-Dealer-Context header
+    if (user.role === 'salesrep') {
+        req.user = user;
+        const dealerContext = req.headers['x-dealer-context'];
+        if (dealerContext && dealerContext !== 'DIRECT') {
+            // Validate the dealer is in their assigned list
+            const assignedDealers = user.assignedDealers || [];
+            if (!assignedDealers.includes(dealerContext.toUpperCase())) {
+                return res.status(403).json({ error: 'Not authorized for dealer ' + dealerContext });
+            }
+            const dealers = readJSON(DEALERS_FILE);
+            const dealer = dealers.find(d => d.dealerCode === dealerContext.toUpperCase() && d.isActive);
+            if (!dealer) {
+                return res.status(403).json({ error: 'Dealer account not found or inactive' });
+            }
+            req.dealer = dealer;
+        } else {
+            // Direct sale mode or no context — no dealer
+            req.dealer = null;
+        }
+        return next();
+    }
+
+    // Non-salesrep: standard dealer lookup
     const dealers = readJSON(DEALERS_FILE);
     const dealer = dealers.find(d => d.dealerCode === user.dealerCode && d.isActive);
     if (!dealer) {

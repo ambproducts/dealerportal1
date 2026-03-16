@@ -12,7 +12,8 @@ router.get('/', requireRole('admin', 'gm'), (req, res) => {
     let filtered = users;
 
     if (req.user.role === 'gm') {
-        filtered = users.filter(u => u.dealerCode === req.user.dealerCode);
+        // GM sees their dealer's users but NOT salesrep users
+        filtered = users.filter(u => u.dealerCode === req.user.dealerCode && u.role !== 'salesrep');
     }
 
     const safe = filtered.map(u => {
@@ -40,7 +41,7 @@ router.post('/', requireRole('admin', 'gm'), (req, res) => {
         : req.user.dealerCode;
 
     const allowedRoles = req.user.role === 'admin'
-        ? ['admin', 'gm', 'frontdesk']
+        ? ['admin', 'gm', 'frontdesk', 'salesrep']
         : ['frontdesk'];
 
     const effectiveRole = allowedRoles.includes(role) ? role : 'frontdesk';
@@ -59,15 +60,41 @@ router.post('/', requireRole('admin', 'gm'), (req, res) => {
     // to onboard their own frontdesk staff.
     const canActivateImmediately = (req.user.role === 'admin' || req.user.role === 'gm');
 
+    // Salesrep-specific: validate assignedDealers and use SALESREP placeholder
+    let finalDealerCode = effectiveDealerCode;
+    let assignedDealers = [];
+    let repPricing = {};
+    if (effectiveRole === 'salesrep') {
+        finalDealerCode = 'SALESREP';
+        assignedDealers = req.body.assignedDealers || [];
+        // Validate assigned dealers exist
+        if (assignedDealers.length > 0) {
+            const { readJSON: rj, DEALERS_FILE: df } = require('../lib/helpers');
+            const allDealers = rj(df);
+            const invalid = assignedDealers.filter(code => !allDealers.find(d => d.dealerCode === code.toUpperCase()));
+            if (invalid.length > 0) {
+                return res.status(400).json({ error: 'Invalid dealer codes: ' + invalid.join(', ') });
+            }
+            assignedDealers = assignedDealers.map(c => c.toUpperCase());
+        }
+        // Global username uniqueness for salesrep
+        const dupGlobal = users.find(u => u.username.toLowerCase() === username.toLowerCase() && u.role === 'salesrep');
+        if (dupGlobal) {
+            return res.status(409).json({ error: 'Salesrep username already exists' });
+        }
+    }
+
     const newUser = {
         id: generateId(),
         username: username.toLowerCase(),
         passwordHash: hashPassword(password),
-        dealerCode: effectiveDealerCode,
+        dealerCode: finalDealerCode,
         role: effectiveRole,
         displayName: displayName || username,
         email: email || '',
         phone: phone || '',
+        assignedDealers: assignedDealers,
+        repPricing: repPricing,
         status: canActivateImmediately ? 'active' : 'pending',
         createdBy: req.user.username,
         approvedBy: canActivateImmediately ? req.user.username : null,
@@ -106,6 +133,16 @@ router.put('/:id', requireRole('admin', 'gm'), (req, res) => {
     allowed.forEach(field => {
         if (req.body[field] !== undefined) users[idx][field] = req.body[field];
     });
+
+    // Admin can update salesrep-specific fields
+    if (req.user.role === 'admin' && users[idx].role === 'salesrep') {
+        if (req.body.assignedDealers !== undefined) {
+            users[idx].assignedDealers = (req.body.assignedDealers || []).map(c => c.toUpperCase());
+        }
+        if (req.body.repPricing !== undefined) {
+            users[idx].repPricing = req.body.repPricing;
+        }
+    }
     users[idx].updatedAt = new Date().toISOString();
     writeJSON(USERS_FILE, users);
 
@@ -158,6 +195,9 @@ router.post('/:id/disable', requireRole('admin', 'gm'), (req, res) => {
 
     // GM scope checks
     if (req.user.role === 'gm') {
+        if (users[idx].role === 'salesrep') {
+            return res.status(403).json({ error: 'GM cannot manage salesrep accounts' });
+        }
         if (users[idx].dealerCode !== req.user.dealerCode) {
             return res.status(403).json({ error: 'Cannot modify users from another dealer' });
         }
@@ -185,6 +225,9 @@ router.post('/:id/enable', requireRole('admin', 'gm'), (req, res) => {
 
     // GM scope checks
     if (req.user.role === 'gm') {
+        if (users[idx].role === 'salesrep') {
+            return res.status(403).json({ error: 'GM cannot manage salesrep accounts' });
+        }
         if (users[idx].dealerCode !== req.user.dealerCode) {
             return res.status(403).json({ error: 'Cannot modify users from another dealer' });
         }
@@ -212,6 +255,9 @@ router.post('/:id/reset-password', requireRole('admin', 'gm'), (req, res) => {
 
     // GM scope checks
     if (req.user.role === 'gm') {
+        if (users[idx].role === 'salesrep') {
+            return res.status(403).json({ error: 'GM cannot manage salesrep accounts' });
+        }
         if (users[idx].dealerCode !== req.user.dealerCode) {
             return res.status(403).json({ error: 'Cannot modify users from another dealer' });
         }

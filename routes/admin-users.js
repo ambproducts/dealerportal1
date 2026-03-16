@@ -32,7 +32,7 @@
 
 const express = require('express');
 const router = express.Router();
-const { readJSON, writeJSON, USERS_FILE, generateId, sanitizeInput } = require('../lib/helpers');
+const { readJSON, writeJSON, USERS_FILE, DEALERS_FILE, generateId, sanitizeInput } = require('../lib/helpers');
 const { hashPassword } = require('../lib/password');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 
@@ -126,8 +126,8 @@ router.post('/purge-expired', (req, res) => {
 router.post('/', (req, res) => {
     const { dealerCode, username, displayName, role, password, email, phone } = req.body;
 
-    if (!dealerCode || !username || !password) {
-        return res.status(400).json({ error: 'dealerCode, username, and password are required' });
+    if (!username || !password) {
+        return res.status(400).json({ error: 'username and password are required' });
     }
     if (username.length < 3) {
         return res.status(400).json({ error: 'Username must be at least 3 characters' });
@@ -136,23 +136,49 @@ router.post('/', (req, res) => {
         return res.status(400).json({ error: 'Password must be at least 8 characters' });
     }
 
-    const validRoles = ['admin', 'gm', 'frontdesk', 'dealer', 'rep'];
+    const validRoles = ['admin', 'gm', 'frontdesk', 'salesrep'];
     if (role && !validRoles.includes(role)) {
         return res.status(400).json({ error: 'Invalid role. Must be one of: ' + validRoles.join(', ') });
     }
 
+    const effectiveRole = role || 'frontdesk';
     const users = readJSON(USERS_FILE);
     const normalizedUsername = username.toLowerCase();
-    const normalizedCode = dealerCode.toUpperCase();
 
-    // Check against non-deleted users only
-    const exists = users.find(u =>
-        !u.isDeleted &&
-        u.username.toLowerCase() === normalizedUsername &&
-        u.dealerCode === normalizedCode
-    );
-    if (exists) {
-        return res.status(409).json({ error: 'Username "' + username + '" already exists for dealer ' + normalizedCode });
+    // Salesrep: dealerCode is optional (use SALESREP placeholder)
+    const isSalesrep = effectiveRole === 'salesrep';
+    const normalizedCode = isSalesrep ? 'SALESREP' : (dealerCode ? dealerCode.toUpperCase() : '');
+
+    if (!isSalesrep && !dealerCode) {
+        return res.status(400).json({ error: 'dealerCode is required for non-salesrep roles' });
+    }
+
+    // Uniqueness check
+    if (isSalesrep) {
+        // Salesrep usernames must be globally unique
+        const exists = users.find(u => !u.isDeleted && u.username.toLowerCase() === normalizedUsername && u.role === 'salesrep');
+        if (exists) return res.status(409).json({ error: 'Salesrep username "' + username + '" already exists' });
+    } else {
+        // Check against non-deleted users only
+        const exists = users.find(u =>
+            !u.isDeleted &&
+            u.username.toLowerCase() === normalizedUsername &&
+            u.dealerCode === normalizedCode
+        );
+        if (exists) {
+            return res.status(409).json({ error: 'Username "' + username + '" already exists for dealer ' + normalizedCode });
+        }
+    }
+
+    // Salesrep: validate assignedDealers
+    let assignedDealers = [];
+    if (isSalesrep && req.body.assignedDealers) {
+        const allDealers = readJSON(DEALERS_FILE);
+        assignedDealers = (req.body.assignedDealers || []).map(c => c.toUpperCase());
+        const invalid = assignedDealers.filter(code => !allDealers.find(d => d.dealerCode === code));
+        if (invalid.length > 0) {
+            return res.status(400).json({ error: 'Invalid dealer codes: ' + invalid.join(', ') });
+        }
     }
 
     const now = new Date().toISOString();
@@ -161,9 +187,11 @@ router.post('/', (req, res) => {
         dealerCode: normalizedCode,
         username: sanitizeInput(normalizedUsername),
         displayName: sanitizeInput(displayName || username),
-        role: role || 'frontdesk',
+        role: effectiveRole,
         email: sanitizeInput(email || ''),
         phone: phone || '',
+        assignedDealers: assignedDealers,
+        repPricing: {},
         status: 'active',
         passwordHash: hashPassword(password),
         createdBy: req.user.username,
@@ -226,11 +254,27 @@ router.put('/:id', (req, res) => {
     }
 
     if (role !== undefined) {
-        const validRoles = ['admin', 'gm', 'frontdesk', 'dealer', 'rep'];
+        const validRoles = ['admin', 'gm', 'frontdesk', 'salesrep'];
         if (!validRoles.includes(role)) {
             return res.status(400).json({ error: 'Invalid role. Must be one of: ' + validRoles.join(', ') });
         }
         users[idx].role = role;
+    }
+
+    // Salesrep-specific fields
+    if (users[idx].role === 'salesrep') {
+        if (req.body.assignedDealers !== undefined) {
+            const allDealers = readJSON(DEALERS_FILE);
+            const newDealers = (req.body.assignedDealers || []).map(c => c.toUpperCase());
+            const invalid = newDealers.filter(code => !allDealers.find(d => d.dealerCode === code));
+            if (invalid.length > 0) {
+                return res.status(400).json({ error: 'Invalid dealer codes: ' + invalid.join(', ') });
+            }
+            users[idx].assignedDealers = newDealers;
+        }
+        if (req.body.repPricing !== undefined) {
+            users[idx].repPricing = req.body.repPricing;
+        }
     }
 
     users[idx].updatedAt = new Date().toISOString();

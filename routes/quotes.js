@@ -33,7 +33,7 @@ const crypto = require('crypto');
 const {
     readJSON, writeJSON,
     QUOTES_FILE, CUSTOMERS_FILE, PRODUCTS_FILE, DEALERS_FILE,
-    generateId, getDealerPrice, recalcCustomerStats,
+    generateId, getDealerPrice, getRepPrice, recalcCustomerStats,
     sanitizeInput
 } = require('../lib/helpers');
 const { requireAuth, requireRole } = require('../middleware/auth');
@@ -62,6 +62,45 @@ function calcItemTotal(item) {
 function recalcQuoteTotal(quote) {
     quote.totalAmount = quote.lineItems.reduce((sum, i) => sum + (i.total || 0), 0);
     quote.totalAmount = Math.round(quote.totalAmount * 100) / 100;
+}
+
+// Build line item using salesrep's direct-sale pricing
+function buildLineItemForRep(item, user) {
+    const basePrice = parseFloat(item.basePrice || item.price) || 0;
+    const productId = item.productId || '';
+
+    let repPrice;
+    if (!productId || productId === 'custom') {
+        repPrice = basePrice;
+    } else {
+        repPrice = getRepPrice(user, productId);
+    }
+    repPrice = Math.round(repPrice * 100) / 100;
+
+    const qty          = parseInt(item.quantity) || 1;
+    const length       = item.length      != null ? item.length      : null;
+    const customLength = item.customLength != null ? item.customLength : null;
+    const existingOverride = item.priceOverride || null;
+    let effectivePrice = repPrice;
+    if (existingOverride && existingOverride.status === 'approved') {
+        effectivePrice = existingOverride.requestedPrice;
+    }
+
+    return {
+        productId:     productId,
+        productName:   item.productName || '',
+        quantity:      qty,
+        length:        length,
+        customLength:  customLength,
+        basePrice:     basePrice,
+        tierPrice:     repPrice,
+        price:         effectivePrice,
+        total:         calcItemTotal({ price: effectivePrice, quantity: qty, length, customLength }),
+        color:         item.color  || '',
+        color2:        item.color2 || '',
+        type:          item.type   || '',
+        priceOverride: existingOverride
+    };
 }
 
 function buildLineItem(item, dealer) {
@@ -115,6 +154,9 @@ function findQuoteByParam(quotes, paramId, user) {
     if (user.role === 'admin') {
         return quotes.find(q => matchesParam(q, paramId) && !q.deleted) || null;
     }
+    if (user.role === 'salesrep') {
+        return quotes.find(q => matchesParam(q, paramId) && q.salesRepId === user.id && !q.deleted) || null;
+    }
     return quotes.find(q =>
         matchesParam(q, paramId) && q.dealerCode === user.dealerCode && !q.deleted
     ) || null;
@@ -123,6 +165,9 @@ function findQuoteByParam(quotes, paramId, user) {
 function findQuoteIndexByParam(quotes, paramId, user) {
     if (user.role === 'admin') {
         return quotes.findIndex(q => matchesParam(q, paramId) && !q.deleted);
+    }
+    if (user.role === 'salesrep') {
+        return quotes.findIndex(q => matchesParam(q, paramId) && q.salesRepId === user.id && !q.deleted);
     }
     return quotes.findIndex(q =>
         matchesParam(q, paramId) && q.dealerCode === user.dealerCode && !q.deleted
@@ -318,13 +363,17 @@ async function notifyPendingActionViaFormspree(quote, actionType, requestedBy, n
 // =============================================================
 // GET /api/quotes/pending-overrides (kept for back-compat)
 // =============================================================
-router.get('/pending-overrides', requireRole('admin', 'gm'), (req, res) => {
+router.get('/pending-overrides', requireRole('admin', 'gm', 'salesrep'), (req, res) => {
     const quotes  = readJSON(QUOTES_FILE);
     const results = [];
 
     quotes.forEach(q => {
         if (q.deleted) return;
         if (req.user.role === 'gm' && q.dealerCode !== req.user.dealerCode) return;
+        // GM should not see salesrep pending overrides (admin only)
+        if (req.user.role === 'gm' && q.createdByRole === 'salesrep') return;
+        // Salesrep only sees their own pending overrides
+        if (req.user.role === 'salesrep' && q.salesRepId !== req.user.id) return;
 
         (q.lineItems || []).forEach((item, idx) => {
             if (item.priceOverride && item.priceOverride.status === 'pending') {
@@ -360,13 +409,17 @@ router.get('/pending-overrides', requireRole('admin', 'gm'), (req, res) => {
 // Response: { count, items: [...] }
 // Each item has kind: 'action' | 'override'
 // =============================================================
-router.get('/pending-actions', requireRole('admin', 'gm'), (req, res) => {
+router.get('/pending-actions', requireRole('admin', 'gm', 'salesrep'), (req, res) => {
     const quotes = readJSON(QUOTES_FILE);
     const items  = [];
 
     quotes.forEach(q => {
         if (q.deleted) return;
         if (req.user.role === 'gm' && q.dealerCode !== req.user.dealerCode) return;
+        // GM should not see salesrep pending actions (admin only)
+        if (req.user.role === 'gm' && q.createdByRole === 'salesrep') return;
+        // Salesrep only sees their own pending actions
+        if (req.user.role === 'salesrep' && q.salesRepId !== req.user.id) return;
 
         // 1. Pending quote-level actions (delete / revision requests)
         if (q.pendingAction && q.pendingAction.type) {
@@ -558,6 +611,15 @@ router.get('/', (req, res) => {
         mine = quotes.filter(q => !q.deleted);
     } else if (req.user.role === 'admin' && scopeDealerCode) {
         mine = quotes.filter(q => q.dealerCode === scopeDealerCode && !q.deleted);
+    } else if (req.user.role === 'salesrep') {
+        // Salesrep sees all their own quotes across all dealers + direct
+        mine = quotes.filter(q => q.salesRepId === req.user.id && !q.deleted);
+    } else if (req.user.role === 'gm') {
+        // GM sees their dealer's quotes but NOT salesrep-created quotes
+        mine = quotes.filter(q => q.dealerCode === req.user.dealerCode && !q.deleted && q.createdByRole !== 'salesrep');
+    } else if (req.user.role === 'frontdesk') {
+        // Frontdesk sees their dealer's quotes but NOT salesrep-created quotes
+        mine = quotes.filter(q => q.dealerCode === req.user.dealerCode && !q.deleted && q.createdByRole !== 'salesrep');
     } else {
         mine = quotes.filter(q => q.dealerCode === req.user.dealerCode && !q.deleted);
     }
@@ -646,9 +708,23 @@ router.post('/', (req, res) => {
     } = req.body;
     const dealer = req.dealer;
 
-    const items       = (lineItems || []).map(item => buildLineItem(item, dealer));
+    // Salesrep: determine if dealer-attributed or direct sale
+    const isSalesrep = req.user.role === 'salesrep';
+    const isDirectSale = isSalesrep && !dealer;
+    const effectiveDealerCode = isSalesrep
+        ? (dealer ? dealer.dealerCode : 'DIRECT')
+        : req.user.dealerCode;
+
+    // Build line items with appropriate pricing
+    const items = (lineItems || []).map(item => {
+        if (isDirectSale) {
+            // Direct sale: use rep pricing
+            return buildLineItemForRep(item, req.user);
+        }
+        return buildLineItem(item, dealer);
+    });
     const totalAmount = items.reduce((sum, i) => sum + i.total, 0);
-    const upsertedCustomer = upsertCustomer(customer, req.user.dealerCode, null);
+    const upsertedCustomer = upsertCustomer(customer, effectiveDealerCode, null);
 
     const customerSnapshot = {
         customerId: upsertedCustomer.id      || null,
@@ -665,9 +741,11 @@ router.post('/', (req, res) => {
     const newQuote = {
         id:                  generateId(),
         quoteNumber:         generateQuoteNumber(),
-        dealerCode:          req.user.dealerCode,
+        dealerCode:          effectiveDealerCode,
         createdBy:           req.user.username,
         createdByRole:       req.user.role,
+        salesRepId:          isSalesrep ? req.user.id : null,
+        salesRepUsername:     isSalesrep ? req.user.username : null,
         customer:            customerSnapshot,
         lineItems:           items,
         notes:               sanitizeInput(notes || ''),
@@ -676,7 +754,7 @@ router.post('/', (req, res) => {
         internalNotes:       sanitizeInput(internalNotes       || ''),
         shippingAddress:     sanitizeInput(shippingAddress     || ''),
         deliveryDate:        deliveryDate        || '',
-        pricingModel:        'per-dealer',
+        pricingModel:        isDirectSale ? 'per-rep' : 'per-dealer',
         totalAmount:         Math.round(totalAmount * 100) / 100,
         hasPendingOverrides: false,
         pendingAction:       null,

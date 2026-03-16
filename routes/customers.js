@@ -34,13 +34,28 @@ router.get('/', (req, res) => {
     let filtered;
 
     // Non-admin users: only see customers whose dealers[] includes their dealerCode
-    if (userRole !== 'admin') {
+    if (userRole === 'admin') {
+        // Admin: see all customers across all dealers
+        filtered = customers;
+    } else if (userRole === 'salesrep') {
+        // Salesrep: see customers across all assigned dealers + DIRECT
+        const assignedDealers = req.user.assignedDealers || [];
+        const allCodes = assignedDealers.concat('DIRECT');
+        if (dealerCode && dealerCode !== 'SALESREP') {
+            // If working under a specific dealer context, filter to that dealer
+            filtered = customers.filter(c =>
+                c.dealers && c.dealers.includes(dealerCode)
+            );
+        } else {
+            // No specific context: show all accessible customers
+            filtered = customers.filter(c =>
+                c.dealers && c.dealers.some(d => allCodes.includes(d))
+            );
+        }
+    } else {
         filtered = customers.filter(c =>
             c.dealers && c.dealers.includes(dealerCode)
         );
-    } else {
-        // Admin: see all customers across all dealers
-        filtered = customers;
     }
 
     // --- SEARCH ---
@@ -162,13 +177,26 @@ router.get('/search', (req, res) => {
     let searchPool;
 
     // Non-admin users: only search within their dealer's customers
-    if (userRole !== 'admin') {
+    if (userRole === 'admin') {
+        // Admin: search across all customers
+        searchPool = customers;
+    } else if (userRole === 'salesrep') {
+        // Salesrep: search across all assigned dealers + DIRECT
+        const assignedDealers = req.user.assignedDealers || [];
+        const allCodes = assignedDealers.concat('DIRECT');
+        if (dealerCode && dealerCode !== 'SALESREP') {
+            searchPool = customers.filter(c =>
+                c.dealers && c.dealers.includes(dealerCode)
+            );
+        } else {
+            searchPool = customers.filter(c =>
+                c.dealers && c.dealers.some(d => allCodes.includes(d))
+            );
+        }
+    } else {
         searchPool = customers.filter(c =>
             c.dealers && c.dealers.includes(dealerCode)
         );
-    } else {
-        // Admin: search across all customers
-        searchPool = customers;
     }
 
     const results = searchPool
@@ -207,7 +235,10 @@ router.post('/', (req, res) => {
     }
 
     const customers = readJSON(CUSTOMERS_FILE);
-    const dealerCode = req.user.dealerCode;
+    // Salesrep: use dealer context or DIRECT
+    const dealerCode = (req.user.role === 'salesrep')
+        ? (req.dealer ? req.dealer.dealerCode : 'DIRECT')
+        : req.user.dealerCode;
     const sanitizedName = sanitizeInput(name);
     const sanitizedCompany = sanitizeInput(company);
     const sanitizedPhone = sanitizeInput(phone);
@@ -284,7 +315,12 @@ router.put('/:id', (req, res) => {
     }
 
     // Dealer-scope authorization: non-admin users can only update customers belonging to their dealer
-    if (req.user.role !== 'admin' && (!customers[idx].dealers || !customers[idx].dealers.includes(req.user.dealerCode))) {
+    if (req.user.role === 'salesrep') {
+        // Salesrep can update customers in their assigned dealers or DIRECT
+        const assignedDealers = (req.user.assignedDealers || []).concat('DIRECT');
+        const hasAccess = customers[idx].dealers && customers[idx].dealers.some(d => assignedDealers.includes(d));
+        if (!hasAccess) return res.status(403).json({ error: 'Access denied' });
+    } else if (req.user.role !== 'admin' && (!customers[idx].dealers || !customers[idx].dealers.includes(req.user.dealerCode))) {
         return res.status(403).json({ error: 'Access denied' });
     }
 
