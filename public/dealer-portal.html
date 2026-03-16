@@ -424,7 +424,7 @@
     .modal-close { position: absolute; top: 10px; right: 12px; font-size: 1.5rem; cursor: pointer; color: #6b7280; background: none; border: none; padding: 0.5rem; }
     .modal-close:hover { color: #111827; }
 
-    .review-modal-content { text-align: left; max-width: 600px; }
+    .review-modal-content { text-align: left; max-width: 600px; width: min(600px, 95vw); }
     .review-section { margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border-subtle); }
     .review-section h3 { margin: 0 0 0.75rem 0; font-size: 1rem; color: var(--primary); }
     .review-item { display: flex; justify-content: space-between; margin-bottom: 0.5rem; font-size: 0.9rem; }
@@ -468,18 +468,49 @@
         #line-items th:nth-child(6), #line-items td:nth-child(6) { width: 6%; }
     }
 
-    @media (max-width: 768px) {
+    @media (max-width: 767px) {
         header.app-header { border-radius: 0 0 10px 10px; padding: 1.25rem; flex-direction: column; text-align: center; }
         .header-brand { flex-direction: column; }
-        .card { padding: 1.35rem; }
+        .card { padding: 1.25rem 1rem; }
         #desktop-table-container { display: none; }
         #mobile-items-container { display: block; }
-        .btn { padding: 0.7rem 1.35rem; font-size: 0.9rem; }
+        .btn { padding: 0.7rem 1.35rem; font-size: 0.9rem; min-height: 44px; }
+        .btn-sm { min-height: 44px; }
+        .btn-xs { min-height: 44px; padding: 0.45rem 0.75rem; }
         .actions-row { flex-direction: column; align-items: stretch; }
         .actions-row .btn { width: 100%; }
         .quote-mode-toggle { flex-direction: column; }
         .saved-quotes-header { flex-direction: column; align-items: stretch; }
         .saved-quotes-search { max-width: none; }
+        .review-modal-content { padding: 1.25rem !important; }
+        .review-item { flex-direction: column; gap: 0.15rem; }
+        .print-preview-modal { width: 100% !important; max-width: 100% !important; }
+        .print-preview-content { padding: 1rem; max-height: 50vh; }
+        .print-preview-actions { flex-direction: column; }
+        .print-preview-actions .btn { width: 100%; }
+        .settings-modal-content { max-width: 100%; }
+        .total-bar { padding: 0.75rem 1rem; }
+        .total-value { font-size: 1.15rem; }
+        .dropdown-content { min-width: 180px; }
+        .dropdown-content button { min-height: 44px; }
+        /* Polygon tool responsive */
+        #polygon-tool-section { padding: 0.75rem !important; }
+        #polygon-scale { width: 70px !important; min-height: 44px; font-size: 16px !important; }
+        #polygon-snap-toggle { width: 20px !important; height: 20px !important; }
+        #polygon-canvas { height: auto !important; min-height: 200px; }
+        /* iOS zoom prevention */
+        input, select, textarea { font-size: 16px !important; }
+    }
+
+    @media (min-width: 768px) and (max-width: 1024px) {
+        .card { padding: 1.5rem 1.25rem; }
+        .btn { min-height: 44px; }
+        .btn-sm { min-height: 44px; }
+        .btn-xs { min-height: 44px; padding: 0.4rem 0.7rem; }
+        .review-modal-content { width: min(600px, 90vw); }
+        .print-preview-modal { width: 90%; }
+        .dropdown-content button { min-height: 44px; }
+        input, select, textarea { font-size: 16px !important; }
     }
 
             /* CUSTOMERS SECTION STYLES - ADD THIS TO THE <style> TAG IN THE <head> */
@@ -678,31 +709,44 @@
             color: var(--primary-dark);
         }
         
-        /* Responsive adjustments */
-        @media (max-width: 768px) {
+        /* Responsive — Mobile */
+        @media (max-width: 767px) {
             .customer-item {
                 grid-template-columns: 1fr;
                 gap: 0.75rem;
+                padding: 1rem;
             }
-            
             .customer-actions {
                 flex-direction: row;
                 align-items: center;
                 width: 100%;
             }
-            
             .customer-actions .btn {
                 flex: 1;
+                min-height: 44px;
             }
-            
             .customers-header {
                 flex-direction: column;
                 align-items: stretch;
             }
-            
             .customers-search {
                 max-width: none;
             }
+            .customers-search input {
+                font-size: 16px !important;
+                min-height: 44px;
+            }
+            .view-quotes-toggle {
+                min-height: 44px;
+                padding: 0.5rem 0.75rem;
+            }
+        }
+        /* Responsive — Tablet */
+        @media (min-width: 768px) and (max-width: 1024px) {
+            .customer-item { padding: 1rem 1.25rem; }
+            .customer-actions .btn { min-height: 44px; }
+            .customers-search input { font-size: 16px !important; }
+            .view-quotes-toggle { min-height: 44px; }
         }
 
 /* Collapsible cards */
