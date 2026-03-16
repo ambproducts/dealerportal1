@@ -23,7 +23,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // Helmet — security headers (CSP disabled until inline scripts are audited)
 app.use(helmet({
-    contentSecurityPolicy: false
+    contentSecurityPolicy: false,
     frameguard: false
 }));
 
