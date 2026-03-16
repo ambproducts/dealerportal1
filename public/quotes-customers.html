@@ -463,8 +463,8 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* Responsive */
-    @media (max-width: 768px) {
+    /* Responsive — Mobile */
+    @media (max-width: 767px) {
         header.app-header {
             border-radius: 0 0 10px 10px;
             padding: 1.25rem;
@@ -476,6 +476,10 @@
             flex-direction: column;
         }
         .filter-bar .search-input {
+            min-width: unset;
+            width: 100%;
+        }
+        .filter-bar .filter-select {
             min-width: unset;
             width: 100%;
         }
@@ -498,14 +502,38 @@
             margin-right: -0.5rem;
             border-radius: 10px;
             max-height: 450px;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
         }
+        .page-tab { min-height: 44px; font-size: 0.88rem; }
+        .filter-clear { min-height: 44px; }
+        .pagination-btn { min-height: 44px; min-width: 44px; }
+        input, select { font-size: 16px !important; }
+    }
+
+    /* Responsive — Tablet */
+    @media (min-width: 768px) and (max-width: 1024px) {
+        .stat-cards {
+            grid-template-columns: repeat(3, 1fr);
+        }
+        .filter-bar .filter-select {
+            min-width: 110px;
+        }
+        .data-table-wrap {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        .page-tab { min-height: 44px; }
+        .pagination-btn { min-height: 44px; min-width: 44px; }
     }
 </style>
 <script>
     window.AMERIDEX_API_BASE = 'https://ameridex-dealer-portal.onrender.com';
 </script>
 <link rel="stylesheet" href="ameridex-toast.css">
+<link rel="stylesheet" href="ameridex-mobile.css">
 <script src="ameridex-toast.js"></script>
+<script src="ameridex-mobile-header-fix.js"></script>
 </head>
 <body>
 
