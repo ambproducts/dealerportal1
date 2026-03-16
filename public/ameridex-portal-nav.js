@@ -19,14 +19,28 @@
  *      - ?custPhone=...     -> pre-fills customer phone
  *      - ?tab=customers     -> opens the customers panel
  *
- * v1.1 Changes (2026-02-27):
+ * v1.3 Changes (2026-03-15):
+ *   - FIX: Race condition where portal-nav called window.loadQuote BEFORE
+ *     ameridex-quote-editor.js had patched it with the locking wrapper.
+ *     This caused the form to render fully unlocked and then visually crash
+ *     when quote-editor's bootstrapCheck() tried to lock it 300ms later.
+ *   - FIX: Attempt 1 now listens for 'ameridex-quoteeditor-ready' (dispatched
+ *     by quote-editor v1.5 after patchLoadQuote installs the wrapper) instead
+ *     of relying on a blind 200ms setTimeout. This guarantees the patched
+ *     loadQuote is in place before it is called, regardless of load speed.
+ *   - FIX: 800ms fallback setTimeout kept as a safety net for edge cases where
+ *     the editor-ready event was missed.
+ *   - All prior retry logic (ameridex-login, 6s safety timeout) retained.
+ *
+ * v1.2 Changes (2026-02-28):
  *   - FIX: quoteId handler now searches savedQuotes by BOTH quoteId (quote number)
  *     AND _serverId (MongoDB ID) so links from quotes-customers.html work correctly.
- *   - FIX: cleanUrlParams() moved inside success path only. Previously it wiped
- *     the URL immediately before the setTimeout fired, preventing all fallbacks.
- *   - ADD: ameridex-login retry. If savedQuotes hasn't loaded by the initial 200ms
- *     attempt, retries once the login event fires (guarantees savedQuotes populated).
+ *   - FIX: cleanUrlParams() moved inside success path only.
+ *   - ADD: ameridex-login retry.
  *   - ADD: 6-second safety timeout cleans URL if all retries fail.
+ *
+ * v1.1 Changes (2026-02-27):
+ *   - Initial retry and login-event logic.
  */
 
 (function portalNavPatch() {
@@ -154,7 +168,6 @@
     if (params.get('tab') === 'customers') {
       var showCustomers = window.showCustomersView;
       if (typeof showCustomers === 'function') {
-        // Small delay to ensure DOM is ready
         setTimeout(showCustomers, 100);
       }
     }
@@ -168,7 +181,6 @@
           prefillCustomerFromParams(params);
         }, 150);
       }
-      // Clean URL
       cleanUrlParams();
       return;
     }
@@ -207,11 +219,12 @@
         if (idx >= 0 && typeof window.loadQuote === 'function') {
           _quoteLoadDone = true;
           window._quoteFromUrlHandled = true;
-          console.log('[portal-nav v1.2] Loading quote at savedQuotes[' + idx + '] for param: ' + quoteId);
+          console.log('[portal-nav v1.3] Loading quote at savedQuotes[' + idx + '] for param: ' + quoteId);
           try {
             window.loadQuote(idx);
           } catch (err) {
-            console.error('[portal-nav v1.2] loadQuote threw:', err);
+            console.error('[portal-nav v1.3] loadQuote threw:', err);
+            if (typeof window.resetFormOnly === 'function') window.resetFormOnly();
           }
           cleanUrlParams();
           var custSection = document.getElementById('customer');
@@ -224,27 +237,52 @@
         return false;
       }
 
-      // Attempt 1: try after short delay (savedQuotes may already be populated)
-      setTimeout(function () {
+      // --------------------------------------------------
+      // Attempt 1 (PRIMARY): Wait for quote-editor v1.5 to
+      // signal that loadQuote has been patched with the
+      // locking wrapper before we call it. This eliminates
+      // the race condition that caused the form crash.
+      // --------------------------------------------------
+      window.addEventListener('ameridex-quoteeditor-ready', function _onEditorReady() {
+        window.removeEventListener('ameridex-quoteeditor-ready', _onEditorReady);
+        console.log('[portal-nav v1.3] Editor ready, attempting quote load for: ' + quoteId);
         if (!tryLoadQuoteFromParam()) {
-          console.log('[portal-nav v1.1] Attempt 1 missed, waiting for ameridex-login...');
+          console.log('[portal-nav v1.3] Editor ready but savedQuotes not yet populated, waiting for login...');
         }
-      }, 200);
+      });
 
-      // Attempt 2: retry when ameridex-login fires (savedQuotes guaranteed loaded by then)
+      // --------------------------------------------------
+      // Attempt 1b (FALLBACK): 800ms timeout in case the
+      // editor-ready event was dispatched before this
+      // listener was registered (script ordering edge case).
+      // --------------------------------------------------
+      setTimeout(function () {
+        if (!_quoteLoadDone) {
+          console.log('[portal-nav v1.3] 800ms fallback attempt for: ' + quoteId);
+          tryLoadQuoteFromParam();
+        }
+      }, 800);
+
+      // --------------------------------------------------
+      // Attempt 2: retry when ameridex-login fires
+      // (savedQuotes guaranteed loaded by then)
+      // --------------------------------------------------
       window.addEventListener('ameridex-login', function _onLoginNav() {
         window.removeEventListener('ameridex-login', _onLoginNav);
         setTimeout(function () {
           if (!tryLoadQuoteFromParam()) {
-            console.warn('[portal-nav v1.1] Attempt 2 (post-login) also failed for: ' + quoteId);
+            console.warn('[portal-nav v1.3] Attempt 2 (post-login) also failed for: ' + quoteId);
           }
         }, 100);
       });
 
-      // Safety net: clean URL after 6 seconds even if we could not find the quote
+      // --------------------------------------------------
+      // Safety net: clean URL after 6 seconds even if we
+      // could not find the quote.
+      // --------------------------------------------------
       setTimeout(function () {
         if (!_quoteLoadDone) {
-          console.warn('[portal-nav v1.1] Could not load quote for param: ' + quoteId + ' after all retries. Cleaning URL.');
+          console.warn('[portal-nav v1.3] Could not load quote for param: ' + quoteId + ' after all retries. Cleaning URL.');
           cleanUrlParams();
         }
       }, 6000);
