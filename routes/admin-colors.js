@@ -54,20 +54,16 @@ router.post('/', (req, res) => {
     products.forEach(p => {
         if (p.category === 'decking' && p.isActive) {
             if (!p.colorPricing) p.colorPricing = {};
-            // Use basePrice for solid tier, basePrice + 0.50 for variegated (matching the pattern)
-            // Actually, derive from existing pattern: variegated = basePrice + 0.50 for system ($9.50 base, $10 variegated)
-            // For grooved/solid: basePrice = $6.00, variegated = $6.50
-            // Pattern: variegated adds $0.50 over solid basePrice
-            if (tier === 'variegated') {
-                // Find the highest existing variegated price for this product, or use basePrice + 0.50
-                const existingVariegated = Object.entries(p.colorPricing)
+            // Solid colors (premium) = basePrice + 0.50, variegated (standard) = basePrice
+            if (tier === 'solid') {
+                // Solid colors are premium = basePrice + 0.50
+                const existingSolid = Object.entries(p.colorPricing)
                     .filter(([, price]) => {
-                        const colorObj = colors.find(c => c.id !== id && c.tier === 'variegated');
+                        const colorObj = colors.find(c => c.id !== id && c.tier === 'solid');
                         return colorObj !== undefined;
                     });
-                if (existingVariegated.length > 0) {
-                    // Use the first variegated color's price as reference
-                    const refColor = colors.find(c => c.id !== id && c.tier === 'variegated');
+                if (existingSolid.length > 0) {
+                    const refColor = colors.find(c => c.id !== id && c.tier === 'solid');
                     if (refColor && p.colorPricing[refColor.id] !== undefined) {
                         p.colorPricing[id] = p.colorPricing[refColor.id];
                     } else {
@@ -77,6 +73,7 @@ router.post('/', (req, res) => {
                     p.colorPricing[id] = Math.round((p.basePrice + 0.50) * 100) / 100;
                 }
             } else {
+                // Variegated colors = basePrice
                 p.colorPricing[id] = p.basePrice;
             }
             productsUpdated = true;

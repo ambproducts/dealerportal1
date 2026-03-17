@@ -1452,7 +1452,7 @@ Object.values(PRODUCT_CONFIG.categories).forEach(cat => { Object.assign(PRODUCTS
 
 var COLORS = ["Driftwood", "Khaki", "Slate", "Beachwood", "Chestnut", "Redwood", "Hazelnut"];
 var COLOR_IMAGES = { Driftwood: "Driftwood.png", Khaki: "Khaki.png", Slate: "Slate.png", Beachwood: "Beachwood.png", Chestnut: "Chestnut.png", Redwood: "Redwood.png", Hazelnut: "Hazelnut.png" };
-var COLOR_TIERS = { Driftwood: "variegated", Khaki: "variegated", Slate: "variegated", Beachwood: "solid", Chestnut: "solid", Redwood: "solid", Hazelnut: "solid" };
+var COLOR_TIERS = { Driftwood: "solid", Khaki: "solid", Slate: "solid", Beachwood: "variegated", Chestnut: "variegated", Redwood: "variegated", Hazelnut: "variegated" };
 const BOARD_LENGTHS = [12, 16, 20, "custom"];
 const COIL_LENGTHS = [240, 50];
 const BOARD_WIDTH_INCH = 5.5;
@@ -1918,7 +1918,7 @@ function renderDesktop() {
             td.appendChild(helpDiv);
             const priceDiv = document.createElement("div");
             priceDiv.style.cssText = "margin-top:0.3rem;font-size:0.8rem;color:#1e40af;font-weight:600";
-            priceDiv.textContent = "Price: " + formatCurrency(prod ? prod.price : 0) + ((prod && prod.isFt) ? "/ft" : " each");
+            priceDiv.textContent = "Price: $" + formatCurrency(window.getDisplayPrice ? window.getDisplayPrice(item) : (prod ? prod.price : 0)) + ((prod && prod.isFt) ? "/ft" : " each");
             td.appendChild(priceDiv);
         }
         row.appendChild(td);
