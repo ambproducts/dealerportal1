@@ -13,6 +13,10 @@ const PORT = process.env.PORT || 3000;
 // Read version once at startup
 const pkg = require('./package.json');
 
+// Seed / migrate data files before any routes are registered
+const { ensureDataFiles } = require('./lib/data-init');
+ensureDataFiles();
+
 // Middleware
 app.use(express.json({ limit: '5mb' })); // raised for full HTML bodies sent to /api/pdf/generate
 app.use(express.static(path.join(__dirname, 'public')));
