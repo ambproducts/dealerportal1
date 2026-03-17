@@ -1201,7 +1201,7 @@
             colorPricingHtml = '<div class="admin-form-row" style="grid-column:1/-1;">' +
                 '<div class="admin-form-field" style="grid-column:1/-1;">' +
                     '<label>Color Pricing <span style="font-weight:400;color:#6b7280;font-size:0.82rem;">(per-unit price by color)</span></label>' +
-                    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:0.5rem;margin-top:0.5rem;">';
+                    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:0.5rem;margin-top:0.5rem;">';
 
             activeColors.forEach(function(c) {
                 var currentPrice = (prod.colorPricing && prod.colorPricing[c.id] !== undefined)
@@ -1209,13 +1209,13 @@
                     : prod.basePrice;
                 var tierBadge = c.tier === 'solid' ? 'solid' : 'variegated';
                 colorPricingHtml += '<div style="display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.6rem;background:#f9fafb;border-radius:6px;border:1px solid #e5e7eb;">' +
-                    '<span style="font-size:0.85rem;font-weight:600;min-width:80px;">' + esc(c.name) + '</span>' +
-                    '<span class="admin-badge badge-' + tierBadge + '" style="font-size:0.65rem;">' + esc(c.tier) + '</span>' +
-                    '<span style="color:#6b7280;font-size:0.85rem;">$</span>' +
+                    '<span style="font-size:0.85rem;font-weight:600;flex:0 0 auto;">' + esc(c.name) + '</span>' +
+                    '<span class="admin-badge badge-' + tierBadge + '" style="font-size:0.65rem;flex:0 0 auto;white-space:nowrap;">' + esc(c.tier) + '</span>' +
+                    '<span style="color:#6b7280;font-size:0.85rem;flex:0 0 auto;">$</span>' +
                     '<input type="number" step="0.01" min="0" ' +
                         'id="edit-cp-' + escAttr(id) + '-' + escAttr(c.id) + '" ' +
                         'value="' + currentPrice.toFixed(2) + '" ' +
-                        'style="width:100px;padding:0.3rem 0.4rem;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem;text-align:right;">' +
+                        'style="flex:1 1 auto;min-width:75px;padding:0.3rem 0.4rem;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem;text-align:right;">' +
                 '</div>';
             });
 
