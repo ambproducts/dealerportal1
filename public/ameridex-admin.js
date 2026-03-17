@@ -167,6 +167,8 @@
         '.badge-hardware { background:#f3f4f6; color:#374151; }' +
         '.badge-custom { background:#f5f3ff; color:#7c3aed; }' +
         '.badge-other { background:#f3f4f6; color:#6b7280; }' +
+        '.badge-solid { background:#f3f4f6; color:#374151; }' +
+        '.badge-variegated { background:#fef3c7; color:#92400e; }' +
         '.admin-btn { padding:0.4rem 0.85rem; border-radius:6px; border:none; font-size:0.8rem; ' +
             'font-weight:600; cursor:pointer; transition:all 0.15s; }' +
         '.admin-btn-primary { background:#2563eb; color:#fff; }' +
@@ -281,6 +283,8 @@
                 '<button class="admin-tab" data-tab="products">Products</button>' +
                 '<button class="admin-tab" data-tab="pricing">Pricing Tiers</button>' +
                 '<button class="admin-tab" data-tab="users">Users</button>' +
+                '<button class="admin-tab" data-tab="colors">Colors</button>' +
+                '<button class="admin-tab" data-tab="categories">Categories</button>' +
             '</div>' +
             '<div class="admin-body">' +
 
@@ -423,13 +427,7 @@
                             '<div class="admin-form-row">' +
                                 '<div class="admin-form-field">' +
                                     '<label>Category</label>' +
-                                    '<select id="admin-new-prod-cat">' +
-                                        '<option value="decking">Decking</option>' +
-                                        '<option value="sealing">Sealing & Protection</option>' +
-                                        '<option value="fasteners">Fasteners & Hardware</option>' +
-                                        '<option value="hardware">Hardware</option>' +
-                                        '<option value="other">Other</option>' +
-                                    '</select>' +
+                                    '<select id="admin-new-prod-cat"></select>' +
                                 '</div>' +
                                 '<div class="admin-form-field">' +
                                     '<label>Exempt from Tier Discounts?</label>' +
@@ -553,6 +551,42 @@
                     '<div id="admin-users-list"><div class="admin-loading">Loading users...</div></div>' +
                 '</div>' +
 
+                // ---- COLORS TAB ----
+                '<div class="admin-tab-content" id="admin-tab-colors">' +
+                    '<div id="admin-colors-alert"></div>' +
+                    '<div class="admin-toolbar">' +
+                        '<h3>Color Management</h3>' +
+                        '<input type="text" class="admin-search" id="admin-color-search" placeholder="Search colors...">' +
+                    '</div>' +
+                    '<div id="admin-colors-list"><div class="admin-loading">Loading colors...</div></div>' +
+                    '<div style="margin-top:1rem;">' +
+                        '<h4 style="font-size:0.95rem;color:#374151;margin-bottom:0.5rem;">Add New Color</h4>' +
+                        '<div class="admin-form-row">' +
+                            '<input type="text" class="admin-input" id="new-color-name" placeholder="Color name (e.g. Walnut)" style="padding:0.55rem 0.85rem;border:1px solid #e5e7eb;border-radius:8px;font-size:0.9rem;">' +
+                            '<input type="text" class="admin-input" id="new-color-image" placeholder="Image filename (e.g. Walnut.png)" style="padding:0.55rem 0.85rem;border:1px solid #e5e7eb;border-radius:8px;font-size:0.9rem;">' +
+                            '<select class="admin-input" id="new-color-tier" style="padding:0.55rem 0.85rem;border:1px solid #e5e7eb;border-radius:8px;font-size:0.9rem;"><option value="solid">Solid</option><option value="variegated">Variegated</option></select>' +
+                            '<button class="admin-btn admin-btn-primary" id="add-color-btn">Add Color</button>' +
+                        '</div>' +
+                    '</div>' +
+                '</div>' +
+
+                // ---- CATEGORIES TAB ----
+                '<div class="admin-tab-content" id="admin-tab-categories">' +
+                    '<div id="admin-categories-alert"></div>' +
+                    '<div class="admin-toolbar">' +
+                        '<h3>Category Management</h3>' +
+                    '</div>' +
+                    '<div id="admin-categories-list"><div class="admin-loading">Loading categories...</div></div>' +
+                    '<div style="margin-top:1rem;">' +
+                        '<h4 style="font-size:0.95rem;color:#374151;margin-bottom:0.5rem;">Add New Category</h4>' +
+                        '<div class="admin-form-row">' +
+                            '<input type="text" class="admin-input" id="new-cat-slug" placeholder="Slug (e.g. railing)" style="padding:0.55rem 0.85rem;border:1px solid #e5e7eb;border-radius:8px;font-size:0.9rem;">' +
+                            '<input type="text" class="admin-input" id="new-cat-label" placeholder="Label (e.g. Railing & Posts)" style="padding:0.55rem 0.85rem;border:1px solid #e5e7eb;border-radius:8px;font-size:0.9rem;">' +
+                            '<button class="admin-btn admin-btn-primary" id="add-cat-btn">Add Category</button>' +
+                        '</div>' +
+                    '</div>' +
+                '</div>' +
+
             '</div>' +
         '</div>';
     document.body.appendChild(modal);
@@ -575,6 +609,8 @@
             if (tabName === 'products') loadProducts();
             if (tabName === 'pricing') loadPricingTiers();
             if (tabName === 'users') loadAdminUsers();
+            if (tabName === 'colors') loadColors();
+            if (tabName === 'categories') loadCategories();
         });
     });
 
@@ -987,13 +1023,52 @@
     // ----------------------------------------------------------
     // PRODUCTS TAB
     // ----------------------------------------------------------
+    var _productCategories = [
+        { slug: 'decking', label: 'Decking' },
+        { slug: 'sealing', label: 'Sealing & Protection' },
+        { slug: 'fasteners', label: 'Fasteners & Hardware' },
+        { slug: 'hardware', label: 'Hardware' },
+        { slug: 'other', label: 'Other' }
+    ];
+
+    function buildCategoryOptions(selectedSlug) {
+        var html = '';
+        _productCategories.forEach(function (c) {
+            html += '<option value="' + escAttr(c.slug) + '"' + (c.slug === selectedSlug ? ' selected' : '') + '>' + esc(c.label) + '</option>';
+        });
+        return html;
+    }
+
+    function populateNewProductCatDropdown() {
+        var sel = document.getElementById('admin-new-prod-cat');
+        if (sel) sel.innerHTML = buildCategoryOptions('decking');
+    }
+
     function loadProducts() {
         var container = document.getElementById('admin-products-list');
         container.innerHTML = '<div class="admin-loading">Loading products...</div>';
+
+        // Load categories first (if not already loaded), then products
+        _api('GET', '/api/admin/categories')
+            .then(function (cats) {
+                if (cats && cats.length > 0) {
+                    _productCategories = cats.map(function (c) { return { slug: c.slug, label: c.label }; });
+                    // Also add 'other' if not present
+                    if (!_productCategories.find(function (c) { return c.slug === 'other'; })) {
+                        _productCategories.push({ slug: 'other', label: 'Other' });
+                    }
+                }
+                populateNewProductCatDropdown();
+            })
+            .catch(function () { populateNewProductCatDropdown(); });
+
         _api('GET', '/api/admin/products')
             .then(function (products) { _allProducts = products; renderProductStats(); renderProductsTable(); })
             .catch(function (err) { container.innerHTML = '<div class="admin-error">Failed to load products: ' + esc(err.message) + '</div>'; });
     }
+
+    // Populate add-product category dropdown on initial load
+    populateNewProductCatDropdown();
 
     function renderProductStats() {
         var active = _allProducts.filter(function (p) { return p.isActive !== false; }).length;
@@ -1135,13 +1210,7 @@
                         '</div>' +
                         '<div class="admin-form-field">' +
                             '<label>Category</label>' +
-                            '<select id="edit-cat-' + escAttr(id) + '">' +
-                                '<option value="decking"' + (prod.category === 'decking' ? ' selected' : '') + '>Decking</option>' +
-                                '<option value="sealing"' + (prod.category === 'sealing' ? ' selected' : '') + '>Sealing & Protection</option>' +
-                                '<option value="fasteners"' + (prod.category === 'fasteners' ? ' selected' : '') + '>Fasteners & Hardware</option>' +
-                                '<option value="hardware"' + (prod.category === 'hardware' ? ' selected' : '') + '>Hardware</option>' +
-                                '<option value="other"' + (prod.category === 'other' ? ' selected' : '') + '>Other</option>' +
-                            '</select>' +
+                            '<select id="edit-cat-' + escAttr(id) + '">' + buildCategoryOptions(prod.category) + '</select>' +
                         '</div>' +
                     '</div>' +
                     '<div class="admin-form-row">' +
@@ -1993,5 +2062,172 @@
     }
 
 
-    console.log('[AmeriDex Admin] v2.3 loaded – salesrep support added.');
+    // ----------------------------------------------------------
+    // COLORS TAB
+    // ----------------------------------------------------------
+    var _allColors = [];
+
+    function loadColors() {
+        var container = document.getElementById('admin-colors-list');
+        container.innerHTML = '<div class="admin-loading">Loading colors...</div>';
+        _api('GET', '/api/admin/colors')
+            .then(function (colors) { _allColors = colors; renderColorsTable(); })
+            .catch(function (err) { container.innerHTML = '<div class="admin-error">Failed: ' + esc(err.message) + '</div>'; });
+    }
+
+    function renderColorsTable() {
+        var container = document.getElementById('admin-colors-list');
+        var search = (document.getElementById('admin-color-search').value || '').toLowerCase();
+        var filtered = _allColors.filter(function (c) {
+            return (c.name || '').toLowerCase().indexOf(search) !== -1 || (c.tier || '').toLowerCase().indexOf(search) !== -1;
+        });
+        if (filtered.length === 0) { container.innerHTML = '<div class="admin-empty">No colors found</div>'; return; }
+
+        var html = '<div class="admin-table-wrap" style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table class="admin-table"><thead><tr>' +
+            '<th>Color Name</th><th>Image</th><th>Tier</th><th>Status</th><th>Sort Order</th><th>Actions</th></tr></thead><tbody>';
+
+        filtered.forEach(function (c) {
+            html += '<tr>' +
+                '<td><strong>' + esc(c.name) + '</strong></td>' +
+                '<td><img src="colors/' + esc(c.image) + '" style="width:40px;height:30px;border-radius:4px;object-fit:cover;" onerror="this.style.display=\'none\'"></td>' +
+                '<td><span class="admin-badge badge-' + (c.tier === 'variegated' ? 'variegated' : 'solid') + '">' + esc(c.tier) + '</span></td>' +
+                '<td><span class="admin-badge badge-' + (c.isActive ? 'active' : 'inactive') + '">' + (c.isActive ? 'Active' : 'Inactive') + '</span></td>' +
+                '<td>' + (c.sortOrder || 0) + '</td>' +
+                '<td class="admin-actions">' +
+                    '<button class="admin-btn admin-btn-ghost admin-btn-sm" data-action="edit-color" data-id="' + escAttr(c.id) + '">Edit</button>' +
+                    '<button class="admin-btn admin-btn-danger admin-btn-sm" data-action="delete-color" data-id="' + escAttr(c.id) + '">Delete</button>' +
+                '</td></tr>';
+        });
+
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+
+        container.querySelectorAll('[data-action]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var action = btn.getAttribute('data-action');
+                var id = btn.getAttribute('data-id');
+                if (action === 'edit-color') editColor(id);
+                if (action === 'delete-color') deleteColor(id);
+            });
+        });
+    }
+
+    document.getElementById('admin-color-search').addEventListener('input', renderColorsTable);
+
+    document.getElementById('add-color-btn').addEventListener('click', function () {
+        var name = document.getElementById('new-color-name').value.trim();
+        var image = document.getElementById('new-color-image').value.trim();
+        var tier = document.getElementById('new-color-tier').value;
+        if (!name) { showAlert('admin-colors-alert', 'Color name required', 'error'); return; }
+        if (!image) image = name + '.png';
+        _api('POST', '/api/admin/colors', { name: name, image: image, tier: tier, sortOrder: _allColors.length + 1 })
+            .then(function () {
+                document.getElementById('new-color-name').value = '';
+                document.getElementById('new-color-image').value = '';
+                showAlert('admin-colors-alert', 'Color "' + name + '" added', 'success');
+                loadColors();
+            })
+            .catch(function (err) { showAlert('admin-colors-alert', err.message, 'error'); });
+    });
+
+    function editColor(id) {
+        var color = _allColors.find(function (c) { return c.id === id; });
+        if (!color) return;
+        var newName = prompt('Color name:', color.name);
+        if (newName === null) return;
+        var newTier = prompt('Tier (solid or variegated):', color.tier);
+        if (newTier === null) return;
+        var newImage = prompt('Image filename:', color.image);
+        if (newImage === null) return;
+        _api('PUT', '/api/admin/colors/' + encodeURIComponent(id), { name: newName.trim(), tier: newTier.trim(), image: newImage.trim() })
+            .then(function () { showAlert('admin-colors-alert', 'Color updated', 'success'); loadColors(); })
+            .catch(function (err) { showAlert('admin-colors-alert', err.message, 'error'); });
+    }
+
+    function deleteColor(id) {
+        if (!confirm('Delete this color? This will remove it from all products.')) return;
+        _api('DELETE', '/api/admin/colors/' + encodeURIComponent(id))
+            .then(function () { showAlert('admin-colors-alert', 'Color deleted', 'success'); loadColors(); })
+            .catch(function (err) { showAlert('admin-colors-alert', err.message, 'error'); });
+    }
+
+
+    // ----------------------------------------------------------
+    // CATEGORIES TAB
+    // ----------------------------------------------------------
+    var _allCategories = [];
+
+    function loadCategories() {
+        var container = document.getElementById('admin-categories-list');
+        container.innerHTML = '<div class="admin-loading">Loading categories...</div>';
+        _api('GET', '/api/admin/categories')
+            .then(function (cats) { _allCategories = cats; renderCategoriesTable(); })
+            .catch(function (err) { container.innerHTML = '<div class="admin-error">Failed: ' + esc(err.message) + '</div>'; });
+    }
+
+    function renderCategoriesTable() {
+        var container = document.getElementById('admin-categories-list');
+        if (_allCategories.length === 0) { container.innerHTML = '<div class="admin-empty">No categories found</div>'; return; }
+
+        var html = '<div class="admin-table-wrap" style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table class="admin-table"><thead><tr>' +
+            '<th>Slug</th><th>Label</th><th>Sort Order</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
+
+        _allCategories.forEach(function (c) {
+            html += '<tr>' +
+                '<td><code>' + esc(c.slug) + '</code></td>' +
+                '<td>' + esc(c.label) + '</td>' +
+                '<td>' + (c.sortOrder || 0) + '</td>' +
+                '<td><span class="admin-badge badge-' + (c.isActive !== false ? 'active' : 'inactive') + '">' + (c.isActive !== false ? 'Active' : 'Inactive') + '</span></td>' +
+                '<td class="admin-actions">' +
+                    '<button class="admin-btn admin-btn-ghost admin-btn-sm" data-action="edit-cat" data-slug="' + escAttr(c.slug) + '">Edit</button>' +
+                    (c.slug !== 'custom' ? '<button class="admin-btn admin-btn-danger admin-btn-sm" data-action="delete-cat" data-slug="' + escAttr(c.slug) + '">Delete</button>' : '') +
+                '</td></tr>';
+        });
+
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+
+        container.querySelectorAll('[data-action]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var action = btn.getAttribute('data-action');
+                var slug = btn.getAttribute('data-slug');
+                if (action === 'edit-cat') editCategory(slug);
+                if (action === 'delete-cat') deleteCategory(slug);
+            });
+        });
+    }
+
+    document.getElementById('add-cat-btn').addEventListener('click', function () {
+        var slug = document.getElementById('new-cat-slug').value.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+        var label = document.getElementById('new-cat-label').value.trim();
+        if (!slug || !label) { showAlert('admin-categories-alert', 'Slug and label required', 'error'); return; }
+        _api('POST', '/api/admin/categories', { slug: slug, label: label, sortOrder: _allCategories.length + 1 })
+            .then(function () {
+                document.getElementById('new-cat-slug').value = '';
+                document.getElementById('new-cat-label').value = '';
+                showAlert('admin-categories-alert', 'Category "' + label + '" added', 'success');
+                loadCategories();
+            })
+            .catch(function (err) { showAlert('admin-categories-alert', err.message, 'error'); });
+    });
+
+    function editCategory(slug) {
+        var cat = _allCategories.find(function (c) { return c.slug === slug; });
+        if (!cat) return;
+        var newLabel = prompt('Category label:', cat.label);
+        if (newLabel === null) return;
+        _api('PUT', '/api/admin/categories/' + encodeURIComponent(slug), { label: newLabel.trim() })
+            .then(function () { showAlert('admin-categories-alert', 'Category updated', 'success'); loadCategories(); })
+            .catch(function (err) { showAlert('admin-categories-alert', err.message, 'error'); });
+    }
+
+    function deleteCategory(slug) {
+        if (!confirm('Delete category "' + slug + '"? Only works if no products use it.')) return;
+        _api('DELETE', '/api/admin/categories/' + encodeURIComponent(slug))
+            .then(function () { showAlert('admin-categories-alert', 'Category deleted', 'success'); loadCategories(); })
+            .catch(function (err) { showAlert('admin-categories-alert', err.message, 'error'); });
+    }
+
+
+    console.log('[AmeriDex Admin] v2.4 loaded - colors and categories tabs added.');
 })();

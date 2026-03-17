@@ -5,7 +5,7 @@
 const express = require('express');
 const router = express.Router();
 const { requireAuth, requireAdmin } = require('../middleware/auth');
-const { readJSON, writeJSON, PRODUCTS_FILE, DEALERS_FILE, generateId } = require('../lib/helpers');
+const { readJSON, writeJSON, PRODUCTS_FILE, DEALERS_FILE, COLORS_FILE, generateId } = require('../lib/helpers');
 
 router.use(requireAuth, requireAdmin);
 
@@ -67,17 +67,39 @@ router.post('/', (req, res) => {
         }
     }
 
+    const normalizedCategory = (category || 'other').trim().toLowerCase();
+    const roundedBasePrice = Math.round(Number(basePrice) * 100) / 100;
+
     const newProduct = {
         id: id,
         name: name.trim(),
-        category: (category || 'other').trim().toLowerCase(),
-        basePrice: Math.round(Number(basePrice) * 100) / 100,
+        category: normalizedCategory,
+        basePrice: roundedBasePrice,
         unit: (unit || 'each').trim().toLowerCase(),
         tierOverrides: tierOverrides || {},
         isActive: true,
         sortOrder: sortOrder || products.length + 1,
         createdAt: new Date().toISOString()
     };
+
+    // If decking product, accept or auto-create colorPricing
+    if (normalizedCategory === 'decking') {
+        if (req.body.colorPricing && typeof req.body.colorPricing === 'object') {
+            newProduct.colorPricing = req.body.colorPricing;
+        } else {
+            // Auto-create from colors.json using basePrice for all colors
+            const colors = readJSON(COLORS_FILE);
+            const colorPricing = {};
+            colors.forEach(c => {
+                if (c.isActive) {
+                    colorPricing[c.id] = c.tier === 'variegated'
+                        ? Math.round((roundedBasePrice + 0.50) * 100) / 100
+                        : roundedBasePrice;
+                }
+            });
+            newProduct.colorPricing = colorPricing;
+        }
+    }
 
     products.push(newProduct);
     writeJSON(PRODUCTS_FILE, products);
@@ -95,6 +117,8 @@ router.put('/:id', (req, res) => {
     const updates = req.body;
     const product = products[idx];
     const oldBasePrice = product.basePrice;
+    const oldCategory = product.category;
+    const oldColorPricing = product.colorPricing ? JSON.parse(JSON.stringify(product.colorPricing)) : null;
 
     // Updateable fields
     if (updates.name !== undefined) product.name = updates.name.trim();
@@ -104,6 +128,25 @@ router.put('/:id', (req, res) => {
     if (updates.tierOverrides !== undefined) product.tierOverrides = updates.tierOverrides;
     if (updates.isActive !== undefined) product.isActive = Boolean(updates.isActive);
     if (updates.sortOrder !== undefined) product.sortOrder = Number(updates.sortOrder);
+
+    // Handle colorPricing updates
+    if (updates.colorPricing !== undefined) {
+        product.colorPricing = updates.colorPricing;
+    }
+
+    // If category changed TO decking and product doesn't have colorPricing, auto-create it
+    if (product.category === 'decking' && oldCategory !== 'decking' && !product.colorPricing) {
+        const colors = readJSON(COLORS_FILE);
+        const colorPricing = {};
+        colors.forEach(c => {
+            if (c.isActive) {
+                colorPricing[c.id] = c.tier === 'variegated'
+                    ? Math.round((product.basePrice + 0.50) * 100) / 100
+                    : product.basePrice;
+            }
+        });
+        product.colorPricing = colorPricing;
+    }
 
     product.updatedAt = new Date().toISOString();
     products[idx] = product;
@@ -138,25 +181,17 @@ router.put('/:id', (req, res) => {
 
                 const dealerCurrentPrice = dealer.pricing[productId];
 
-                // Case 1: Dealer has no entry for this product (undefined).
-                // They get the basePrice from products.json via getDealerPrice()
-                // fallback, so no action needed. But if they DO have an entry
-                // that equals the old base, update it.
                 if (dealerCurrentPrice === undefined) {
-                    // No explicit entry; getDealerPrice() will use the new
-                    // basePrice from products.json automatically. No change needed.
                     return;
                 }
 
                 const roundedDealerPrice = Math.round(dealerCurrentPrice * 100) / 100;
 
                 if (roundedDealerPrice === roundedOld) {
-                    // Dealer was on the default base price; cascade the update
                     dealer.pricing[productId] = newBasePrice;
                     dealersCascaded++;
                     dealersChanged = true;
                 } else {
-                    // Dealer has a custom price; leave it alone
                     dealersSkipped++;
                 }
             });
@@ -172,7 +207,56 @@ router.put('/:id', (req, res) => {
             }
         } catch (err) {
             console.error('[Admin Products] Cascade failed for "' + product.id + '":', err.message);
-            // Don't fail the whole request; the product itself was saved
+        }
+    }
+
+    // ----------------------------------------------------------
+    // CASCADE: If colorPricing changed for a decking product,
+    // update dealers whose color prices matched the old defaults.
+    // ----------------------------------------------------------
+    let colorCascadeCount = 0;
+
+    if (product.category === 'decking' && product.colorPricing && oldColorPricing) {
+        try {
+            const dealers = readJSON(DEALERS_FILE);
+            let dealersChanged = false;
+            const productId = product.id;
+
+            dealers.forEach(dealer => {
+                if (dealer.isDeleted) return;
+                if (!dealer.colorPricing || !dealer.colorPricing[productId]) return;
+
+                let dealerUpdated = false;
+                Object.keys(product.colorPricing).forEach(colorName => {
+                    const oldDefault = oldColorPricing[colorName];
+                    const newDefault = product.colorPricing[colorName];
+                    if (oldDefault === undefined || newDefault === undefined) return;
+                    if (oldDefault === newDefault) return;
+
+                    const dealerColorPrice = dealer.colorPricing[productId][colorName];
+                    if (dealerColorPrice === undefined) return;
+
+                    const roundedDealerColor = Math.round(dealerColorPrice * 100) / 100;
+                    const roundedOldDefault = Math.round(oldDefault * 100) / 100;
+
+                    if (roundedDealerColor === roundedOldDefault) {
+                        dealer.colorPricing[productId][colorName] = newDefault;
+                        dealerUpdated = true;
+                    }
+                });
+
+                if (dealerUpdated) {
+                    colorCascadeCount++;
+                    dealersChanged = true;
+                }
+            });
+
+            if (dealersChanged) {
+                writeJSON(DEALERS_FILE, dealers);
+                console.log('[Admin Products] Color price cascade for "' + product.id + '": ' + colorCascadeCount + ' dealer(s) updated');
+            }
+        } catch (err) {
+            console.error('[Admin Products] Color cascade failed for "' + product.id + '":', err.message);
         }
     }
 
@@ -183,7 +267,8 @@ router.put('/:id', (req, res) => {
                 dealersUpdated: dealersCascaded,
                 dealersSkipped: dealersSkipped,
                 oldBasePrice: oldBasePrice,
-                newBasePrice: product.basePrice
+                newBasePrice: product.basePrice,
+                colorCascadeCount: colorCascadeCount
             }
             : null
     });

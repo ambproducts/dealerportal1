@@ -1,0 +1,9 @@
+[
+  { "id": "Driftwood",  "name": "Driftwood",  "image": "Driftwood.png",  "tier": "variegated", "isActive": true, "sortOrder": 1 },
+  { "id": "Khaki",      "name": "Khaki",      "image": "Khaki.png",      "tier": "variegated", "isActive": true, "sortOrder": 2 },
+  { "id": "Slate",      "name": "Slate",      "image": "Slate.png",      "tier": "variegated", "isActive": true, "sortOrder": 3 },
+  { "id": "Beachwood",  "name": "Beachwood",  "image": "Beachwood.png",  "tier": "solid",      "isActive": true, "sortOrder": 4 },
+  { "id": "Chestnut",   "name": "Chestnut",   "image": "Chestnut.png",   "tier": "solid",      "isActive": true, "sortOrder": 5 },
+  { "id": "Redwood",    "name": "Redwood",    "image": "Redwood.png",    "tier": "solid",      "isActive": true, "sortOrder": 6 },
+  { "id": "Hazelnut",   "name": "Hazelnut",   "image": "Hazelnut.png",   "tier": "solid",      "isActive": true, "sortOrder": 7 }
+]

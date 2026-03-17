@@ -519,6 +519,10 @@
                         PRODUCTS[key].price = parseFloat(data.products[key].price);
                     if (PRODUCTS[key] && isValidPrice(data.products[key].basePrice))
                         PRODUCTS[key].basePrice = parseFloat(data.products[key].basePrice);
+                    // Sync colorPricing from server
+                    if (PRODUCTS[key] && data.products[key].colorPricing) {
+                        PRODUCTS[key].colorPricing = data.products[key].colorPricing;
+                    }
                 });
                 Object.values(PRODUCT_CONFIG.categories).forEach(function (cat) {
                     Object.keys(cat.products).forEach(function (k) {
@@ -526,8 +530,47 @@
                             cat.products[k].price = parseFloat(data.products[k].price);
                         if (data.products[k] && isValidPrice(data.products[k].basePrice))
                             cat.products[k].basePrice = parseFloat(data.products[k].basePrice);
+                        // Sync colorPricing from server
+                        if (data.products[k] && data.products[k].colorPricing) {
+                            cat.products[k].colorPricing = data.products[k].colorPricing;
+                        }
                     });
                 });
+                // Update colors from server
+                if (data.colors && Array.isArray(data.colors) && data.colors.length > 0) {
+                    window.COLORS = data.colors.map(function (c) { return c.name; });
+                    var newColorImages = {};
+                    var newColorTiers = {};
+                    data.colors.forEach(function (c) {
+                        newColorImages[c.name] = c.image;
+                        newColorTiers[c.name] = c.tier;
+                    });
+                    window.COLOR_IMAGES = newColorImages;
+                    window.COLOR_TIERS = newColorTiers;
+
+                    // Rebuild color grid if function exists
+                    if (typeof window.rebuildColorGrid === 'function') {
+                        window.rebuildColorGrid();
+                    }
+
+                    console.log('[Pricing] Colors updated from server: ' + window.COLORS.length + ' colors');
+                }
+
+                // Update categories from server
+                if (data.categories && Array.isArray(data.categories)) {
+                    data.categories.forEach(function (cat) {
+                        if (!PRODUCT_CONFIG.categories[cat.slug]) {
+                            PRODUCT_CONFIG.categories[cat.slug] = {
+                                label: cat.label,
+                                products: {}
+                            };
+                        } else {
+                            PRODUCT_CONFIG.categories[cat.slug].label = cat.label;
+                        }
+                    });
+                    console.log('[Pricing] Categories updated from server: ' + data.categories.length + ' categories');
+                }
+
                 window._currentTier = data.tier;
                 console.log('[Pricing] Tier:', data.tier.label, '(x' + data.tier.multiplier + ')');
 

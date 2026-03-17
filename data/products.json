@@ -3,7 +3,16 @@
     "id": "system",
     "name": "AmeriDex System Boards (Grooved + Dexerdry included)",
     "category": "decking",
-    "basePrice": 8.00,
+    "basePrice": 9.50,
+    "colorPricing": {
+      "Driftwood": 10.00,
+      "Khaki": 10.00,
+      "Slate": 10.00,
+      "Beachwood": 9.50,
+      "Chestnut": 9.50,
+      "Redwood": 9.50,
+      "Hazelnut": 9.50
+    },
     "unit": "ft",
     "isActive": true,
     "sortOrder": 1
@@ -13,6 +22,15 @@
     "name": "Grooved Deck Boards (no Dexerdry)",
     "category": "decking",
     "basePrice": 6.00,
+    "colorPricing": {
+      "Driftwood": 6.50,
+      "Khaki": 6.50,
+      "Slate": 6.50,
+      "Beachwood": 6.00,
+      "Chestnut": 6.00,
+      "Redwood": 6.00,
+      "Hazelnut": 6.00
+    },
     "unit": "ft",
     "isActive": true,
     "sortOrder": 2
@@ -22,6 +40,15 @@
     "name": "Solid Edge Deck Boards",
     "category": "decking",
     "basePrice": 6.00,
+    "colorPricing": {
+      "Driftwood": 6.50,
+      "Khaki": 6.50,
+      "Slate": 6.50,
+      "Beachwood": 6.00,
+      "Chestnut": 6.00,
+      "Redwood": 6.00,
+      "Hazelnut": 6.00
+    },
     "unit": "ft",
     "isActive": true,
     "sortOrder": 3

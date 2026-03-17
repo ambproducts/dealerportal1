@@ -124,6 +124,15 @@
             if (!isNaN(tp) && isFinite(tp)) return tp;
         }
 
+        // Try color-specific pricing for decking products
+        if (item.color && typeof PRODUCTS !== 'undefined' && PRODUCTS[item.type]) {
+            var cp = PRODUCTS[item.type].colorPricing;
+            if (cp && cp[item.color] !== undefined) {
+                var colorPrice = parseFloat(cp[item.color]);
+                if (!isNaN(colorPrice) && isFinite(colorPrice)) return colorPrice;
+            }
+        }
+
         // Try PRODUCTS global (updated by applyTierPricing)
         if (typeof PRODUCTS !== 'undefined' && PRODUCTS[item.type]) {
             var prodPrice = PRODUCTS[item.type].price;

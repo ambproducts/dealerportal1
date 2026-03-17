@@ -103,6 +103,18 @@ app.use('/api/admin/quotes', adminQuoteRoutes);
 const adminProductRoutes = require('./routes/admin-products');
 app.use('/api/admin/products', adminProductRoutes);
 
+// Admin - Colors
+const adminColorRoutes = require('./routes/admin-colors');
+app.use('/api/admin/colors', adminColorRoutes);
+
+// Admin - Categories
+const adminCategoryRoutes = require('./routes/admin-categories');
+app.use('/api/admin/categories', adminCategoryRoutes);
+
+// Colors (dealer-facing, read-only)
+const colorRoutes = require('./routes/colors');
+app.use('/api/colors', colorRoutes);
+
 // Admin - Pricing (deprecated stub, kept for backward compat)
 const adminPricingRoutes = require('./routes/admin-pricing');
 app.use('/api/admin/pricing-tiers', adminPricingRoutes);

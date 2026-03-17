@@ -1414,9 +1414,9 @@ const PRODUCT_CONFIG = {
         decking: {
             label: "Decking Boards",
             products: {
-                system: { name: "AmeriDex System Boards (Grooved + Dexerdry included)", price: 8.00, isFt: true, hasColor: true, lengthType: "board", help: "Premium boards with integrated Dexerdry sealing." },
-                grooved: { name: "Grooved Deck Boards (no Dexerdry)", price: 6.00, isFt: true, hasColor: true, lengthType: "board", help: "Grooved boards without integrated sealing." },
-                solid: { name: "Solid Edge Deck Boards", price: 6.00, isFt: true, hasColor: true, lengthType: "board", help: "For picture framing or stair construction." }
+                system: { name: "AmeriDex System Boards (Grooved + Dexerdry included)", price: 9.50, isFt: true, hasColor: true, lengthType: "board", colorPricing: { Driftwood: 10.00, Khaki: 10.00, Slate: 10.00, Beachwood: 9.50, Chestnut: 9.50, Redwood: 9.50, Hazelnut: 9.50 }, help: "Premium boards with integrated Dexerdry sealing." },
+                grooved: { name: "Grooved Deck Boards (no Dexerdry)", price: 6.00, isFt: true, hasColor: true, lengthType: "board", colorPricing: { Driftwood: 6.50, Khaki: 6.50, Slate: 6.50, Beachwood: 6.00, Chestnut: 6.00, Redwood: 6.00, Hazelnut: 6.00 }, help: "Grooved boards without integrated sealing." },
+                solid: { name: "Solid Edge Deck Boards", price: 6.00, isFt: true, hasColor: true, lengthType: "board", colorPricing: { Driftwood: 6.50, Khaki: 6.50, Slate: 6.50, Beachwood: 6.00, Chestnut: 6.00, Redwood: 6.00, Hazelnut: 6.00 }, help: "For picture framing or stair construction." }
             }
         },
         sealing: {
@@ -1450,8 +1450,9 @@ const PRODUCT_CONFIG = {
 const PRODUCTS = {};
 Object.values(PRODUCT_CONFIG.categories).forEach(cat => { Object.assign(PRODUCTS, cat.products); });
 
-const COLORS = ["Driftwood", "Khaki", "Slate", "Beachwood", "Chestnut", "Redwood", "Hazelnut"];
-const COLOR_IMAGES = { Driftwood: "Driftwood.png", Khaki: "Khaki.png", Slate: "Slate.png", Beachwood: "Beachwood.png", Chestnut: "Chestnut.png", Redwood: "Redwood.png", Hazelnut: "Hazelnut.png" };
+var COLORS = ["Driftwood", "Khaki", "Slate", "Beachwood", "Chestnut", "Redwood", "Hazelnut"];
+var COLOR_IMAGES = { Driftwood: "Driftwood.png", Khaki: "Khaki.png", Slate: "Slate.png", Beachwood: "Beachwood.png", Chestnut: "Chestnut.png", Redwood: "Redwood.png", Hazelnut: "Hazelnut.png" };
+var COLOR_TIERS = { Driftwood: "variegated", Khaki: "variegated", Slate: "variegated", Beachwood: "solid", Chestnut: "solid", Redwood: "solid", Hazelnut: "solid" };
 const BOARD_LENGTHS = [12, 16, 20, "custom"];
 const COIL_LENGTHS = [240, 50];
 const BOARD_WIDTH_INCH = 5.5;
@@ -1728,7 +1729,12 @@ function setQuoteMode(mode) {
 // COLOR GRID
 // ============================================
 function initColorGrid() {
+    rebuildColorGrid();
+}
+
+window.rebuildColorGrid = function() {
     const grid = document.getElementById("color-grid");
+    if (!grid) return;
     grid.innerHTML = "";
     COLORS.forEach(color => {
         const card = document.createElement("div");
@@ -1750,7 +1756,8 @@ function initColorGrid() {
         });
         grid.appendChild(card);
     });
-}
+    updateColorSelection();
+};
 
 function updateColorSelection() {
     document.querySelectorAll(".color-card").forEach(card => {
@@ -1935,7 +1942,7 @@ function renderDesktop() {
                 const colorName = item.color || COLORS[0];
                 prev.src = "colors/" + (COLOR_IMAGES[colorName] || COLOR_IMAGES.Driftwood);
             }
-            csel.onchange = e => { item.color = e.target.value; applyImage(); updateTotalAndFasteners(); };
+            csel.onchange = e => { item.color = e.target.value; render(); updateTotalAndFasteners(); };
             td.appendChild(csel);
             item.color = item.color || COLORS[0];
             applyImage();
@@ -2127,7 +2134,7 @@ function renderMobile() {
                 if (c === item.color) o.selected = true;
                 colorSel.appendChild(o);
             });
-            colorSel.onchange = e => { item.color = e.target.value; updateTotalAndFasteners(); };
+            colorSel.onchange = e => { item.color = e.target.value; render(); updateTotalAndFasteners(); };
             colorRow.appendChild(colorLabel);
             colorRow.appendChild(colorSel);
             card.appendChild(colorRow);

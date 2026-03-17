@@ -16,8 +16,8 @@ const router = express.Router();
 const crypto = require('crypto');
 const {
     readJSON, writeJSON,
-    DEALERS_FILE, USERS_FILE, PRODUCTS_FILE,
-    generateId, buildDefaultPricing, getDealerPrice,
+    DEALERS_FILE, USERS_FILE, PRODUCTS_FILE, COLORS_FILE,
+    generateId, buildDefaultPricing, buildDefaultColorPricing, getDealerPrice,
     sanitizeInput
 } = require('../lib/helpers');
 const { hashPassword } = require('../lib/password');
@@ -133,6 +133,7 @@ router.post('/', (req, res) => {
         email: sanitizeInput(email || ''),
         phone: phone || '',
         pricing: buildDefaultPricing(),
+        colorPricing: {},
         role: role || 'dealer',
         isActive: true,
         isDeleted: false,
@@ -373,19 +374,41 @@ router.get('/:id/pricing', (req, res) => {
 
     const products = readJSON(PRODUCTS_FILE);
     const dealerPricing = dealer.pricing || {};
+    const dealerColorPricing = dealer.colorPricing || {};
 
     const result = products
         .filter(p => p.isActive)
         .sort((a, b) => a.sortOrder - b.sortOrder)
-        .map(p => ({
-            productId: p.id,
-            name: p.name,
-            category: p.category,
-            unit: p.unit,
-            basePrice: p.basePrice,
-            dealerPrice: dealerPricing[p.id] !== undefined ? dealerPricing[p.id] : p.basePrice,
-            isCustomized: dealerPricing[p.id] !== undefined && dealerPricing[p.id] !== p.basePrice
-        }));
+        .map(p => {
+            const item = {
+                productId: p.id,
+                name: p.name,
+                category: p.category,
+                unit: p.unit,
+                basePrice: p.basePrice,
+                dealerPrice: dealerPricing[p.id] !== undefined ? dealerPricing[p.id] : p.basePrice,
+                isCustomized: dealerPricing[p.id] !== undefined && dealerPricing[p.id] !== p.basePrice
+            };
+
+            // Add colorPricing for decking products
+            if (p.category === 'decking' && p.colorPricing) {
+                const colorPricingResult = {};
+                Object.keys(p.colorPricing).forEach(colorName => {
+                    const baseColorPrice = p.colorPricing[colorName];
+                    const dealerColorPrice = (dealerColorPricing[p.id] && dealerColorPricing[p.id][colorName] !== undefined)
+                        ? dealerColorPricing[p.id][colorName]
+                        : baseColorPrice;
+                    colorPricingResult[colorName] = {
+                        basePrice: baseColorPrice,
+                        dealerPrice: dealerColorPrice,
+                        isCustomized: dealerColorPricing[p.id] !== undefined && dealerColorPricing[p.id][colorName] !== undefined && dealerColorPricing[p.id][colorName] !== baseColorPrice
+                    };
+                });
+                item.colorPricing = colorPricingResult;
+            }
+
+            return item;
+        });
 
     res.json({
         dealerId: dealer.id,
@@ -397,37 +420,79 @@ router.get('/:id/pricing', (req, res) => {
 
 // PUT /api/admin/dealers/:id/pricing
 // Update one or more product prices for this dealer
-// Body: { "pricing": { "system": 7.50, "grooved": 5.25 } }
+// Body: { "pricing": { "system": 7.50, "grooved": 5.25 }, "colorPricing": { "system": { "Driftwood": 9.75 } } }
 router.put('/:id/pricing', (req, res) => {
     const dealers = readJSON(DEALERS_FILE);
     const idx = dealers.findIndex(d => d.id === req.params.id && !d.isDeleted);
     if (idx === -1) return res.status(404).json({ error: 'Dealer not found' });
 
-    const { pricing } = req.body;
-    if (!pricing || typeof pricing !== 'object') {
-        return res.status(400).json({ error: 'Request body must include a "pricing" object' });
+    const { pricing, colorPricing } = req.body;
+    if (!pricing && !colorPricing) {
+        return res.status(400).json({ error: 'Request body must include "pricing" and/or "colorPricing" object' });
     }
 
     const products = readJSON(PRODUCTS_FILE);
     const validProductIds = products.filter(p => p.isActive).map(p => p.id);
-
-    if (!dealers[idx].pricing) {
-        dealers[idx].pricing = buildDefaultPricing();
-    }
+    const deckingProductIds = products.filter(p => p.isActive && p.category === 'decking').map(p => p.id);
+    const colors = readJSON(COLORS_FILE);
+    const validColorIds = colors.map(c => c.id);
 
     const errors = [];
-    Object.entries(pricing).forEach(([productId, price]) => {
-        if (!validProductIds.includes(productId)) {
-            errors.push('Unknown product: ' + productId);
-            return;
+
+    // Handle flat pricing updates
+    if (pricing && typeof pricing === 'object') {
+        if (!dealers[idx].pricing) {
+            dealers[idx].pricing = buildDefaultPricing();
         }
-        const numPrice = parseFloat(price);
-        if (isNaN(numPrice) || numPrice < 0) {
-            errors.push('Invalid price for ' + productId + ': must be a number >= 0');
-            return;
+
+        Object.entries(pricing).forEach(([productId, price]) => {
+            if (!validProductIds.includes(productId)) {
+                errors.push('Unknown product: ' + productId);
+                return;
+            }
+            const numPrice = parseFloat(price);
+            if (isNaN(numPrice) || numPrice < 0) {
+                errors.push('Invalid price for ' + productId + ': must be a number >= 0');
+                return;
+            }
+            dealers[idx].pricing[productId] = Math.round(numPrice * 100) / 100;
+        });
+    }
+
+    // Handle color pricing updates
+    if (colorPricing && typeof colorPricing === 'object') {
+        if (!dealers[idx].colorPricing) {
+            dealers[idx].colorPricing = {};
         }
-        dealers[idx].pricing[productId] = Math.round(numPrice * 100) / 100;
-    });
+
+        Object.entries(colorPricing).forEach(([productId, colorMap]) => {
+            if (!deckingProductIds.includes(productId)) {
+                errors.push('Unknown or non-decking product for color pricing: ' + productId);
+                return;
+            }
+            if (!colorMap || typeof colorMap !== 'object') {
+                errors.push('Color pricing for ' + productId + ' must be an object');
+                return;
+            }
+
+            if (!dealers[idx].colorPricing[productId]) {
+                dealers[idx].colorPricing[productId] = {};
+            }
+
+            Object.entries(colorMap).forEach(([colorName, price]) => {
+                if (!validColorIds.includes(colorName)) {
+                    errors.push('Unknown color: ' + colorName);
+                    return;
+                }
+                const numPrice = parseFloat(price);
+                if (isNaN(numPrice) || numPrice < 0) {
+                    errors.push('Invalid color price for ' + productId + '/' + colorName + ': must be a number >= 0');
+                    return;
+                }
+                dealers[idx].colorPricing[productId][colorName] = Math.round(numPrice * 100) / 100;
+            });
+        });
+    }
 
     if (errors.length > 0) {
         return res.status(400).json({ error: 'Some prices were invalid', details: errors });
@@ -445,13 +510,14 @@ router.put('/:id/pricing', (req, res) => {
 });
 
 // POST /api/admin/dealers/:id/pricing/reset
-// Reset all dealer prices back to product base prices
+// Reset all dealer prices back to product base prices (including color pricing)
 router.post('/:id/pricing/reset', (req, res) => {
     const dealers = readJSON(DEALERS_FILE);
     const idx = dealers.findIndex(d => d.id === req.params.id && !d.isDeleted);
     if (idx === -1) return res.status(404).json({ error: 'Dealer not found' });
 
     dealers[idx].pricing = buildDefaultPricing();
+    dealers[idx].colorPricing = {};
     dealers[idx].pricingUpdatedAt = new Date().toISOString();
     dealers[idx].pricingUpdatedBy = req.user.username;
     writeJSON(DEALERS_FILE, dealers);
@@ -478,6 +544,7 @@ router.post('/:id/pricing/copy-from/:sourceId', (req, res) => {
     }
 
     dealers[targetIdx].pricing = JSON.parse(JSON.stringify(source.pricing));
+    dealers[targetIdx].colorPricing = source.colorPricing ? JSON.parse(JSON.stringify(source.colorPricing)) : {};
     dealers[targetIdx].pricingUpdatedAt = new Date().toISOString();
     dealers[targetIdx].pricingUpdatedBy = req.user.username;
     dealers[targetIdx].pricingCopiedFrom = source.dealerCode;

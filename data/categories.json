@@ -1,0 +1,7 @@
+[
+  { "slug": "decking",   "label": "Decking Boards",        "sortOrder": 1, "isActive": true },
+  { "slug": "sealing",   "label": "Sealing & Protection",  "sortOrder": 2, "isActive": true },
+  { "slug": "fasteners", "label": "Fasteners & Hardware",   "sortOrder": 3, "isActive": true },
+  { "slug": "hardware",  "label": "Hardware",               "sortOrder": 4, "isActive": true },
+  { "slug": "custom",    "label": "Custom Items",           "sortOrder": 5, "isActive": true }
+]
