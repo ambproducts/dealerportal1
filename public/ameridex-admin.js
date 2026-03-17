@@ -2160,7 +2160,7 @@
             var sysPrice = (_systemBoardPricing && _systemBoardPricing[c.id] !== undefined)
                 ? '$' + Number(_systemBoardPricing[c.id]).toFixed(2) + '/ft'
                 : 'N/A';
-            html += '<tr>' +
+            html += '<tr id="color-row-' + escAttr(c.id) + '">' +
                 '<td><strong>' + esc(c.name) + '</strong></td>' +
                 '<td><img src="colors/' + esc(c.image) + '" style="width:40px;height:30px;border-radius:4px;object-fit:cover;" onerror="this.style.display=\'none\'"></td>' +
                 '<td><span class="admin-badge badge-' + (c.tier === 'variegated' ? 'variegated' : 'solid') + '">' + esc(c.tier) + '</span></td>' +
@@ -2170,7 +2170,8 @@
                 '<td class="admin-actions">' +
                     '<button class="admin-btn admin-btn-ghost admin-btn-sm" data-action="edit-color" data-id="' + escAttr(c.id) + '">Edit</button>' +
                     '<button class="admin-btn admin-btn-danger admin-btn-sm" data-action="delete-color" data-id="' + escAttr(c.id) + '">Delete</button>' +
-                '</td></tr>';
+                '</td></tr>' +
+                '<tr id="color-edit-row-' + escAttr(c.id) + '" style="display:none;"><td colspan="7" style="padding:0;border-bottom:none;"></td></tr>';
         });
 
         html += '</tbody></table></div>';
@@ -2207,15 +2208,198 @@
     function editColor(id) {
         var color = _allColors.find(function (c) { return c.id === id; });
         if (!color) return;
-        var newName = prompt('Color name:', color.name);
-        if (newName === null) return;
-        var newTier = prompt('Tier (solid or variegated):', color.tier);
-        if (newTier === null) return;
-        var newImage = prompt('Image filename:', color.image);
-        if (newImage === null) return;
-        _api('PUT', '/api/admin/colors/' + encodeURIComponent(id), { name: newName.trim(), tier: newTier.trim(), image: newImage.trim() })
-            .then(function () { showAlert('admin-colors-alert', 'Color updated', 'success'); loadColors(); })
-            .catch(function (err) { showAlert('admin-colors-alert', err.message, 'error'); });
+
+        // Fetch products to get per-product color pricing, then render
+        if (_allProducts.length === 0) {
+            _api('GET', '/api/admin/products').then(function (products) {
+                _allProducts = products;
+                _renderEditColor(id, color);
+            });
+        } else {
+            _renderEditColor(id, color);
+        }
+    }
+
+    function _renderEditColor(id, color) {
+        // Close any other open color edit rows
+        document.querySelectorAll('[id^="color-edit-row-"]').forEach(function (row) {
+            row.style.display = 'none';
+            row.querySelector('td').innerHTML = '';
+        });
+
+        var editRow = document.getElementById('color-edit-row-' + id);
+        if (!editRow) return;
+        var cell = editRow.querySelector('td');
+
+        // Build per-product pricing inputs for decking products
+        var deckingProducts = _allProducts.filter(function (p) {
+            return p.category === 'decking';
+        });
+
+        var pricingHtml = '';
+        if (deckingProducts.length > 0) {
+            pricingHtml = '<div class="admin-form-row" style="grid-column:1/-1;">' +
+                '<div class="admin-form-field" style="grid-column:1/-1;">' +
+                    '<label>Color Pricing by Product <span style="font-weight:400;color:#6b7280;font-size:0.82rem;">(per-unit price for this color)</span></label>' +
+                    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:0.5rem;margin-top:0.5rem;">';
+
+            deckingProducts.forEach(function (p) {
+                var currentPrice = (p.colorPricing && p.colorPricing[id] !== undefined)
+                    ? p.colorPricing[id]
+                    : p.basePrice;
+                pricingHtml += '<div style="display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.6rem;background:#f9fafb;border-radius:6px;border:1px solid #e5e7eb;">' +
+                    '<span style="font-size:0.85rem;font-weight:600;min-width:120px;">' + esc(p.name) + '</span>' +
+                    '<span style="color:#6b7280;font-size:0.85rem;">$</span>' +
+                    '<input type="number" step="0.01" min="0" ' +
+                        'id="edit-color-cp-' + escAttr(id) + '-' + escAttr(p.id) + '" ' +
+                        'value="' + Number(currentPrice).toFixed(2) + '" ' +
+                        'style="width:100px;padding:0.3rem 0.4rem;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem;text-align:right;">' +
+                    '<span style="color:#6b7280;font-size:0.8rem;">/' + esc(p.unit || 'ft') + '</span>' +
+                '</div>';
+            });
+
+            pricingHtml += '</div></div></div>';
+        }
+
+        cell.innerHTML =
+            '<div class="admin-inline-edit">' +
+                '<h4>' +
+                    '<span>Editing Color: ' + esc(color.name) + '</span>' +
+                    '<button class="admin-btn admin-btn-ghost admin-btn-sm" id="cancel-color-' + escAttr(id) + '">Cancel</button>' +
+                '</h4>' +
+                '<div class="admin-form">' +
+                    '<div class="admin-form-row">' +
+                        '<div class="admin-form-field">' +
+                            '<label>Color Name</label>' +
+                            '<input type="text" id="edit-color-name-' + escAttr(id) + '" value="' + escAttr(color.name || '') + '">' +
+                        '</div>' +
+                        '<div class="admin-form-field">' +
+                            '<label>Tier</label>' +
+                            '<select id="edit-color-tier-' + escAttr(id) + '">' +
+                                '<option value="solid"' + (color.tier === 'solid' ? ' selected' : '') + '>solid</option>' +
+                                '<option value="variegated"' + (color.tier === 'variegated' ? ' selected' : '') + '>variegated</option>' +
+                            '</select>' +
+                        '</div>' +
+                        '<div class="admin-form-field">' +
+                            '<label>Image Filename</label>' +
+                            '<input type="text" id="edit-color-image-' + escAttr(id) + '" value="' + escAttr(color.image || '') + '">' +
+                        '</div>' +
+                    '</div>' +
+                    pricingHtml +
+                    '<div class="admin-form-actions">' +
+                        '<button class="admin-btn admin-btn-ghost" id="cancel-color2-' + escAttr(id) + '">Cancel</button>' +
+                        '<button class="admin-btn admin-btn-primary" id="save-color-' + escAttr(id) + '">Save Changes</button>' +
+                    '</div>' +
+                '</div>' +
+            '</div>';
+
+        editRow.style.display = 'table-row';
+        editRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+        document.getElementById('cancel-color-' + id).addEventListener('click', function () { cancelEditColor(id); });
+        document.getElementById('cancel-color2-' + id).addEventListener('click', function () { cancelEditColor(id); });
+        document.getElementById('save-color-' + id).addEventListener('click', function () { saveEditColor(id); });
+    }
+
+    function cancelEditColor(id) {
+        var editRow = document.getElementById('color-edit-row-' + id);
+        if (editRow) {
+            editRow.style.display = 'none';
+            editRow.querySelector('td').innerHTML = '';
+        }
+    }
+
+    function saveEditColor(id) {
+        var nameEl = document.getElementById('edit-color-name-' + id);
+        var tierEl = document.getElementById('edit-color-tier-' + id);
+        var imageEl = document.getElementById('edit-color-image-' + id);
+
+        if (!nameEl) return;
+
+        var newName = nameEl.value.trim();
+        var newTier = tierEl.value;
+        var newImage = imageEl.value.trim();
+
+        if (!newName) { showAlert('admin-colors-alert', 'Color name is required', 'error'); return; }
+
+        var saveBtn = document.getElementById('save-color-' + id);
+        if (saveBtn) { saveBtn.textContent = 'Saving...'; saveBtn.disabled = true; }
+
+        // Build list of product pricing updates
+        var deckingProducts = _allProducts.filter(function (p) {
+            return p.category === 'decking';
+        });
+
+        var productUpdates = [];
+        deckingProducts.forEach(function (p) {
+            var el = document.getElementById('edit-color-cp-' + id + '-' + p.id);
+            if (el) {
+                var newPrice = parseFloat(el.value);
+                if (isNaN(newPrice) || newPrice < 0) {
+                    showAlert('admin-colors-alert', 'Invalid price for ' + p.name, 'error');
+                    if (saveBtn) { saveBtn.textContent = 'Save Changes'; saveBtn.disabled = false; }
+                    return;
+                }
+                var oldPrice = (p.colorPricing && p.colorPricing[id] !== undefined)
+                    ? p.colorPricing[id] : p.basePrice;
+                if (Math.round(newPrice * 100) !== Math.round(oldPrice * 100)) {
+                    var updatedPricing = {};
+                    var key;
+                    if (p.colorPricing) {
+                        for (key in p.colorPricing) {
+                            if (p.colorPricing.hasOwnProperty(key)) {
+                                updatedPricing[key] = p.colorPricing[key];
+                            }
+                        }
+                    }
+                    updatedPricing[id] = Math.round(newPrice * 100) / 100;
+                    productUpdates.push({ productId: p.id, colorPricing: updatedPricing });
+                }
+            }
+        });
+
+        // Step 1: Save color properties
+        var colorPromise = _api('PUT', '/api/admin/colors/' + encodeURIComponent(id), {
+            name: newName,
+            tier: newTier,
+            image: newImage
+        });
+
+        // Step 2: Save each changed product pricing
+        var pricingPromises = productUpdates.map(function (update) {
+            return _api('PUT', '/api/admin/products/' + encodeURIComponent(update.productId), {
+                colorPricing: update.colorPricing
+            });
+        });
+
+        var allPromises = [colorPromise].concat(pricingPromises);
+
+        Promise.all(allPromises)
+            .then(function () {
+                // Refresh cached products with new pricing
+                productUpdates.forEach(function (update) {
+                    var prod = _allProducts.find(function (p) { return p.id === update.productId; });
+                    if (prod) {
+                        prod.colorPricing = update.colorPricing;
+                    }
+                });
+
+                // Force loadColors to re-fetch product pricing so table shows updated values
+                if (productUpdates.length > 0) {
+                    _systemBoardPricing = null;
+                }
+
+                var msg = 'Color "' + newName + '" updated';
+                if (productUpdates.length > 0) {
+                    msg += ' with pricing for ' + productUpdates.length + ' product(s)';
+                }
+                showAlert('admin-colors-alert', msg, 'success');
+                loadColors();
+            })
+            .catch(function (err) {
+                if (saveBtn) { saveBtn.textContent = 'Save Changes'; saveBtn.disabled = false; }
+                showAlert('admin-colors-alert', 'Save failed: ' + esc(err.message), 'error');
+            });
     }
 
     function deleteColor(id) {
