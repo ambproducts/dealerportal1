@@ -1169,6 +1169,18 @@
         var prod = _allProducts.find(function (p) { return p.id === id; });
         if (!prod) return;
 
+        // If decking product and we don't have colors yet, fetch them first
+        if (prod.category === 'decking' && _allColors.length === 0) {
+            _api('GET', '/api/admin/colors').then(function(colors) {
+                _allColors = colors;
+                _renderEditProduct(id, prod);
+            });
+        } else {
+            _renderEditProduct(id, prod);
+        }
+    }
+
+    function _renderEditProduct(id, prod) {
         document.querySelectorAll('[id^="prod-edit-row-"]').forEach(function (row) {
             row.style.display = 'none';
             row.querySelector('td').innerHTML = '';
@@ -1179,6 +1191,36 @@
         var cell = editRow.querySelector('td');
 
         var isExempt = prod.tierOverrides && Object.keys(prod.tierOverrides).length > 0;
+
+        // Color Pricing section (decking products only)
+        var colorPricingHtml = '';
+        if (prod.category === 'decking' && _allColors.length > 0) {
+            var activeColors = _allColors.filter(function(c) { return c.isActive !== false; })
+                .sort(function(a, b) { return (a.sortOrder || 99) - (b.sortOrder || 99); });
+
+            colorPricingHtml = '<div class="admin-form-row" style="grid-column:1/-1;">' +
+                '<div class="admin-form-field" style="grid-column:1/-1;">' +
+                    '<label>Color Pricing <span style="font-weight:400;color:#6b7280;font-size:0.82rem;">(per-unit price by color)</span></label>' +
+                    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:0.5rem;margin-top:0.5rem;">';
+
+            activeColors.forEach(function(c) {
+                var currentPrice = (prod.colorPricing && prod.colorPricing[c.id] !== undefined)
+                    ? prod.colorPricing[c.id]
+                    : prod.basePrice;
+                var tierBadge = c.tier === 'solid' ? 'solid' : 'variegated';
+                colorPricingHtml += '<div style="display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.6rem;background:#f9fafb;border-radius:6px;border:1px solid #e5e7eb;">' +
+                    '<span style="font-size:0.85rem;font-weight:600;min-width:80px;">' + esc(c.name) + '</span>' +
+                    '<span class="admin-badge badge-' + tierBadge + '" style="font-size:0.65rem;">' + esc(c.tier) + '</span>' +
+                    '<span style="color:#6b7280;font-size:0.85rem;">$</span>' +
+                    '<input type="number" step="0.01" min="0" ' +
+                        'id="edit-cp-' + escAttr(id) + '-' + escAttr(c.id) + '" ' +
+                        'value="' + currentPrice.toFixed(2) + '" ' +
+                        'style="width:75px;padding:0.3rem 0.4rem;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem;text-align:right;">' +
+                '</div>';
+            });
+
+            colorPricingHtml += '</div></div></div>';
+        }
 
         cell.innerHTML =
             '<div class="admin-inline-edit">' +
@@ -1223,6 +1265,7 @@
                         '</div>' +
                         '<div class="admin-form-field"></div>' +
                     '</div>' +
+                    colorPricingHtml +
                     '<div class="admin-form-actions">' +
                         '<button class="admin-btn admin-btn-ghost" id="cancel-edit2-' + escAttr(id) + '">Cancel</button>' +
                         '<button class="admin-btn admin-btn-primary" id="save-edit-' + escAttr(id) + '">Save Changes</button>' +
@@ -1326,6 +1369,18 @@
             tierOverrides = { preferred: { multiplier: 1.0 }, vip: { multiplier: 1.0 } };
         }
 
+        var colorPricing = null;
+        var prod = _allProducts.find(function(p) { return p.id === id; });
+        if (prod && prod.category === 'decking' && _allColors.length > 0) {
+            colorPricing = {};
+            _allColors.filter(function(c) { return c.isActive !== false; }).forEach(function(c) {
+                var el = document.getElementById('edit-cp-' + id + '-' + c.id);
+                if (el) {
+                    colorPricing[c.id] = parseFloat(el.value) || 0;
+                }
+            });
+        }
+
         var saveBtn = document.getElementById('save-edit-' + id);
         if (saveBtn) { saveBtn.textContent = 'Saving...'; saveBtn.disabled = true; }
 
@@ -1334,7 +1389,8 @@
             basePrice: Number(newPrice),
             unit: newUnit,
             category: newCat,
-            tierOverrides: tierOverrides
+            tierOverrides: tierOverrides,
+            colorPricing: colorPricing
         })
             .then(function (result) {
                 syncProductGlobals(id, newName, Number(newPrice), newUnit, newCat);
@@ -2066,13 +2122,27 @@
     // COLORS TAB
     // ----------------------------------------------------------
     var _allColors = [];
+    var _systemBoardPricing = null;
 
     function loadColors() {
         var container = document.getElementById('admin-colors-list');
         container.innerHTML = '<div class="admin-loading">Loading colors...</div>';
-        _api('GET', '/api/admin/colors')
-            .then(function (colors) { _allColors = colors; renderColorsTable(); })
-            .catch(function (err) { container.innerHTML = '<div class="admin-error">Failed: ' + esc(err.message) + '</div>'; });
+
+        var promises = [_api('GET', '/api/admin/colors')];
+        if (!_systemBoardPricing) {
+            promises.push(_api('GET', '/api/admin/products'));
+        }
+
+        Promise.all(promises).then(function(results) {
+            _allColors = results[0];
+            if (results[1]) {
+                var system = results[1].find(function(p) { return p.id === 'system'; });
+                _systemBoardPricing = (system && system.colorPricing) ? system.colorPricing : {};
+            }
+            renderColorsTable();
+        }).catch(function(err) {
+            container.innerHTML = '<div class="admin-error">Failed: ' + esc(err.message) + '</div>';
+        });
     }
 
     function renderColorsTable() {
@@ -2084,13 +2154,17 @@
         if (filtered.length === 0) { container.innerHTML = '<div class="admin-empty">No colors found</div>'; return; }
 
         var html = '<div class="admin-table-wrap" style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table class="admin-table"><thead><tr>' +
-            '<th>Color Name</th><th>Image</th><th>Tier</th><th>Status</th><th>Sort Order</th><th>Actions</th></tr></thead><tbody>';
+            '<th>Color Name</th><th>Image</th><th>Tier</th><th>System Price</th><th>Status</th><th>Sort Order</th><th>Actions</th></tr></thead><tbody>';
 
         filtered.forEach(function (c) {
+            var sysPrice = (_systemBoardPricing && _systemBoardPricing[c.id] !== undefined)
+                ? '$' + Number(_systemBoardPricing[c.id]).toFixed(2) + '/ft'
+                : 'N/A';
             html += '<tr>' +
                 '<td><strong>' + esc(c.name) + '</strong></td>' +
                 '<td><img src="colors/' + esc(c.image) + '" style="width:40px;height:30px;border-radius:4px;object-fit:cover;" onerror="this.style.display=\'none\'"></td>' +
                 '<td><span class="admin-badge badge-' + (c.tier === 'variegated' ? 'variegated' : 'solid') + '">' + esc(c.tier) + '</span></td>' +
+                '<td style="font-weight:600;color:#1e40af;">' + sysPrice + '</td>' +
                 '<td><span class="admin-badge badge-' + (c.isActive ? 'active' : 'inactive') + '">' + (c.isActive ? 'Active' : 'Inactive') + '</span></td>' +
                 '<td>' + (c.sortOrder || 0) + '</td>' +
                 '<td class="admin-actions">' +

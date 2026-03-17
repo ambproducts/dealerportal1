@@ -68,18 +68,31 @@
         return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
+    var _dealerColorPrices = {};
+
     function parsePricingResponse(data) {
         var map = {};
+        _dealerColorPrices = {};
         if (data && data.products && Array.isArray(data.products)) {
             data.products.forEach(function (p) {
                 if (p.isCustomized) {
                     map[p.productId] = p.dealerPrice;
+                }
+                if (p.colorPricing) {
+                    _dealerColorPrices[p.productId] = {};
+                    Object.keys(p.colorPricing).forEach(function(colorName) {
+                        var cp = p.colorPricing[colorName];
+                        _dealerColorPrices[p.productId][colorName] = cp.dealerPrice !== undefined ? cp.dealerPrice : cp.basePrice;
+                    });
                 }
             });
         } else if (data && data.pricing && typeof data.pricing === 'object') {
             Object.keys(data.pricing).forEach(function (pid) {
                 map[pid] = Number(data.pricing[pid]);
             });
+            if (data.colorPricing) {
+                _dealerColorPrices = data.colorPricing;
+            }
         }
         return map;
     }
@@ -145,9 +158,11 @@
     // ----------------------------------------------------------
     var _patchDealers = [];
     var _patchProducts = [];
+    var _patchColors = [];
     var _selectedDealerId = null;
     var _dealerPrices = {};
     var _editedPrices = {};
+    var _editedColorPrices = {};
     var _backendAvailable = null;
 
 
@@ -635,12 +650,15 @@
 
         Promise.all([
             _api('GET', '/api/admin/dealers'),
-            _api('GET', '/api/admin/products')
+            _api('GET', '/api/admin/products'),
+            _api('GET', '/api/admin/colors')
         ]).then(function (results) {
             _patchDealers = (results[0] || []).filter(function (d) { return d.isActive !== false; });
             _patchProducts = (results[1] || []).filter(function (p) {
                 return p.isActive !== false && p.id !== 'custom';
             });
+            _patchColors = (results[2] || []).filter(function(c) { return c.isActive !== false; })
+                .sort(function(a, b) { return (a.sortOrder || 99) - (b.sortOrder || 99); });
             renderPricingEditor();
 
             if (_selectedDealerId) {
@@ -856,6 +874,47 @@
                         (isOverride ? '<span class="dp-override-badge">OVERRIDE</span>' : '<span style="color:#9ca3af;font-size:0.78rem;">Default</span>') +
                     '</td>' +
                 '</tr>';
+
+                // Color pricing rows for decking products
+                if (p.category === 'decking' && _patchColors.length > 0) {
+                    html += '<tr class="dp-color-toggle-row" data-product-id="' + escAttr(p.id) + '">' +
+                        '<td colspan="6" style="padding:0.25rem 0.75rem;">' +
+                            '<button class="admin-btn admin-btn-ghost admin-btn-sm dp-color-toggle" ' +
+                                'data-target="dp-colors-' + escAttr(p.id) + '" ' +
+                                'style="font-size:0.78rem;padding:0.2rem 0.6rem;">' +
+                                'Color Prices (' + _patchColors.length + ')' +
+                            '</button>' +
+                        '</td></tr>';
+
+                    html += '<tr class="dp-color-row" id="dp-colors-' + escAttr(p.id) + '" style="display:none;">' +
+                        '<td colspan="6" style="padding:0 0.75rem 0.75rem;background:#f9fafb;">' +
+                            '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:0.4rem;padding:0.5rem 0;">';
+
+                    _patchColors.forEach(function(c) {
+                        var productColorPricing = p.colorPricing || {};
+                        var baseColorPrice = productColorPricing[c.id] !== undefined ? productColorPricing[c.id] : p.basePrice;
+                        var dealerColorPrice = (_dealerColorPrices[p.id] && _dealerColorPrices[p.id][c.id] !== undefined)
+                            ? _dealerColorPrices[p.id][c.id]
+                            : baseColorPrice;
+                        var isColorOverride = dealerColorPrice !== baseColorPrice;
+
+                        html += '<div style="display:flex;align-items:center;gap:0.4rem;padding:0.3rem 0.5rem;background:#fff;border-radius:4px;border:1px solid #e5e7eb;">' +
+                            '<span style="font-size:0.8rem;font-weight:600;min-width:70px;">' + esc(c.name) + '</span>' +
+                            '<span class="admin-badge badge-' + (c.tier === 'solid' ? 'solid' : 'variegated') + '" style="font-size:0.6rem;">' + esc(c.tier) + '</span>' +
+                            '<span style="color:#9ca3af;font-size:0.75rem;">Base: $' + baseColorPrice.toFixed(2) + '</span>' +
+                            '<span style="color:#6b7280;font-size:0.82rem;">$</span>' +
+                            '<input type="number" step="0.01" min="0" ' +
+                                'class="dp-price-input dp-color-price-input' + (isColorOverride ? ' dp-override' : '') + '" ' +
+                                'data-product-id="' + escAttr(p.id) + '" ' +
+                                'data-color-id="' + escAttr(c.id) + '" ' +
+                                'data-base-price="' + baseColorPrice.toFixed(2) + '" ' +
+                                'value="' + dealerColorPrice.toFixed(2) + '" ' +
+                                'style="width:70px;">' +
+                        '</div>';
+                    });
+
+                    html += '</div></td></tr>';
+                }
             });
         });
 
@@ -886,6 +945,31 @@
             });
         });
 
+        tableDiv.querySelectorAll('.dp-color-toggle').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var target = document.getElementById(btn.getAttribute('data-target'));
+                if (target) {
+                    var visible = target.style.display !== 'none';
+                    target.style.display = visible ? 'none' : 'table-row';
+                    btn.textContent = visible
+                        ? 'Hide Color Prices'
+                        : 'Color Prices (' + _patchColors.length + ')';
+                }
+            });
+        });
+
+        tableDiv.querySelectorAll('.dp-color-price-input').forEach(function(input) {
+            input.addEventListener('input', function() {
+                var pid = input.getAttribute('data-product-id');
+                var cid = input.getAttribute('data-color-id');
+                var val = parseFloat(input.value);
+                if (isNaN(val)) return;
+                _editedColorPrices[pid + ':' + cid] = val;
+                input.classList.add('dp-modified');
+                updateUnsavedBar();
+            });
+        });
+
         updatePricingStats();
         updateUnsavedBar();
     }
@@ -893,7 +977,7 @@
     function updateUnsavedBar() {
         var bar = document.getElementById('dp-unsaved-bar');
         if (!bar) return;
-        var count = Object.keys(_editedPrices).length;
+        var count = Object.keys(_editedPrices).length + Object.keys(_editedColorPrices).length;
         if (count === 0) { bar.style.display = 'none'; return; }
         bar.style.display = 'flex';
         bar.innerHTML = '<span>&#9888; ' + count + ' unsaved price change' + (count !== 1 ? 's' : '') + '</span>' +
@@ -931,7 +1015,8 @@
     function saveDealerPrices() {
         if (!_selectedDealerId) { patchAlert('dp-pricing-alert', 'No dealer selected.', 'error'); return; }
         var edits = Object.keys(_editedPrices);
-        if (edits.length === 0) { patchAlert('dp-pricing-alert', 'No changes to save.', 'error'); return; }
+        var colorEdits = Object.keys(_editedColorPrices);
+        if (edits.length === 0 && colorEdits.length === 0) { patchAlert('dp-pricing-alert', 'No changes to save.', 'error'); return; }
 
         var mergedPrices = {};
         Object.keys(_dealerPrices).forEach(function (pid) { mergedPrices[pid] = Number(_dealerPrices[pid]); });
@@ -941,15 +1026,32 @@
             if (_editedPrices[pid] === base) { delete mergedPrices[pid]; } else { mergedPrices[pid] = _editedPrices[pid]; }
         });
 
+        // Build colorPricing payload
+        var colorPricingPayload = {};
+        colorEdits.forEach(function(key) {
+            var parts = key.split(':');
+            var pid = parts[0];
+            var cid = parts[1];
+            if (!colorPricingPayload[pid]) colorPricingPayload[pid] = {};
+            colorPricingPayload[pid][cid] = _editedColorPrices[key];
+        });
+
+        var payload = { pricing: mergedPrices };
+        if (Object.keys(colorPricingPayload).length > 0) {
+            payload.colorPricing = colorPricingPayload;
+        }
+
         var saveBtn = document.getElementById('dp-save-btn');
         if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving...'; }
 
-        _api('PUT', '/api/admin/dealers/' + _selectedDealerId + '/pricing', { pricing: mergedPrices })
+        var totalEdits = edits.length + colorEdits.length;
+        _api('PUT', '/api/admin/dealers/' + _selectedDealerId + '/pricing', payload)
             .then(function () {
                 _dealerPrices = mergedPrices;
                 _editedPrices = {};
+                _editedColorPrices = {};
                 renderPriceTable();
-                patchAlert('dp-pricing-alert', 'Dealer prices saved! (' + edits.length + ' product' + (edits.length !== 1 ? 's' : '') + ' updated)', 'success');
+                patchAlert('dp-pricing-alert', 'Dealer prices saved! (' + totalEdits + ' change' + (totalEdits !== 1 ? 's' : '') + ' updated)', 'success');
                 if (typeof window.applyTierPricing === 'function') {
                     try { var p = window.applyTierPricing(); if (p && typeof p.catch === 'function') p.catch(function () {}); } catch (e) {}
                 }
@@ -975,14 +1077,14 @@
         if (!confirm('Reset ALL prices for ' + label + ' to catalog defaults?')) return;
         _api('POST', '/api/admin/dealers/' + _selectedDealerId + '/pricing/reset')
             .then(function () {
-                _dealerPrices = {}; _editedPrices = {}; renderPriceTable();
+                _dealerPrices = {}; _editedPrices = {}; _editedColorPrices = {}; _dealerColorPrices = {}; renderPriceTable();
                 patchAlert('dp-pricing-alert', 'Prices reset to catalog defaults for ' + esc(label) + '.', 'success');
             })
             .catch(function (err) {
                 var status = err.status || err.statusCode || 0;
                 var msg = (err.message || String(err)).toLowerCase();
                 if (status === 404 || msg.indexOf('404') !== -1) {
-                    _dealerPrices = {}; _editedPrices = {}; renderPriceTable();
+                    _dealerPrices = {}; _editedPrices = {}; _editedColorPrices = {}; _dealerColorPrices = {}; renderPriceTable();
                     patchAlert('dp-pricing-alert', 'Reset endpoint not deployed. Cleared local view.', 'error');
                 } else {
                     patchAlert('dp-pricing-alert', 'Reset failed: ' + esc(err.message || err), 'error');
