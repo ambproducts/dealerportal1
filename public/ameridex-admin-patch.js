@@ -888,7 +888,7 @@
 
                     html += '<tr class="dp-color-row" id="dp-colors-' + escAttr(p.id) + '" style="display:none;">' +
                         '<td colspan="6" style="padding:0 0.75rem 0.75rem;background:#f9fafb;">' +
-                            '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:0.4rem;padding:0.5rem 0;">';
+                            '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;padding:0.5rem 0;">';
 
                     _patchColors.forEach(function(c) {
                         var productColorPricing = p.colorPricing || {};
@@ -898,10 +898,10 @@
                             : baseColorPrice;
                         var isColorOverride = dealerColorPrice !== baseColorPrice;
 
-                        html += '<div style="display:flex;align-items:center;gap:0.4rem;padding:0.3rem 0.5rem;background:#fff;border-radius:4px;border:1px solid #e5e7eb;">' +
+                        html += '<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#fff;border-radius:4px;border:1px solid #e5e7eb;">' +
                             '<span style="font-size:0.8rem;font-weight:600;min-width:70px;">' + esc(c.name) + '</span>' +
                             '<span class="admin-badge badge-' + (c.tier === 'solid' ? 'solid' : 'variegated') + '" style="font-size:0.6rem;">' + esc(c.tier) + '</span>' +
-                            '<span style="color:#9ca3af;font-size:0.75rem;">Base: $' + baseColorPrice.toFixed(2) + '</span>' +
+                            '<span style="color:#9ca3af;font-size:0.75rem;margin-left:4px;margin-right:4px;">Base: $' + baseColorPrice.toFixed(2) + '</span>' +
                             '<span style="color:#6b7280;font-size:0.82rem;">$</span>' +
                             '<input type="number" step="0.01" min="0" ' +
                                 'class="dp-price-input dp-color-price-input' + (isColorOverride ? ' dp-override' : '') + '" ' +
