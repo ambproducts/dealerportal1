@@ -1215,7 +1215,7 @@
                     '<input type="number" step="0.01" min="0" ' +
                         'id="edit-cp-' + escAttr(id) + '-' + escAttr(c.id) + '" ' +
                         'value="' + currentPrice.toFixed(2) + '" ' +
-                        'style="width:75px;padding:0.3rem 0.4rem;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem;text-align:right;">' +
+                        'style="width:100px;padding:0.3rem 0.4rem;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem;text-align:right;">' +
                 '</div>';
             });
 

@@ -110,7 +110,7 @@
             'margin-bottom:1rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; }' +
         '.dp-dealer-info-name { font-weight:700; color:#1e40af; font-size:1rem; }' +
         '.dp-dealer-info-code { font-size:0.85rem; color:#6b7280; }' +
-        '.dp-price-input { width:90px; padding:0.4rem 0.5rem; border:1px solid #e5e7eb; border-radius:6px; ' +
+        '.dp-price-input { width:110px; padding:0.4rem 0.5rem; border:1px solid #e5e7eb; border-radius:6px; ' +
             'font-size:0.85rem; text-align:right; font-weight:600; }' +
         '.dp-price-input:focus { outline:none; border-color:#2563eb; box-shadow:0 0 0 2px rgba(37,99,235,0.15); }' +
         '.dp-price-input.dp-modified { border-color:#f59e0b; background:#fffbeb; }' +
@@ -909,7 +909,7 @@
                                 'data-color-id="' + escAttr(c.id) + '" ' +
                                 'data-base-price="' + baseColorPrice.toFixed(2) + '" ' +
                                 'value="' + dealerColorPrice.toFixed(2) + '" ' +
-                                'style="width:70px;">' +
+                                'style="width:100px;">' +
                         '</div>';
                     });
 
@@ -952,8 +952,8 @@
                     var visible = target.style.display !== 'none';
                     target.style.display = visible ? 'none' : 'table-row';
                     btn.textContent = visible
-                        ? 'Hide Color Prices'
-                        : 'Color Prices (' + _patchColors.length + ')';
+                        ? 'Color Prices (' + _patchColors.length + ')'
+                        : 'Hide Color Prices';
                 }
             });
         });
