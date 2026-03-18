@@ -183,7 +183,7 @@
     }
 
     function isElevatedRole() {
-        return userRole === 'gm' || userRole === 'admin';
+        return userRole === 'gm' || userRole === 'admin' || userRole === 'salesrep';
     }
 
     // ============================================================
@@ -1326,7 +1326,7 @@
     }
 
     // ============================================================
-    // CUSTOMER DELETE CONFIRMATION (GM/Admin)
+    // CUSTOMER DELETE CONFIRMATION (GM/Admin/Salesrep)
     // ============================================================
     function openDeleteCustomerConfirm(customerId, customerName) {
         // Remove any existing modal

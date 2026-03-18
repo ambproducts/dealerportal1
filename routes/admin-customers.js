@@ -2,8 +2,9 @@
 // routes/admin-customers.js - Admin Customer Management v3.3
 // Date: 2026-02-28
 // ============================================================
-// Soft delete with undo for customers. Only admin/gm can access.
+// Soft delete with undo for customers. Admin, GM, and salesrep can access.
 // GM is scoped to their own dealer code for delete/restore.
+// Salesrep is scoped to their assignedDealers list for delete/restore.
 // Admin has unrestricted access across all dealers.
 // Deleting a customer cascade-soft-deletes their quotes.
 //
@@ -43,17 +44,33 @@ const { requireAuth, requireRole, requireAdmin } = require('../middleware/auth')
 // Soft-delete expiry: 30 days in milliseconds
 const PURGE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
 
-// All routes require authenticated admin or gm
-router.use(requireAuth, requireRole('admin', 'gm'));
+// All routes require authenticated admin, gm, or salesrep
+router.use(requireAuth, requireRole('admin', 'gm', 'salesrep'));
 
 // -----------------------------------------------------------
-// HELPER: Check if GM owns this customer (by dealer code)
+// HELPER: Check if user owns this customer (by dealer code)
 // Admin always passes. GM must have their dealerCode in the
 // customer's dealers array or dealerCode field.
+// Salesrep must have at least one of their assignedDealers
+// in the customer's dealers array.
 // -----------------------------------------------------------
-function gmOwnsCustomer(user, customer) {
+function userOwnsCustomer(user, customer) {
     if (user.role === 'admin') return true;
 
+    if (user.role === 'salesrep') {
+        const assignedDealers = (user.assignedDealers || []).map(d => d.toUpperCase());
+        // Check the dealers array
+        if (customer.dealers && Array.isArray(customer.dealers)) {
+            return customer.dealers.some(d => assignedDealers.includes(d.toUpperCase()));
+        }
+        // Fallback: check single dealerCode field
+        if (customer.dealerCode) {
+            return assignedDealers.includes(customer.dealerCode.toUpperCase());
+        }
+        return false;
+    }
+
+    // GM: check single dealerCode
     const myCode = user.dealerCode.toUpperCase();
 
     // Check the dealers array (primary method)
@@ -66,7 +83,7 @@ function gmOwnsCustomer(user, customer) {
         return customer.dealerCode.toUpperCase() === myCode;
     }
 
-    // If customer has no dealer association, deny for GM
+    // If customer has no dealer association, deny
     return false;
 }
 
@@ -75,7 +92,14 @@ function gmOwnsCustomer(user, customer) {
 // -----------------------------------------------------------
 router.get('/', (req, res) => {
     const customers = readJSON(CUSTOMERS_FILE);
-    res.json(customers.filter(c => !c.deleted));
+    let active = customers.filter(c => !c.deleted);
+
+    // Scope for GM/salesrep: only their dealer's customers
+    if (req.user.role === 'gm' || req.user.role === 'salesrep') {
+        active = active.filter(c => userOwnsCustomer(req.user, c));
+    }
+
+    res.json(active);
 });
 
 // -----------------------------------------------------------
@@ -86,9 +110,9 @@ router.get('/deleted', (req, res) => {
     const customers = readJSON(CUSTOMERS_FILE);
     let deleted = customers.filter(c => c.deleted === true);
 
-    // Scope for GM: only their dealer's customers
-    if (req.user.role === 'gm') {
-        deleted = deleted.filter(c => gmOwnsCustomer(req.user, c));
+    // Scope for GM/salesrep: only their dealer's customers
+    if (req.user.role === 'gm' || req.user.role === 'salesrep') {
+        deleted = deleted.filter(c => userOwnsCustomer(req.user, c));
     }
 
     deleted.sort((a, b) => new Date(b.deletedAt || 0) - new Date(a.deletedAt || 0));
@@ -213,14 +237,14 @@ router.put('/:id', (req, res) => {
         return res.status(404).json({ error: 'Customer not found' });
     }
 
-    // GM ownership check
-    if (!gmOwnsCustomer(req.user, customers[idx])) {
+    // Ownership check (GM/salesrep scoped to their dealers)
+    if (!userOwnsCustomer(req.user, customers[idx])) {
         return res.status(403).json({
-            error: 'Access denied. You can only edit customers for your dealer (' + req.user.dealerCode + ')'
+            error: 'Access denied. You can only edit customers for your assigned dealer(s).'
         });
     }
 
-    // GM cannot change the dealers array (only admin can)
+    // Only admin can change the dealers array
     const allowed = req.user.role === 'admin'
         ? ['name', 'email', 'company', 'phone', 'zipCode', 'notes', 'dealers']
         : ['name', 'email', 'company', 'phone', 'zipCode', 'notes'];
@@ -250,10 +274,10 @@ router.delete('/:id', (req, res) => {
         return res.status(404).json({ error: 'Customer not found' });
     }
 
-    // GM ownership check
-    if (!gmOwnsCustomer(req.user, customers[idx])) {
+    // Ownership check (GM/salesrep scoped to their dealers)
+    if (!userOwnsCustomer(req.user, customers[idx])) {
         return res.status(403).json({
-            error: 'Access denied. You can only delete customers for your dealer (' + req.user.dealerCode + ')'
+            error: 'Access denied. You can only delete customers for your assigned dealer(s).'
         });
     }
 
@@ -269,7 +293,7 @@ router.delete('/:id', (req, res) => {
     writeJSON(CUSTOMERS_FILE, customers);
 
     // Cascade: soft delete quotes for this customer
-    // GM cascade only deletes quotes at their dealer; admin deletes all
+    // GM/salesrep cascade only deletes quotes at their dealer(s); admin deletes all
     const quotes = readJSON(QUOTES_FILE);
     let cascadeCount = 0;
     quotes.forEach(q => {
@@ -278,6 +302,13 @@ router.delete('/:id', (req, res) => {
             if (req.user.role === 'gm') {
                 if (!q.dealerCode || q.dealerCode.toUpperCase() !== req.user.dealerCode.toUpperCase()) {
                     return; // Skip quotes from other dealers
+                }
+            }
+            // For salesrep, only cascade-delete quotes from their assigned dealers
+            if (req.user.role === 'salesrep') {
+                const assignedDealers = (req.user.assignedDealers || []).map(d => d.toUpperCase());
+                if (!q.dealerCode || !assignedDealers.includes(q.dealerCode.toUpperCase())) {
+                    return; // Skip quotes from unassigned dealers
                 }
             }
             q.deleted = true;
@@ -317,10 +348,10 @@ router.post('/:id/restore', (req, res) => {
         return res.status(404).json({ error: 'Deleted customer not found' });
     }
 
-    // GM ownership check
-    if (!gmOwnsCustomer(req.user, customers[idx])) {
+    // Ownership check (GM/salesrep scoped to their dealers)
+    if (!userOwnsCustomer(req.user, customers[idx])) {
         return res.status(403).json({
-            error: 'Access denied. You can only restore customers for your dealer (' + req.user.dealerCode + ')'
+            error: 'Access denied. You can only restore customers for your assigned dealer(s).'
         });
     }
 
@@ -337,7 +368,7 @@ router.post('/:id/restore', (req, res) => {
     writeJSON(CUSTOMERS_FILE, customers);
 
     // Restore cascade-deleted quotes for this customer
-    // GM only restores quotes at their dealer; admin restores all
+    // GM/salesrep only restores quotes at their dealer(s); admin restores all
     const quotes = readJSON(QUOTES_FILE);
     let restoredQuotes = 0;
     quotes.forEach(q => {
@@ -346,6 +377,13 @@ router.post('/:id/restore', (req, res) => {
             if (req.user.role === 'gm') {
                 if (!q.dealerCode || q.dealerCode.toUpperCase() !== req.user.dealerCode.toUpperCase()) {
                     return; // Skip quotes from other dealers
+                }
+            }
+            // For salesrep, only restore quotes from their assigned dealers
+            if (req.user.role === 'salesrep') {
+                const assignedDealers = (req.user.assignedDealers || []).map(d => d.toUpperCase());
+                if (!q.dealerCode || !assignedDealers.includes(q.dealerCode.toUpperCase())) {
+                    return; // Skip quotes from unassigned dealers
                 }
             }
             delete q.deleted;
