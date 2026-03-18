@@ -31,29 +31,32 @@ router.get('/', (req, res) => {
     const dealerCode = req.user.dealerCode;
     const userRole = req.user.role;
 
+    // Exclude soft-deleted customers from the active list
+    const active = customers.filter(c => !c.deleted);
+
     let filtered;
 
     // Non-admin users: only see customers whose dealers[] includes their dealerCode
     if (userRole === 'admin') {
         // Admin: see all customers across all dealers
-        filtered = customers;
+        filtered = active;
     } else if (userRole === 'salesrep') {
         // Salesrep: see customers across all assigned dealers + DIRECT
         const assignedDealers = req.user.assignedDealers || [];
         const allCodes = assignedDealers.concat('DIRECT');
         if (dealerCode && dealerCode !== 'SALESREP') {
             // If working under a specific dealer context, filter to that dealer
-            filtered = customers.filter(c =>
+            filtered = active.filter(c =>
                 c.dealers && c.dealers.includes(dealerCode)
             );
         } else {
             // No specific context: show all accessible customers
-            filtered = customers.filter(c =>
+            filtered = active.filter(c =>
                 c.dealers && c.dealers.some(d => allCodes.includes(d))
             );
         }
     } else {
-        filtered = customers.filter(c =>
+        filtered = active.filter(c =>
             c.dealers && c.dealers.includes(dealerCode)
         );
     }
@@ -174,27 +177,30 @@ router.get('/search', (req, res) => {
     const dealerCode = req.user.dealerCode;
     const userRole = req.user.role;
 
+    // Exclude soft-deleted customers from search
+    const active = customers.filter(c => !c.deleted);
+
     let searchPool;
 
     // Non-admin users: only search within their dealer's customers
     if (userRole === 'admin') {
         // Admin: search across all customers
-        searchPool = customers;
+        searchPool = active;
     } else if (userRole === 'salesrep') {
         // Salesrep: search across all assigned dealers + DIRECT
         const assignedDealers = req.user.assignedDealers || [];
         const allCodes = assignedDealers.concat('DIRECT');
         if (dealerCode && dealerCode !== 'SALESREP') {
-            searchPool = customers.filter(c =>
+            searchPool = active.filter(c =>
                 c.dealers && c.dealers.includes(dealerCode)
             );
         } else {
-            searchPool = customers.filter(c =>
+            searchPool = active.filter(c =>
                 c.dealers && c.dealers.some(d => allCodes.includes(d))
             );
         }
     } else {
-        searchPool = customers.filter(c =>
+        searchPool = active.filter(c =>
             c.dealers && c.dealers.includes(dealerCode)
         );
     }
