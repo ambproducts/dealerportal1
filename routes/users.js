@@ -9,11 +9,12 @@ router.use(requireAuth);
 // GET /api/users
 router.get('/', requireRole('admin', 'gm'), (req, res) => {
     const users = readJSON(USERS_FILE);
-    let filtered = users;
+    // Filter out soft-deleted users so they never appear in the GM "My Team" panel
+    let filtered = users.filter(u => !u.isDeleted);
 
     if (req.user.role === 'gm') {
         // GM sees their dealer's users but NOT salesrep users
-        filtered = users.filter(u => u.dealerCode === req.user.dealerCode && u.role !== 'salesrep');
+        filtered = filtered.filter(u => u.dealerCode === req.user.dealerCode && u.role !== 'salesrep');
     }
 
     const safe = filtered.map(u => {
