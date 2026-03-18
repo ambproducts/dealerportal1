@@ -1,7 +1,14 @@
 // ============================================================
-// AmeriDex Dealer Portal - Quotes & Customers Page v2.7
+// AmeriDex Dealer Portal - Quotes & Customers Page v2.8
 // Date: 2026-03-18
 // ============================================================
+// v2.8 Changes (2026-03-18):
+//   - FEAT: Add Customer button in customer panel for GM/Admin.
+//     Opens a modal with all customer fields (name, email,
+//     company, phone, zip code, notes). New customer is
+//     automatically associated with the current dealer via
+//     POST /api/customers. Refreshes list on success.
+//
 // v2.7 Changes (2026-03-18):
 //   - FEAT: GM users can now edit and delete customers belonging
 //     to their dealer. Edit form includes ALL customer fields:
@@ -1196,6 +1203,129 @@
     }
 
     // ============================================================
+    // ADD CUSTOMER MODAL (GM/Admin)
+    // ============================================================
+    function openAddCustomerModal() {
+        // Remove any existing modal
+        var existing = document.getElementById('add-customer-modal');
+        if (existing) existing.remove();
+
+        var modal = document.createElement('div');
+        modal.id = 'add-customer-modal';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.6);z-index:3000;display:flex;justify-content:center;align-items:center;padding:1rem;';
+
+        var panel = document.createElement('div');
+        panel.style.cssText = 'background:#fff;border-radius:14px;width:100%;max-width:520px;box-shadow:0 25px 50px rgba(0,0,0,0.25);overflow:hidden;';
+
+        // Header
+        var header = document.createElement('div');
+        header.style.cssText = 'background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;padding:1rem 1.25rem;display:flex;justify-content:space-between;align-items:center;';
+        header.innerHTML = '<h3 style="margin:0;font-size:1.05rem;">Add Customer</h3>'
+            + '<button id="ac-close" style="background:rgba(255,255,255,0.2);border:none;color:#fff;width:28px;height:28px;border-radius:6px;cursor:pointer;font-size:1rem;display:flex;align-items:center;justify-content:center;">&times;</button>';
+        panel.appendChild(header);
+
+        // Body
+        var body = document.createElement('div');
+        body.style.cssText = 'padding:1.25rem;';
+
+        var fields = [
+            { id: 'ac-name', label: 'Name *', value: '', type: 'text', required: true },
+            { id: 'ac-email', label: 'Email', value: '', type: 'email', required: false },
+            { id: 'ac-company', label: 'Company', value: '', type: 'text', required: false },
+            { id: 'ac-phone', label: 'Phone', value: '', type: 'tel', required: false },
+            { id: 'ac-zip', label: 'Zip Code *', value: '', type: 'text', required: true }
+        ];
+
+        var formHtml = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;">';
+        fields.forEach(function (f) {
+            var span = (f.id === 'ac-name' || f.id === 'ac-email') ? 'grid-column:span 1;' : '';
+            formHtml += '<div style="' + span + '">'
+                + '<label for="' + f.id + '" style="display:block;font-size:0.82rem;font-weight:600;color:#374151;margin-bottom:0.25rem;">' + f.label + '</label>'
+                + '<input type="' + f.type + '" id="' + f.id + '" value="" placeholder="' + f.label.replace(' *', '') + '" style="width:100%;padding:0.5rem 0.7rem;border:1px solid #d1d5db;border-radius:8px;font-size:0.9rem;box-sizing:border-box;">'
+                + '</div>';
+        });
+        formHtml += '</div>';
+
+        // Notes field (full width)
+        formHtml += '<div style="margin-top:0.75rem;">'
+            + '<label for="ac-notes" style="display:block;font-size:0.82rem;font-weight:600;color:#374151;margin-bottom:0.25rem;">Notes</label>'
+            + '<textarea id="ac-notes" rows="3" placeholder="Optional notes about this customer" style="width:100%;padding:0.5rem 0.7rem;border:1px solid #d1d5db;border-radius:8px;font-size:0.9rem;resize:vertical;box-sizing:border-box;"></textarea>'
+            + '</div>';
+
+        // Error display
+        formHtml += '<div id="ac-error" style="display:none;margin-top:0.75rem;padding:0.5rem 0.75rem;background:#fef2f2;color:#dc2626;border-radius:8px;font-size:0.85rem;"></div>';
+
+        // Buttons
+        formHtml += '<div style="display:flex;gap:0.75rem;margin-top:1rem;justify-content:flex-end;">'
+            + '<button id="ac-cancel" style="padding:0.5rem 1.25rem;background:#f3f4f6;color:#374151;border:none;border-radius:8px;font-size:0.9rem;font-weight:600;cursor:pointer;">Cancel</button>'
+            + '<button id="ac-save" style="padding:0.5rem 1.25rem;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:0.9rem;font-weight:600;cursor:pointer;">Add Customer</button>'
+            + '</div>';
+
+        body.innerHTML = formHtml;
+        panel.appendChild(body);
+        modal.appendChild(panel);
+        document.body.appendChild(modal);
+
+        // Close handlers
+        function closeModal() { modal.remove(); }
+        document.getElementById('ac-close').addEventListener('click', closeModal);
+        document.getElementById('ac-cancel').addEventListener('click', closeModal);
+        modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+
+        // Escape key
+        function onEsc(e) { if (e.key === 'Escape') { closeModal(); document.removeEventListener('keydown', onEsc); } }
+        document.addEventListener('keydown', onEsc);
+
+        // Save handler
+        document.getElementById('ac-save').addEventListener('click', function () {
+            var errEl = document.getElementById('ac-error');
+            errEl.style.display = 'none';
+
+            var customerData = {
+                name: document.getElementById('ac-name').value.trim(),
+                email: document.getElementById('ac-email').value.trim(),
+                company: document.getElementById('ac-company').value.trim(),
+                phone: document.getElementById('ac-phone').value.trim(),
+                zipCode: document.getElementById('ac-zip').value.trim()
+            };
+
+            if (!customerData.name) {
+                errEl.textContent = 'Name is required.';
+                errEl.style.display = 'block';
+                document.getElementById('ac-name').focus();
+                return;
+            }
+            if (!customerData.zipCode) {
+                errEl.textContent = 'Zip code is required.';
+                errEl.style.display = 'block';
+                document.getElementById('ac-zip').focus();
+                return;
+            }
+
+            var saveBtn = document.getElementById('ac-save');
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Adding...';
+
+            apiPost('/api/customers', customerData)
+                .then(function (result) {
+                    closeModal();
+                    // Refresh customer list
+                    customersState.allData = null;
+                    fetchCustomers();
+                })
+                .catch(function (err) {
+                    saveBtn.disabled = false;
+                    saveBtn.textContent = 'Add Customer';
+                    errEl.textContent = err.message || 'Failed to add customer.';
+                    errEl.style.display = 'block';
+                });
+        });
+
+        // Focus name field
+        document.getElementById('ac-name').focus();
+    }
+
+    // ============================================================
     // CUSTOMER DELETE CONFIRMATION (GM/Admin)
     // ============================================================
     function openDeleteCustomerConfirm(customerId, customerName) {
@@ -1382,6 +1512,13 @@
             customersState.page = 1;
             fetchCustomers();
         });
+
+        // Show "Add Customer" button for GM/Admin roles
+        var addCustBtn = document.getElementById('customers-add-btn');
+        if (addCustBtn && isElevatedRole()) {
+            addCustBtn.style.display = '';
+            addCustBtn.addEventListener('click', function () { openAddCustomerModal(); });
+        }
 
         document.getElementById('customers-clear-filters').addEventListener('click', function () {
             customersSearchInput.value = '';

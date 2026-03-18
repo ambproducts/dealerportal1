@@ -225,10 +225,10 @@ router.get('/search', (req, res) => {
 // =============================================================
 // POST /api/customers
 // Required fields: name, zipCode
-// Optional fields: email, company, phone
+// Optional fields: email, company, phone, notes
 // =============================================================
 router.post('/', (req, res) => {
-    const { name, email, company, phone, zipCode } = req.body;
+    const { name, email, company, phone, zipCode, notes } = req.body;
 
     if (!name || !zipCode) {
         return res.status(400).json({ error: 'Name and zip code are required' });
@@ -242,6 +242,7 @@ router.post('/', (req, res) => {
     const sanitizedName = sanitizeInput(name);
     const sanitizedCompany = sanitizeInput(company);
     const sanitizedPhone = sanitizeInput(phone);
+    const sanitizedNotes = sanitizeInput(notes || '');
     const normalizedEmail = sanitizeInput((email || '').toLowerCase().trim());
     const trimmedZip = zipCode.trim();
 
@@ -268,6 +269,7 @@ router.post('/', (req, res) => {
         if (company !== undefined) existing.company = sanitizedCompany;
         if (phone !== undefined) existing.phone = sanitizedPhone;
         if (zipCode !== undefined) existing.zipCode = trimmedZip;
+        if (notes !== undefined) existing.notes = sanitizedNotes;
         if (!existing.dealers) existing.dealers = [];
         if (!existing.dealers.includes(dealerCode)) {
             existing.dealers.push(dealerCode);
@@ -293,7 +295,7 @@ router.post('/', (req, res) => {
         lastContact: new Date().toISOString(),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        notes: ''
+        notes: sanitizedNotes
     };
 
     customers.push(newCustomer);
