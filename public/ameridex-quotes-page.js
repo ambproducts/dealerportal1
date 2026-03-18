@@ -1,7 +1,18 @@
 // ============================================================
-// AmeriDex Dealer Portal - Quotes & Customers Page v2.6
-// Date: 2026-03-04
+// AmeriDex Dealer Portal - Quotes & Customers Page v2.7
+// Date: 2026-03-18
 // ============================================================
+// v2.7 Changes (2026-03-18):
+//   - FEAT: GM users can now edit and delete customers belonging
+//     to their dealer. Edit form includes ALL customer fields:
+//     name, email, company, phone, zip code, and notes.
+//   - FEAT: Delete customer with confirmation dialog, soft-deletes
+//     the customer and cascade-deletes their quotes.
+//   - FEAT: Edit/Delete buttons shown in customer table Actions
+//     column for GM and Admin roles only.
+//   - ADD: apiPut() and apiDelete() helper functions.
+//   - ADD: Customer edit modal and delete confirmation UI.
+//
 // v2.6 Changes (2026-03-04):
 //   - FEAT: Frontdesk users now see "Request Delete" button.
 //     Calls POST /api/quotes/:id/request-action with type=delete.
@@ -221,6 +232,69 @@
             if (!res.ok) {
                 return res.json().then(function (errData) {
                     throw new Error(errData.error || 'Request failed');
+                });
+            }
+            return res.json();
+        });
+    }
+
+    function apiPut(path, body) {
+        var headers = { 'Content-Type': 'application/json' };
+        if (authToken) {
+            headers['Authorization'] = 'Bearer ' + authToken;
+        } else if (dealerCode) {
+            headers['X-Dealer-Code'] = dealerCode;
+        }
+        if (userRole === 'salesrep' && window.getActiveDealerCode) {
+            var ctx = window.getActiveDealerCode();
+            if (ctx && ctx !== 'DIRECT') headers['X-Dealer-Context'] = ctx;
+        }
+
+        return fetch(API_BASE + path, {
+            method: 'PUT',
+            headers: headers,
+            body: JSON.stringify(body || {})
+        })
+        .then(function (res) {
+            if (res.status === 401 || res.status === 403) {
+                return res.json().then(function (errData) {
+                    throw new Error(errData.error || 'Access denied');
+                });
+            }
+            if (!res.ok) {
+                return res.json().then(function (errData) {
+                    throw new Error(errData.error || 'Request failed');
+                });
+            }
+            return res.json();
+        });
+    }
+
+    function apiDelete(path) {
+        var headers = { 'Content-Type': 'application/json' };
+        if (authToken) {
+            headers['Authorization'] = 'Bearer ' + authToken;
+        } else if (dealerCode) {
+            headers['X-Dealer-Code'] = dealerCode;
+        }
+        if (userRole === 'salesrep' && window.getActiveDealerCode) {
+            var ctx = window.getActiveDealerCode();
+            if (ctx && ctx !== 'DIRECT') headers['X-Dealer-Context'] = ctx;
+        }
+
+        return fetch(API_BASE + path, {
+            method: 'DELETE',
+            headers: headers
+        })
+        .then(function (res) {
+            if (res.status === 401 || res.status === 403) {
+                return res.json().then(function (errData) {
+                    throw new Error(errData.error || 'Access denied');
+                });
+            }
+            if (!res.ok) {
+                return res.json().then(function (errData) {
+                    throw new Error(errData.error || 'Delete failed');
                 });
             }
             return res.json();
@@ -900,6 +974,12 @@
             html += '<td class="dt-actions">';
             html += '<button class="btn btn-outline btn-xs" data-view-quotes="' + escapeHTML(c.id) + '" data-customer-name="' + escapeHTML(c.name) + '">View Quotes</button> ';
             html += '<a href="dealer-portal.html?newQuote=1&custName=' + encodeURIComponent(c.name || '') + '&custEmail=' + encodeURIComponent(c.email || '') + '&custCompany=' + encodeURIComponent(c.company || '') + '&custPhone=' + encodeURIComponent(c.phone || '') + '" class="btn btn-primary btn-xs">+ Quote</a>';
+
+            // GM/Admin: Edit and Delete buttons for customer management
+            if (isElevatedRole()) {
+                html += ' <button class="btn btn-outline btn-xs" data-edit-customer="' + escapeHTML(c.id) + '" style="color:#2563eb;border-color:#2563eb;">Edit</button>';
+                html += ' <button class="btn btn-xs" data-delete-customer="' + escapeHTML(c.id) + '" data-customer-name="' + escapeHTML(c.name) + '" style="background:#fee2e2;color:#dc2626;border-color:#fecaca;">Delete</button>';
+            }
             html += '</td>';
 
             html += '</tr>';
@@ -921,6 +1001,24 @@
                 quotesState.search = customerName || '';
                 quotesState.page = 1;
                 fetchQuotes();
+            });
+        });
+
+        // Wire up Edit Customer buttons (GM/Admin)
+        contentEl.querySelectorAll('[data-edit-customer]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var custId = btn.getAttribute('data-edit-customer');
+                var cust = customers.find(function (c) { return c.id === custId; });
+                if (cust) openEditCustomerModal(cust);
+            });
+        });
+
+        // Wire up Delete Customer buttons (GM/Admin)
+        contentEl.querySelectorAll('[data-delete-customer]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var custId = btn.getAttribute('data-delete-customer');
+                var custName = btn.getAttribute('data-customer-name');
+                openDeleteCustomerConfirm(custId, custName);
             });
         });
     }
@@ -970,6 +1068,199 @@
                     if (viewEl) { viewEl.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
                 }
             });
+        });
+    }
+
+    // ============================================================
+    // CUSTOMER EDIT MODAL (GM/Admin)
+    // ============================================================
+    function openEditCustomerModal(customer) {
+        // Remove any existing modal
+        var existing = document.getElementById('edit-customer-modal');
+        if (existing) existing.remove();
+
+        var modal = document.createElement('div');
+        modal.id = 'edit-customer-modal';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.6);z-index:3000;display:flex;justify-content:center;align-items:center;padding:1rem;';
+
+        var panel = document.createElement('div');
+        panel.style.cssText = 'background:#fff;border-radius:14px;width:100%;max-width:520px;box-shadow:0 25px 50px rgba(0,0,0,0.25);overflow:hidden;';
+
+        // Header
+        var header = document.createElement('div');
+        header.style.cssText = 'background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;padding:1rem 1.25rem;display:flex;justify-content:space-between;align-items:center;';
+        header.innerHTML = '<h3 style="margin:0;font-size:1.05rem;">Edit Customer</h3>'
+            + '<button id="edit-cust-close" style="background:rgba(255,255,255,0.2);border:none;color:#fff;width:28px;height:28px;border-radius:6px;cursor:pointer;font-size:1rem;display:flex;align-items:center;justify-content:center;">&times;</button>';
+        panel.appendChild(header);
+
+        // Body
+        var body = document.createElement('div');
+        body.style.cssText = 'padding:1.25rem;';
+
+        var fields = [
+            { id: 'ec-name', label: 'Name *', value: customer.name || '', type: 'text', required: true },
+            { id: 'ec-email', label: 'Email', value: customer.email || '', type: 'email', required: false },
+            { id: 'ec-company', label: 'Company', value: customer.company || '', type: 'text', required: false },
+            { id: 'ec-phone', label: 'Phone', value: customer.phone || '', type: 'tel', required: false },
+            { id: 'ec-zip', label: 'Zip Code *', value: customer.zipCode || '', type: 'text', required: true }
+        ];
+
+        var formHtml = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;">';
+        fields.forEach(function (f) {
+            var span = (f.id === 'ec-name' || f.id === 'ec-email') ? 'grid-column:span 1;' : '';
+            formHtml += '<div style="' + span + '">'
+                + '<label for="' + f.id + '" style="display:block;font-size:0.82rem;font-weight:600;color:#374151;margin-bottom:0.25rem;">' + f.label + '</label>'
+                + '<input type="' + f.type + '" id="' + f.id + '" value="' + escapeHTML(f.value) + '" style="width:100%;padding:0.5rem 0.7rem;border:1px solid #d1d5db;border-radius:8px;font-size:0.9rem;box-sizing:border-box;">'
+                + '</div>';
+        });
+        formHtml += '</div>';
+
+        // Notes field (full width)
+        formHtml += '<div style="margin-top:0.75rem;">'
+            + '<label for="ec-notes" style="display:block;font-size:0.82rem;font-weight:600;color:#374151;margin-bottom:0.25rem;">Notes</label>'
+            + '<textarea id="ec-notes" rows="3" style="width:100%;padding:0.5rem 0.7rem;border:1px solid #d1d5db;border-radius:8px;font-size:0.9rem;resize:vertical;box-sizing:border-box;">' + escapeHTML(customer.notes || '') + '</textarea>'
+            + '</div>';
+
+        // Error display
+        formHtml += '<div id="ec-error" style="display:none;margin-top:0.75rem;padding:0.5rem 0.75rem;background:#fef2f2;color:#dc2626;border-radius:8px;font-size:0.85rem;"></div>';
+
+        // Buttons
+        formHtml += '<div style="display:flex;gap:0.75rem;margin-top:1rem;justify-content:flex-end;">'
+            + '<button id="ec-cancel" style="padding:0.5rem 1.25rem;background:#f3f4f6;color:#374151;border:none;border-radius:8px;font-size:0.9rem;font-weight:600;cursor:pointer;">Cancel</button>'
+            + '<button id="ec-save" style="padding:0.5rem 1.25rem;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:0.9rem;font-weight:600;cursor:pointer;">Save Changes</button>'
+            + '</div>';
+
+        body.innerHTML = formHtml;
+        panel.appendChild(body);
+        modal.appendChild(panel);
+        document.body.appendChild(modal);
+
+        // Close handlers
+        function closeModal() { modal.remove(); }
+        document.getElementById('edit-cust-close').addEventListener('click', closeModal);
+        document.getElementById('ec-cancel').addEventListener('click', closeModal);
+        modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+
+        // Escape key
+        function onEsc(e) { if (e.key === 'Escape') { closeModal(); document.removeEventListener('keydown', onEsc); } }
+        document.addEventListener('keydown', onEsc);
+
+        // Save handler
+        document.getElementById('ec-save').addEventListener('click', function () {
+            var errEl = document.getElementById('ec-error');
+            errEl.style.display = 'none';
+
+            var updates = {
+                name: document.getElementById('ec-name').value.trim(),
+                email: document.getElementById('ec-email').value.trim(),
+                company: document.getElementById('ec-company').value.trim(),
+                phone: document.getElementById('ec-phone').value.trim(),
+                zipCode: document.getElementById('ec-zip').value.trim(),
+                notes: document.getElementById('ec-notes').value
+            };
+
+            if (!updates.name) {
+                errEl.textContent = 'Name is required.';
+                errEl.style.display = 'block';
+                document.getElementById('ec-name').focus();
+                return;
+            }
+            if (!updates.zipCode) {
+                errEl.textContent = 'Zip code is required.';
+                errEl.style.display = 'block';
+                document.getElementById('ec-zip').focus();
+                return;
+            }
+
+            var saveBtn = document.getElementById('ec-save');
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saving...';
+
+            apiPut('/api/admin/customers/' + customer.id, updates)
+                .then(function (result) {
+                    closeModal();
+                    // Refresh customer list
+                    customersState.allData = null;
+                    fetchCustomers();
+                })
+                .catch(function (err) {
+                    saveBtn.disabled = false;
+                    saveBtn.textContent = 'Save Changes';
+                    errEl.textContent = err.message || 'Failed to save customer.';
+                    errEl.style.display = 'block';
+                });
+        });
+
+        // Focus name field
+        document.getElementById('ec-name').focus();
+    }
+
+    // ============================================================
+    // CUSTOMER DELETE CONFIRMATION (GM/Admin)
+    // ============================================================
+    function openDeleteCustomerConfirm(customerId, customerName) {
+        // Remove any existing modal
+        var existing = document.getElementById('delete-customer-modal');
+        if (existing) existing.remove();
+
+        var modal = document.createElement('div');
+        modal.id = 'delete-customer-modal';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.6);z-index:3000;display:flex;justify-content:center;align-items:center;padding:1rem;';
+
+        var panel = document.createElement('div');
+        panel.style.cssText = 'background:#fff;border-radius:14px;width:100%;max-width:420px;box-shadow:0 25px 50px rgba(0,0,0,0.25);overflow:hidden;';
+
+        // Header
+        var header = document.createElement('div');
+        header.style.cssText = 'background:linear-gradient(135deg,#dc2626,#991b1b);color:#fff;padding:1rem 1.25rem;';
+        header.innerHTML = '<h3 style="margin:0;font-size:1.05rem;">Delete Customer</h3>';
+        panel.appendChild(header);
+
+        // Body
+        var body = document.createElement('div');
+        body.style.cssText = 'padding:1.25rem;';
+        body.innerHTML = '<p style="margin:0 0 0.75rem;font-size:0.92rem;color:#374151;">Are you sure you want to delete <strong>' + escapeHTML(customerName) + '</strong>?</p>'
+            + '<p style="margin:0 0 1rem;font-size:0.85rem;color:#6b7280;">This will soft-delete the customer and all their associated quotes. This action can be undone by an admin.</p>'
+            + '<div id="dc-error" style="display:none;margin-bottom:0.75rem;padding:0.5rem 0.75rem;background:#fef2f2;color:#dc2626;border-radius:8px;font-size:0.85rem;"></div>'
+            + '<div style="display:flex;gap:0.75rem;justify-content:flex-end;">'
+            + '<button id="dc-cancel" style="padding:0.5rem 1.25rem;background:#f3f4f6;color:#374151;border:none;border-radius:8px;font-size:0.9rem;font-weight:600;cursor:pointer;">Cancel</button>'
+            + '<button id="dc-confirm" style="padding:0.5rem 1.25rem;background:#dc2626;color:#fff;border:none;border-radius:8px;font-size:0.9rem;font-weight:600;cursor:pointer;">Delete Customer</button>'
+            + '</div>';
+        panel.appendChild(body);
+        modal.appendChild(panel);
+        document.body.appendChild(modal);
+
+        // Close handlers
+        function closeModal() { modal.remove(); }
+        document.getElementById('dc-cancel').addEventListener('click', closeModal);
+        modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+
+        // Escape key
+        function onEsc(e) { if (e.key === 'Escape') { closeModal(); document.removeEventListener('keydown', onEsc); } }
+        document.addEventListener('keydown', onEsc);
+
+        // Delete handler
+        document.getElementById('dc-confirm').addEventListener('click', function () {
+            var errEl = document.getElementById('dc-error');
+            errEl.style.display = 'none';
+
+            var confirmBtn = document.getElementById('dc-confirm');
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = 'Deleting...';
+
+            apiDelete('/api/admin/customers/' + customerId)
+                .then(function (result) {
+                    closeModal();
+                    // Refresh customer list
+                    customersState.allData = null;
+                    fetchCustomers();
+                })
+                .catch(function (err) {
+                    confirmBtn.disabled = false;
+                    confirmBtn.textContent = 'Delete Customer';
+                    errEl.textContent = err.message || 'Failed to delete customer.';
+                    errEl.style.display = 'block';
+                });
         });
     }
 

@@ -213,7 +213,17 @@ router.put('/:id', (req, res) => {
         return res.status(404).json({ error: 'Customer not found' });
     }
 
-    const allowed = ['name', 'email', 'company', 'phone', 'zipCode', 'notes', 'dealers'];
+    // GM ownership check
+    if (!gmOwnsCustomer(req.user, customers[idx])) {
+        return res.status(403).json({
+            error: 'Access denied. You can only edit customers for your dealer (' + req.user.dealerCode + ')'
+        });
+    }
+
+    // GM cannot change the dealers array (only admin can)
+    const allowed = req.user.role === 'admin'
+        ? ['name', 'email', 'company', 'phone', 'zipCode', 'notes', 'dealers']
+        : ['name', 'email', 'company', 'phone', 'zipCode', 'notes'];
     allowed.forEach(field => {
         if (req.body[field] !== undefined) {
             customers[idx][field] = field === 'email'
