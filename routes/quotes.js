@@ -1,7 +1,15 @@
 // ============================================================
 // routes/quotes.js - Quote CRUD with per-dealer pricing
-// Date: 2026-03-15
+// Date: 2026-03-21
 // ============================================================
+// v3.9 (2026-03-21):
+//   FEAT: statusHistory audit trail on every quote.
+//   - pushStatusHistory() records { from, to, changedBy, role, note, at }
+//   - Initialized on quote creation (draft) and every transition:
+//     submit, revision, approve-revision, request-action, resolve-action,
+//     GM/admin edits on submitted quotes, soft-delete, and duplicate.
+//   - Non-breaking: existing quotes without statusHistory get [] on next transition.
+//
 // v3.8.2 (2026-03-15):
 //   FIX: Admin cross-dealer quote editing now resolves the quote
 //        owner's dealer for pricing instead of using the admin's
@@ -62,6 +70,24 @@ function calcItemTotal(item) {
 function recalcQuoteTotal(quote) {
     quote.totalAmount = quote.lineItems.reduce((sum, i) => sum + (i.total || 0), 0);
     quote.totalAmount = Math.round(quote.totalAmount * 100) / 100;
+}
+
+// =============================================================
+// AUDIT TRAIL: statusHistory helper  (v3.9)
+// Appends a timestamped entry every time a quote's status changes.
+// Non-breaking: quotes without statusHistory simply get an empty
+// array on their next transition.
+// =============================================================
+function pushStatusHistory(quote, newStatus, actor, actorRole, note) {
+    if (!quote.statusHistory) quote.statusHistory = [];
+    quote.statusHistory.push({
+        from:      quote.status || null,
+        to:        newStatus,
+        changedBy: actor,
+        role:      actorRole,
+        note:      (note || '').trim() || null,
+        at:        new Date().toISOString()
+    });
 }
 
 // Build line item using salesrep's direct-sale pricing
@@ -173,7 +199,6 @@ function findQuoteIndexByParam(quotes, paramId, user) {
         matchesParam(q, paramId) && q.dealerCode === user.dealerCode && !q.deleted
     );
 }
-
 
 function upsertCustomer(customerData, dealerCode, existingCustomerId) {
     if (!customerData || !customerData.name || !customerData.zipCode) {
@@ -370,9 +395,7 @@ router.get('/pending-overrides', requireRole('admin', 'gm', 'salesrep'), (req, r
     quotes.forEach(q => {
         if (q.deleted) return;
         if (req.user.role === 'gm' && q.dealerCode !== req.user.dealerCode) return;
-        // GM should not see salesrep pending overrides (admin only)
         if (req.user.role === 'gm' && q.createdByRole === 'salesrep') return;
-        // Salesrep only sees their own pending overrides
         if (req.user.role === 'salesrep' && q.salesRepId !== req.user.id) return;
 
         (q.lineItems || []).forEach((item, idx) => {
@@ -416,12 +439,9 @@ router.get('/pending-actions', requireRole('admin', 'gm', 'salesrep'), (req, res
     quotes.forEach(q => {
         if (q.deleted) return;
         if (req.user.role === 'gm' && q.dealerCode !== req.user.dealerCode) return;
-        // GM should not see salesrep pending actions (admin only)
         if (req.user.role === 'gm' && q.createdByRole === 'salesrep') return;
-        // Salesrep only sees their own pending actions
         if (req.user.role === 'salesrep' && q.salesRepId !== req.user.id) return;
 
-        // 1. Pending quote-level actions (delete / revision requests)
         if (q.pendingAction && q.pendingAction.type) {
             items.push({
                 kind:          'action',
@@ -438,7 +458,6 @@ router.get('/pending-actions', requireRole('admin', 'gm', 'salesrep'), (req, res
             });
         }
 
-        // 2. Pending price overrides on line items
         (q.lineItems || []).forEach((item, idx) => {
             if (item.priceOverride && item.priceOverride.status === 'pending') {
                 items.push({
@@ -483,7 +502,6 @@ router.post('/:id/request-action', async (req, res) => {
     const idx    = findQuoteIndexByParam(quotes, req.params.id, req.user);
     if (idx === -1) return res.status(404).json({ error: 'Quote not found' });
 
-    // Prevent stacking a second pending action on top of an existing one
     if (quotes[idx].pendingAction) {
         return res.status(409).json({
             error: 'This quote already has a pending action awaiting GM approval',
@@ -494,31 +512,33 @@ router.post('/:id/request-action', async (req, res) => {
     const previousStatus = quotes[idx].status;
 
     quotes[idx].pendingAction = {
-        type:           type,
-        requestedBy:    req.user.username,
+        type:            type,
+        requestedBy:     req.user.username,
         requestedByRole: req.user.role,
-        requestedAt:    new Date().toISOString(),
-        note:           (note || '').trim(),
-        previousStatus: previousStatus
+        requestedAt:     new Date().toISOString(),
+        note:            (note || '').trim(),
+        previousStatus:  previousStatus
     };
 
-    // Set a visual status so the quote table can show a badge
-    quotes[idx].status    = type === 'delete' ? 'pending-delete' : 'pending-revision';
+    const newActionStatus = type === 'delete' ? 'pending-delete' : 'pending-revision';
+    pushStatusHistory(quotes[idx], newActionStatus, req.user.username, req.user.role,
+        (note || '').trim() || type + ' requested');
+
+    quotes[idx].status    = newActionStatus;
     quotes[idx].updatedAt = new Date().toISOString();
 
     writeJSON(QUOTES_FILE, quotes);
 
-    console.log('[Quotes v3.8.1] Action requested:', quotes[idx].quoteNumber,
+    console.log('[Quotes v3.9] Action requested:', quotes[idx].quoteNumber,
         '| type:', type, '| by:', req.user.username, '(' + req.user.role + ')');
 
     res.json({
-        message:     `${type === 'delete' ? 'Delete' : 'Revision'} request submitted. Awaiting GM approval.`,
-        quoteNumber: quotes[idx].quoteNumber,
-        status:      quotes[idx].status,
+        message:       `${type === 'delete' ? 'Delete' : 'Revision'} request submitted. Awaiting GM approval.`,
+        quoteNumber:   quotes[idx].quoteNumber,
+        status:        quotes[idx].status,
         pendingAction: quotes[idx].pendingAction
     });
 
-    // Fire-and-forget Formspree notification to GM
     notifyPendingActionViaFormspree(quotes[idx], type, req.user.username, note || '');
 });
 
@@ -527,10 +547,6 @@ router.post('/:id/request-action', async (req, res) => {
 // POST /api/quotes/:id/resolve-action  (v3.8)
 // GM/admin only.
 // Body: { approved: true|false }
-//   approved=true  + type=delete   -> soft-delete the quote
-//   approved=true  + type=revision -> set status to 'revision'
-//   approved=false                 -> restore previousStatus,
-//                                     clear pendingAction
 // =============================================================
 router.post('/:id/resolve-action', requireRole('admin', 'gm'), async (req, res) => {
     const { approved } = req.body;
@@ -554,12 +570,16 @@ router.post('/:id/resolve-action', requireRole('admin', 'gm'), async (req, res) 
 
     if (isApproved) {
         if (actionType === 'delete') {
+            pushStatusHistory(quotes[idx], 'deleted', req.user.username, req.user.role,
+                'Delete request approved');
             quotes[idx].deleted       = true;
             quotes[idx].deletedBy     = req.user.username;
             quotes[idx].deletedByRole = req.user.role;
             quotes[idx].deletedAt     = now;
             quotes[idx].status        = 'deleted';
         } else if (actionType === 'revision') {
+            pushStatusHistory(quotes[idx], 'revision', req.user.username, req.user.role,
+                'Revision request approved' + (action.note ? ': ' + action.note : ''));
             quotes[idx].status              = 'revision';
             quotes[idx].revisionReason      = action.note || 'Revision approved by GM';
             quotes[idx].revisionRequestedBy = action.requestedBy;
@@ -568,11 +588,12 @@ router.post('/:id/resolve-action', requireRole('admin', 'gm'), async (req, res) 
             quotes[idx].revisionApprovedAt  = now;
         }
     } else {
-        // Denied: restore the status that existed before the request
-        quotes[idx].status = action.previousStatus || 'draft';
+        const restoredStatus = action.previousStatus || 'draft';
+        pushStatusHistory(quotes[idx], restoredStatus, req.user.username, req.user.role,
+            actionType + ' request denied');
+        quotes[idx].status = restoredStatus;
     }
 
-    // Always clear the pending action after resolution
     quotes[idx].pendingAction = null;
     quotes[idx].updatedAt     = now;
 
@@ -584,7 +605,7 @@ router.post('/:id/resolve-action', requireRole('admin', 'gm'), async (req, res) 
     }
 
     const outcome = isApproved ? 'APPROVED' : 'DENIED';
-    console.log('[Quotes v3.8.1] Action', outcome + ':', quotes[idx].quoteNumber,
+    console.log('[Quotes v3.9] Action', outcome + ':', quotes[idx].quoteNumber,
         '| type:', actionType, '| by GM:', req.user.username);
 
     res.json({
@@ -612,13 +633,10 @@ router.get('/', (req, res) => {
     } else if (req.user.role === 'admin' && scopeDealerCode) {
         mine = quotes.filter(q => q.dealerCode === scopeDealerCode && !q.deleted);
     } else if (req.user.role === 'salesrep') {
-        // Salesrep sees all their own quotes across all dealers + direct
         mine = quotes.filter(q => q.salesRepId === req.user.id && !q.deleted);
     } else if (req.user.role === 'gm') {
-        // GM sees their dealer's quotes but NOT salesrep-created quotes
         mine = quotes.filter(q => q.dealerCode === req.user.dealerCode && !q.deleted && q.createdByRole !== 'salesrep');
     } else if (req.user.role === 'frontdesk') {
-        // Frontdesk sees their dealer's quotes but NOT salesrep-created quotes
         mine = quotes.filter(q => q.dealerCode === req.user.dealerCode && !q.deleted && q.createdByRole !== 'salesrep');
     } else {
         mine = quotes.filter(q => q.dealerCode === req.user.dealerCode && !q.deleted);
@@ -708,17 +726,14 @@ router.post('/', (req, res) => {
     } = req.body;
     const dealer = req.dealer;
 
-    // Salesrep: determine if dealer-attributed or direct sale
     const isSalesrep = req.user.role === 'salesrep';
     const isDirectSale = isSalesrep && !dealer;
     const effectiveDealerCode = isSalesrep
         ? (dealer ? dealer.dealerCode : 'DIRECT')
         : req.user.dealerCode;
 
-    // Build line items with appropriate pricing
     const items = (lineItems || []).map(item => {
         if (isDirectSale) {
-            // Direct sale: use rep pricing
             return buildLineItemForRep(item, req.user);
         }
         return buildLineItem(item, dealer);
@@ -738,6 +753,7 @@ router.post('/', (req, res) => {
         zipCode:    upsertedCustomer.zipCode || (customer && customer.zipCode) || ''
     };
 
+    const now = new Date().toISOString();
     const newQuote = {
         id:                  generateId(),
         quoteNumber:         generateQuoteNumber(),
@@ -745,22 +761,30 @@ router.post('/', (req, res) => {
         createdBy:           req.user.username,
         createdByRole:       req.user.role,
         salesRepId:          isSalesrep ? req.user.id : null,
-        salesRepUsername:     isSalesrep ? req.user.username : null,
+        salesRepUsername:    isSalesrep ? req.user.username : null,
         customer:            customerSnapshot,
         lineItems:           items,
         notes:               sanitizeInput(notes || ''),
         options:             options || { pictureFrame: false, stairs: false },
         specialInstructions: sanitizeInput(specialInstructions || ''),
-        internalNotes:       sanitizeInput(internalNotes       || ''),
-        shippingAddress:     sanitizeInput(shippingAddress     || ''),
-        deliveryDate:        deliveryDate        || '',
+        internalNotes:       sanitizeInput(internalNotes || ''),
+        shippingAddress:     sanitizeInput(shippingAddress || ''),
+        deliveryDate:        deliveryDate || '',
         pricingModel:        isDirectSale ? 'per-rep' : 'per-dealer',
         totalAmount:         Math.round(totalAmount * 100) / 100,
         hasPendingOverrides: false,
         pendingAction:       null,
+        statusHistory:       [{
+            from: null,
+            to: 'draft',
+            changedBy: req.user.username,
+            role: req.user.role,
+            note: null,
+            at: now
+        }],
         status:              'draft',
-        createdAt:           new Date().toISOString(),
-        updatedAt:           new Date().toISOString(),
+        createdAt:           now,
+        updatedAt:           now,
         submittedAt:         null,
         reviewedAt:          null,
         approvedAt:          null
@@ -771,7 +795,7 @@ router.post('/', (req, res) => {
     writeJSON(QUOTES_FILE, quotes);
     recalcCustomerStats(customerSnapshot.customerId);
 
-    console.log('[Quotes v3.8.1] Created:', newQuote.quoteNumber, 'by', req.user.username,
+    console.log('[Quotes v3.9] Created:', newQuote.quoteNumber, 'by', req.user.username,
         '| Dealer:', req.user.dealerCode, '| Customer:', customerSnapshot.name);
     res.status(201).json(newQuote);
 });
@@ -822,17 +846,14 @@ router.put('/:id', async (req, res) => {
         };
     }
 
-    if (notes !== undefined)               quotes[idx].notes               = sanitizeInput(notes);
-    if (options !== undefined)              quotes[idx].options             = options;
-    if (specialInstructions !== undefined)  quotes[idx].specialInstructions = sanitizeInput(specialInstructions);
-    if (internalNotes !== undefined)        quotes[idx].internalNotes       = sanitizeInput(internalNotes);
-    if (shippingAddress !== undefined)      quotes[idx].shippingAddress     = sanitizeInput(shippingAddress);
-    if (deliveryDate !== undefined)         quotes[idx].deliveryDate        = deliveryDate;
+    if (notes !== undefined)              quotes[idx].notes               = sanitizeInput(notes);
+    if (options !== undefined)            quotes[idx].options             = options;
+    if (specialInstructions !== undefined) quotes[idx].specialInstructions = sanitizeInput(specialInstructions);
+    if (internalNotes !== undefined)      quotes[idx].internalNotes       = sanitizeInput(internalNotes);
+    if (shippingAddress !== undefined)    quotes[idx].shippingAddress     = sanitizeInput(shippingAddress);
+    if (deliveryDate !== undefined)       quotes[idx].deliveryDate        = deliveryDate;
 
     if (lineItems) {
-        // Use the quote owner's dealer for pricing, not the logged-in user's dealer.
-        // When admin edits another dealer's quote, req.dealer is the admin's dealer
-        // which would apply the wrong pricing. Look up the quote's dealerCode instead.
         let dealer = req.dealer;
         if (req.user.role === 'admin' && quotes[idx].dealerCode &&
             quotes[idx].dealerCode.toUpperCase() !== req.user.dealerCode.toUpperCase()) {
@@ -850,6 +871,8 @@ router.put('/:id', async (req, res) => {
     }
 
     if (isElevated && editableByElevated) {
+        pushStatusHistory(quotes[idx], currentStatus, req.user.username, req.user.role,
+            'Edited while ' + currentStatus);
         quotes[idx].editedBy     = req.user.username;
         quotes[idx].editedByRole = req.user.role;
         quotes[idx].gmEditedAt   = new Date().toISOString();
@@ -862,7 +885,7 @@ router.put('/:id', async (req, res) => {
     if (newCustomerId) recalcCustomerStats(newCustomerId);
     if (oldCustomerId && oldCustomerId !== newCustomerId) recalcCustomerStats(oldCustomerId);
 
-    console.log('[Quotes v3.8.1] PUT:', quotes[idx].quoteNumber,
+    console.log('[Quotes v3.9] PUT:', quotes[idx].quoteNumber,
         '| status:', currentStatus,
         '| by:', req.user.username, '(' + req.user.role + ')');
 
@@ -898,6 +921,7 @@ router.patch('/:id/revision', requireRole('admin', 'gm'), async (req, res) => {
         });
     }
 
+    pushStatusHistory(quotes[idx], 'revision', req.user.username, req.user.role, reason.trim());
     quotes[idx].status               = 'revision';
     quotes[idx].revisionReason       = reason.trim();
     quotes[idx].revisionRequestedBy  = req.user.username;
@@ -906,7 +930,7 @@ router.patch('/:id/revision', requireRole('admin', 'gm'), async (req, res) => {
 
     writeJSON(QUOTES_FILE, quotes);
 
-    console.log('[Quotes v3.8.1] Revision requested:', quotes[idx].quoteNumber,
+    console.log('[Quotes v3.9] Revision requested:', quotes[idx].quoteNumber,
         'by', req.user.username, '| Reason:', reason.trim());
 
     res.json({ status: 'revision', quoteNumber: quotes[idx].quoteNumber });
@@ -949,6 +973,8 @@ router.post('/:id/approve-revision', requireRole('admin', 'gm'), async (req, res
     }
 
     const now = new Date().toISOString();
+    pushStatusHistory(quotes[idx], 'submitted', req.user.username, req.user.role,
+        'Revision approved and resubmitted');
     quotes[idx].status               = 'submitted';
     quotes[idx].submittedAt          = now;
     quotes[idx].revisionApprovedBy   = req.user.username;
@@ -957,7 +983,7 @@ router.post('/:id/approve-revision', requireRole('admin', 'gm'), async (req, res
 
     writeJSON(QUOTES_FILE, quotes);
 
-    console.log('[Quotes v3.8.1] Revision approved:', quotes[idx].quoteNumber,
+    console.log('[Quotes v3.9] Revision approved:', quotes[idx].quoteNumber,
         'by', req.user.username, '(' + req.user.role + ')');
 
     res.json(quotes[idx]);
@@ -1030,14 +1056,13 @@ router.post('/:id/items/:itemIndex/request-override', (req, res) => {
     quotes[qIdx] = quote;
     writeJSON(QUOTES_FILE, quotes);
 
-    // Recalculate customer stats when auto-approved override changes totalAmount
     if (isAutoApprover) {
         const custId = quote.customer ? quote.customer.customerId : null;
         if (custId) recalcCustomerStats(custId);
     }
 
     const action = isAutoApprover ? 'Override applied' : 'Override requested';
-    console.log('[Quotes v3.8.1]', action + ':', quote.quoteNumber, 'item #' + itemIdx,
+    console.log('[Quotes v3.9]', action + ':', quote.quoteNumber, 'item #' + itemIdx,
         '$' + item.tierPrice, '->', '$' + item.priceOverride.requestedPrice,
         'by', req.user.username, '(' + req.user.role + ')',
         '| Reason:', reason.trim());
@@ -1082,11 +1107,10 @@ router.post('/:id/items/:itemIndex/approve-override', requireRole('admin', 'gm')
     quotes[qIdx] = quote;
     writeJSON(QUOTES_FILE, quotes);
 
-    // Recalculate customer stats (totalAmount changed)
     const custId = quote.customer ? quote.customer.customerId : null;
     if (custId) recalcCustomerStats(custId);
 
-    console.log('[Quotes v3.8.1] Override APPROVED:', quote.quoteNumber, 'item #' + itemIdx,
+    console.log('[Quotes v3.9] Override APPROVED:', quote.quoteNumber, 'item #' + itemIdx,
         '$' + item.priceOverride.originalTierPrice, '->', '$' + item.priceOverride.requestedPrice,
         'by', req.user.username, '(requested by', item.priceOverride.requestedBy + ')');
 
@@ -1133,11 +1157,10 @@ router.post('/:id/items/:itemIndex/reject-override', requireRole('admin', 'gm'),
     quotes[qIdx] = quote;
     writeJSON(QUOTES_FILE, quotes);
 
-    // Recalculate customer stats (totalAmount reverted to tier price)
     const custId = quote.customer ? quote.customer.customerId : null;
     if (custId) recalcCustomerStats(custId);
 
-    console.log('[Quotes v3.8.1] Override REJECTED:', quote.quoteNumber, 'item #' + itemIdx,
+    console.log('[Quotes v3.9] Override REJECTED:', quote.quoteNumber, 'item #' + itemIdx,
         'requested $' + item.priceOverride.requestedPrice,
         'by', req.user.username, '| Reason:', item.priceOverride.rejectedReason || 'none');
 
@@ -1170,12 +1193,13 @@ router.post('/:id/submit', async (req, res) => {
         });
     }
 
+    pushStatusHistory(quotes[idx], 'submitted', req.user.username, req.user.role, null);
     quotes[idx].status      = 'submitted';
     quotes[idx].submittedAt = new Date().toISOString();
     quotes[idx].updatedAt   = new Date().toISOString();
     writeJSON(QUOTES_FILE, quotes);
 
-    console.log('[Quotes v3.8.1] Submitted:', quotes[idx].quoteNumber, 'by', req.user.username);
+    console.log('[Quotes v3.9] Submitted:', quotes[idx].quoteNumber, 'by', req.user.username);
 
     res.json(quotes[idx]);
 
@@ -1192,6 +1216,8 @@ router.delete('/:id', requireRole('admin', 'gm'), (req, res) => {
     const idx = findQuoteIndexByParam(quotes, req.params.id, req.user);
     if (idx === -1) return res.status(404).json({ error: 'Quote not found' });
 
+    pushStatusHistory(quotes[idx], 'deleted', req.user.username, req.user.role,
+        'Direct delete by ' + req.user.role);
     quotes[idx].deleted       = true;
     quotes[idx].deletedBy     = req.user.username;
     quotes[idx].deletedByRole = req.user.role;
@@ -1203,7 +1229,7 @@ router.delete('/:id', requireRole('admin', 'gm'), (req, res) => {
     const custId = quotes[idx].customer ? quotes[idx].customer.customerId : null;
     if (custId) recalcCustomerStats(custId);
 
-    console.log('[Quotes v3.8.1] Soft-deleted:', quotes[idx].quoteNumber, 'by', req.user.username, '(' + req.user.role + ')');
+    console.log('[Quotes v3.9] Soft-deleted:', quotes[idx].quoteNumber, 'by', req.user.username, '(' + req.user.role + ')');
     res.json({ message: 'Quote ' + quotes[idx].quoteNumber + ' deleted' });
 });
 
@@ -1229,20 +1255,27 @@ router.post('/:id/duplicate', (req, res) => {
     dup.approvedAt     = null;
     dup.pricingModel   = 'per-dealer';
     dup.pendingAction  = null;
-    dup.revisionReason        = null;
-    dup.revisionRequestedBy   = null;
-    dup.revisionRequestedAt   = null;
-    dup.revisionApprovedBy    = null;
-    dup.revisionApprovedAt    = null;
-    dup.editedBy     = null;
-    dup.editedByRole = null;
-    dup.gmEditedAt   = null;
+    dup.revisionReason      = null;
+    dup.revisionRequestedBy = null;
+    dup.revisionRequestedAt = null;
+    dup.revisionApprovedBy  = null;
+    dup.revisionApprovedAt  = null;
+    dup.editedBy            = null;
+    dup.editedByRole        = null;
+    dup.gmEditedAt          = null;
+    dup.statusHistory = [{
+        from: null,
+        to: 'draft',
+        changedBy: req.user.username,
+        role: req.user.role,
+        note: 'Duplicated from ' + original.quoteNumber,
+        at: new Date().toISOString()
+    }];
 
     if (req.user.role === 'admin' && dup.dealerCode !== req.user.dealerCode) {
         dup.dealerCode = req.user.dealerCode;
     }
 
-    // Re-price line items using the duplicate's owner dealer (may differ from original)
     const dealers = readJSON(DEALERS_FILE);
     const dupDealer = dealers.find(d =>
         d.dealerCode.toUpperCase() === dup.dealerCode.toUpperCase() && d.isActive
@@ -1260,7 +1293,7 @@ router.post('/:id/duplicate', (req, res) => {
     const custId = dup.customer ? dup.customer.customerId : null;
     if (custId) recalcCustomerStats(custId);
 
-    console.log('[Quotes v3.8.1] Duplicated:', original.quoteNumber, '->', dup.quoteNumber);
+    console.log('[Quotes v3.9] Duplicated:', original.quoteNumber, '->', dup.quoteNumber);
     res.status(201).json(dup);
 });
 
@@ -1274,7 +1307,6 @@ router.get('/:id/pdf', async (req, res) => {
         const quote  = findQuoteByParam(quotes, req.params.id, req.user);
         if (!quote) return res.status(404).json({ error: 'Quote not found' });
 
-        // Use the quote owner's dealer for PDF generation, not the logged-in user's dealer
         let dealer = req.dealer;
         if (req.user.role === 'admin' && quote.dealerCode &&
             quote.dealerCode.toUpperCase() !== req.user.dealerCode.toUpperCase()) {
@@ -1295,9 +1327,9 @@ router.get('/:id/pdf', async (req, res) => {
         res.setHeader('Content-Length', pdfBuffer.length);
         res.send(pdfBuffer);
 
-        console.log('[Quotes v3.8.1] PDF generated:', quote.quoteNumber, 'by', req.user.username);
+        console.log('[Quotes v3.9] PDF generated:', quote.quoteNumber, 'by', req.user.username);
     } catch (error) {
-        console.error('[Quotes v3.8.1] PDF generation error:', error);
+        console.error('[Quotes v3.9] PDF generation error:', error);
         res.status(500).json({ error: 'Failed to generate PDF', details: error.message });
     }
 });
