@@ -1,6 +1,6 @@
 // ============================================================
-// AmeriDex Dealer Portal - Admin Panel v2.3
-// Date: 2026-03-16
+// AmeriDex Dealer Portal - Admin Panel v2.4
+// Date: 2026-03-21
 // ============================================================
 // REQUIRES: ameridex-api.js (v2.1+) loaded first
 //
@@ -8,6 +8,17 @@
 //   <script src="ameridex-patches.js"></script>
 //   <script src="ameridex-api.js"></script>
 //   <script src="ameridex-admin.js"></script>
+//
+// v2.4 Changes (2026-03-21):
+//   - FIX: Salesreps without a dealer code now grouped under a
+//          dedicated "SALES REPS (Territory)" section with purple
+//          header instead of falling into "UNKNOWN" group.
+//   - ADD: "Territory Reps" option in dealer code filter dropdown
+//          so admins can quickly filter to just salesrep users.
+//   - FIX: Salesreps remain visible when filtering by a specific
+//          dealer code (they span territories, not tied to one).
+//   - FIX: __SALESREP__ group always sorts to the top of the
+//          Users tab so territory reps are easy to find.
 //
 // v2.3 Changes (2026-03-16):
 //   - ADD: Sales Rep (Territory) role in create/edit user role dropdowns
@@ -1609,8 +1620,17 @@
         });
         codes.sort();
 
+        // Check if any salesreps exist (with or without dealer codes)
+        var hasSalesreps = _allUsers.some(function (u) { return u.role === 'salesrep'; });
+
         var filterSelect = document.getElementById('admin-user-dealer-filter');
         filterSelect.innerHTML = '<option value="">All Dealer Codes</option>';
+        if (hasSalesreps) {
+            var repOpt = document.createElement('option');
+            repOpt.value = '__SALESREP__';
+            repOpt.textContent = 'Territory Reps';
+            filterSelect.appendChild(repOpt);
+        }
         codes.forEach(function (c) {
             var opt = document.createElement('option');
             opt.value = c;
@@ -1656,7 +1676,16 @@
         var search = (document.getElementById('admin-user-search').value || '').toLowerCase();
 
         var filtered = _allUsers.filter(function (u) {
-            if (dealerFilter && u.dealerCode !== dealerFilter) return false;
+            if (dealerFilter) {
+                if (dealerFilter === '__SALESREP__') {
+                    // "Territory Reps" filter: show only salesreps (with or without dealer code)
+                    if (u.role !== 'salesrep') return false;
+                } else {
+                    // Specific dealer code filter: show users with that code,
+                    // plus always include salesreps (they span territories)
+                    if (u.dealerCode !== dealerFilter && u.role !== 'salesrep') return false;
+                }
+            }
             if (roleFilter && u.role !== roleFilter) return false;
             if (statusFilter && u.status !== statusFilter) return false;
             if (search) {
@@ -1673,21 +1702,31 @@
 
         var grouped = {};
         filtered.forEach(function (u) {
-            var code = u.dealerCode || 'UNKNOWN';
+            // Salesreps without a dealer code get their own section
+            var code = (u.role === 'salesrep' && !u.dealerCode) ? '__SALESREP__' : (u.dealerCode || 'UNKNOWN');
             if (!grouped[code]) grouped[code] = [];
             grouped[code].push(u);
         });
 
-        var dealerKeys = Object.keys(grouped).sort();
+        // Sort keys but put __SALESREP__ first so territory reps are prominent
+        var dealerKeys = Object.keys(grouped).sort(function (a, b) {
+            if (a === '__SALESREP__') return -1;
+            if (b === '__SALESREP__') return 1;
+            return a.localeCompare(b);
+        });
         var html = '';
 
         dealerKeys.forEach(function (code) {
             var users = grouped[code];
+            var isSalesrepGroup = code === '__SALESREP__';
+            var groupLabel = isSalesrepGroup ? 'SALES REPS (Territory)' : code;
+            var groupColor = isSalesrepGroup ? '#a21caf' : '#1e40af';
+            var badgeClass = isSalesrepGroup ? 'badge-salesrep' : 'badge-dealer';
 
             html += '<div style="margin-bottom:1.25rem;">';
             html += '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;">';
-            html += '<span style="font-weight:700;font-size:0.95rem;color:#1e40af;">' + esc(code) + '</span>';
-            html += '<span class="admin-badge badge-dealer" style="font-size:0.68rem;">' + users.length + ' user' + (users.length !== 1 ? 's' : '') + '</span>';
+            html += '<span style="font-weight:700;font-size:0.95rem;color:' + groupColor + ';">' + esc(groupLabel) + '</span>';
+            html += '<span class="admin-badge ' + badgeClass + '" style="font-size:0.68rem;">' + users.length + ' user' + (users.length !== 1 ? 's' : '') + '</span>';
             html += '</div>';
 
             html += '<div class="admin-table-wrap" style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table class="admin-table"><thead><tr>' +
